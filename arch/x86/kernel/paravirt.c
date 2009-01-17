@@ -400,6 +400,7 @@ struct pv_cpu_ops pv_cpu_ops = {
 	.swapgs = native_swapgs,
 
 	.set_iopl_mask = native_set_iopl_mask,
+	.set_io_bitmap = native_set_io_bitmap,
 	.io_delay = native_io_delay,
 
 	.start_context_switch = paravirt_nop,

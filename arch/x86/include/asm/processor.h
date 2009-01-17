@@ -540,6 +540,9 @@ static inline void native_set_iopl_mask(unsigned mask)
 #endif
 }
 
+extern void native_set_io_bitmap(struct thread_struct *thread,
+				 int changed, unsigned long updated_bytes);
+
 static inline void
 native_load_sp0(struct tss_struct *tss, struct thread_struct *thread)
 {
@@ -581,6 +584,7 @@ static inline void load_sp0(struct tss_struct *tss,
 }
 
 #define set_iopl_mask native_set_iopl_mask
+#define set_io_bitmap native_set_io_bitmap
 #endif /* CONFIG_PARAVIRT */
 
 /*
