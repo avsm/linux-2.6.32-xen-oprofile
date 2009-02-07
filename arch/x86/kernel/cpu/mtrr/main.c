@@ -98,20 +98,6 @@ static int have_wrcomb(void)
 	return (mtrr_if->have_wrcomb ? mtrr_if->have_wrcomb() : 0);
 }
 
-/*  This function returns the number of variable MTRRs  */
-static void __init set_num_var_ranges(void)
-{
-	unsigned long config = 0, dummy;
-
-	if (use_intel()) {
-		rdmsr(MSR_MTRRcap, config, dummy);
-	} else if (is_cpu(AMD))
-		config = 2;
-	else if (is_cpu(CYRIX) || is_cpu(CENTAUR))
-		config = 8;
-	num_var_ranges = config & 0xff;
-}
-
 static void __init init_table(void)
 {
 	int i, max;
@@ -685,7 +671,7 @@ void __init mtrr_bp_init(void)
 	}
 
 	if (mtrr_if) {
-		set_num_var_ranges();
+		num_var_ranges = mtrr_if->num_var_ranges();
 		init_table();
 		if (use_intel()) {
 			get_mtrr_state();

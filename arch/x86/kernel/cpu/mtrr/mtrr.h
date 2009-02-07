@@ -26,6 +26,8 @@ struct mtrr_ops {
 	int	(*validate_add_page)(unsigned long base, unsigned long size,
 				     unsigned int type);
 	int	(*have_wrcomb)(void);
+
+	int	(*num_var_ranges)(void);
 };
 
 extern int generic_get_free_region(unsigned long base, unsigned long size,

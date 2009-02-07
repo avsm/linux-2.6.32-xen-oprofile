@@ -254,6 +254,11 @@ static void cyrix_set_all(void)
 	post_set();
 }
 
+static int cyrix_num_var_ranges(void)
+{
+	return 8;
+}
+
 static struct mtrr_ops cyrix_mtrr_ops = {
 	.vendor            = X86_VENDOR_CYRIX,
 //	.init              = cyrix_arr_init,
@@ -263,6 +268,7 @@ static struct mtrr_ops cyrix_mtrr_ops = {
 	.get_free_region   = cyrix_get_free_region,
 	.validate_add_page = generic_validate_add_page,
 	.have_wrcomb       = positive_have_wrcomb,
+	.num_var_ranges	   = cyrix_num_var_ranges,
 };
 
 int __init cyrix_init_mtrr(void)
