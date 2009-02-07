@@ -58,6 +58,7 @@
 #include <xen/page.h>
 #include <xen/interface/xen.h>
 #include <xen/interface/version.h>
+#include <xen/interface/memory.h>
 #include <xen/hvc-console.h>
 
 #include "multicalls.h"
@@ -1728,6 +1729,20 @@ static __init void xen_map_identity_early(pmd_t *pmd, unsigned long max_pfn)
 		set_page_prot(&level1_ident_pgt[pteidx], PAGE_KERNEL_RO);
 
 	set_page_prot(pmd, PAGE_KERNEL_RO);
+}
+
+void __init xen_setup_machphys_mapping(void)
+{
+	struct xen_machphys_mapping mapping;
+	unsigned long machine_to_phys_nr_ents;
+
+	if (HYPERVISOR_memory_op(XENMEM_machphys_mapping, &mapping) == 0) {
+		machine_to_phys_mapping = (unsigned long *)mapping.v_start;
+		machine_to_phys_nr_ents = mapping.max_mfn + 1;
+	} else {
+		machine_to_phys_nr_ents = MACH2PHYS_NR_ENTRIES;
+	}
+	machine_to_phys_order = fls(machine_to_phys_nr_ents - 1);
 }
 
 #ifdef CONFIG_X86_64
