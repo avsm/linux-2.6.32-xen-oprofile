@@ -1045,6 +1045,7 @@ asmlinkage void __init xen_start_kernel(void)
 
 	xen_raw_console_write("mapping kernel into physical memory\n");
 	pgd = xen_setup_kernel_pagetable(pgd, xen_start_info->nr_pages);
+	xen_ident_map_ISA();
 
 	init_mm.pgd = pgd;
 
@@ -1053,6 +1054,13 @@ asmlinkage void __init xen_start_kernel(void)
 	pv_info.kernel_rpl = 1;
 	if (xen_feature(XENFEAT_supervisor_mode_kernel))
 		pv_info.kernel_rpl = 0;
+
+	if (xen_initial_domain()) {
+		struct physdev_set_iopl set_iopl;
+		set_iopl.iopl = 1;
+		if (HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl) == -1)
+			BUG();
+	}
 
 	/* set the limit of our address space */
 	xen_reserve_top();
