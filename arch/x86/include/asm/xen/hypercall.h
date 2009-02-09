@@ -432,6 +432,14 @@ MULTI_fpu_taskswitch(struct multicall_entry *mcl, int set)
 	mcl->args[0] = set;
 }
 
+#if defined(CONFIG_X86_64)
+#define MULTI_UVMFLAGS_INDEX 2
+#define MULTI_UVMDOMID_INDEX 3
+#else
+#define MULTI_UVMFLAGS_INDEX 3
+#define MULTI_UVMDOMID_INDEX 4
+#endif
+
 static inline void
 MULTI_update_va_mapping(struct multicall_entry *mcl, unsigned long va,
 			pte_t new_val, unsigned long flags)
@@ -440,12 +448,11 @@ MULTI_update_va_mapping(struct multicall_entry *mcl, unsigned long va,
 	mcl->args[0] = va;
 	if (sizeof(new_val) == sizeof(long)) {
 		mcl->args[1] = new_val.pte;
-		mcl->args[2] = flags;
 	} else {
 		mcl->args[1] = new_val.pte;
 		mcl->args[2] = new_val.pte >> 32;
-		mcl->args[3] = flags;
 	}
+	mcl->args[MULTI_UVMFLAGS_INDEX] = flags;
 }
 
 static inline void
