@@ -37,7 +37,7 @@ static int netback_remove(struct xenbus_device *dev)
 {
 	struct backend_info *be = dev->dev.driver_data;
 
-	netback_remove_accelerators(be, dev);
+	//netback_remove_accelerators(be, dev);
 
 	if (be->netif) {
 		kobject_uevent(&dev->dev.kobj, KOBJ_OFFLINE);
@@ -123,7 +123,7 @@ static int netback_probe(struct xenbus_device *dev,
 		goto fail;
 	}
 
-	netback_probe_accelerators(be, dev);
+	//netback_probe_accelerators(be, dev);
 
 	err = xenbus_switch_state(dev, XenbusStateInitWait);
 	if (err)
@@ -149,12 +149,10 @@ fail:
  * and vif variables to the environment, for the benefit of the vif-* hotplug
  * scripts.
  */
-static int netback_uevent(struct xenbus_device *xdev, char **envp,
-			  int num_envp, char *buffer, int buffer_size)
+static int netback_uevent(struct xenbus_device *xdev, struct kobj_uevent_env *env)
 {
 	struct backend_info *be = xdev->dev.driver_data;
-	netif_t *netif = be->netif;
-	int i = 0, length = 0;
+	struct xen_netif *netif = be->netif;
 	char *val;
 
 	DPRINTK("netback_uevent");
@@ -166,15 +164,15 @@ static int netback_uevent(struct xenbus_device *xdev, char **envp,
 		return err;
 	}
 	else {
-		add_uevent_var(envp, num_envp, &i, buffer, buffer_size,
-			       &length, "script=%s", val);
+		if (add_uevent_var(env, "script=%s", val)) {
+			kfree(val);
+			return -ENOMEM;
+		}
 		kfree(val);
 	}
 
-	add_uevent_var(envp, num_envp, &i, buffer, buffer_size, &length,
-		       "vif=%s", netif->dev->name);
-
-	envp[i] = NULL;
+	if (add_uevent_var(env, "vif=%s", netif->dev->name))
+		return -ENOMEM;
 
 	return 0;
 }
@@ -450,5 +448,6 @@ static struct xenbus_driver netback = {
 
 void netif_xenbus_init(void)
 {
-	xenbus_register_backend(&netback);
+	printk(KERN_CRIT "registering netback\n");
+	(void)xenbus_register_backend(&netback);
 }

@@ -34,6 +34,9 @@
 #include <linux/ethtool.h>
 #include <linux/rtnetlink.h>
 
+#include <xen/events.h>
+#include <asm/xen/hypercall.h>
+
 /*
  * Module parameter 'queue_length':
  *
@@ -51,13 +54,13 @@
 static unsigned long netbk_queue_length = 32;
 module_param_named(queue_length, netbk_queue_length, ulong, 0);
 
-static void __netif_up(netif_t *netif)
+static void __netif_up(struct xen_netif *netif)
 {
 	enable_irq(netif->irq);
 	netif_schedule_work(netif);
 }
 
-static void __netif_down(netif_t *netif)
+static void __netif_down(struct xen_netif *netif)
 {
 	disable_irq(netif->irq);
 	netif_deschedule_work(netif);
@@ -65,7 +68,7 @@ static void __netif_down(netif_t *netif)
 
 static int net_open(struct net_device *dev)
 {
-	netif_t *netif = netdev_priv(dev);
+	struct xen_netif *netif = netdev_priv(dev);
 	if (netback_carrier_ok(netif)) {
 		__netif_up(netif);
 		netif_start_queue(dev);
@@ -75,7 +78,7 @@ static int net_open(struct net_device *dev)
 
 static int net_close(struct net_device *dev)
 {
-	netif_t *netif = netdev_priv(dev);
+	struct xen_netif *netif = netdev_priv(dev);
 	if (netback_carrier_ok(netif))
 		__netif_down(netif);
 	netif_stop_queue(dev);
@@ -95,7 +98,7 @@ static int netbk_change_mtu(struct net_device *dev, int mtu)
 static int netbk_set_sg(struct net_device *dev, u32 data)
 {
 	if (data) {
-		netif_t *netif = netdev_priv(dev);
+		struct xen_netif *netif = netdev_priv(dev);
 
 		if (!(netif->features & NETIF_F_SG))
 			return -ENOSYS;
@@ -107,7 +110,7 @@ static int netbk_set_sg(struct net_device *dev, u32 data)
 static int netbk_set_tso(struct net_device *dev, u32 data)
 {
 	if (data) {
-		netif_t *netif = netdev_priv(dev);
+		struct xen_netif *netif = netdev_priv(dev);
 
 		if (!(netif->features & NETIF_F_TSO))
 			return -ENOSYS;
@@ -127,15 +130,15 @@ static struct ethtool_ops network_ethtool_ops =
 	.get_link = ethtool_op_get_link,
 };
 
-netif_t *netif_alloc(domid_t domid, unsigned int handle)
+struct xen_netif *netif_alloc(domid_t domid, unsigned int handle)
 {
 	int err = 0;
 	struct net_device *dev;
-	netif_t *netif;
+	struct xen_netif *netif;
 	char name[IFNAMSIZ] = {};
 
 	snprintf(name, IFNAMSIZ - 1, "vif%u.%u", domid, handle);
-	dev = alloc_netdev(sizeof(netif_t), name, ether_setup);
+	dev = alloc_netdev(sizeof(struct xen_netif), name, ether_setup);
 	if (dev == NULL) {
 		DPRINTK("Could not create netif: out of memory\n");
 		return ERR_PTR(-ENOMEM);
@@ -194,7 +197,7 @@ netif_t *netif_alloc(domid_t domid, unsigned int handle)
 }
 
 static int map_frontend_pages(
-	netif_t *netif, grant_ref_t tx_ring_ref, grant_ref_t rx_ring_ref)
+	struct xen_netif *netif, grant_ref_t tx_ring_ref, grant_ref_t rx_ring_ref)
 {
 	struct gnttab_map_grant_ref op;
 
@@ -229,7 +232,7 @@ static int map_frontend_pages(
 	return 0;
 }
 
-static void unmap_frontend_pages(netif_t *netif)
+static void unmap_frontend_pages(struct xen_netif *netif)
 {
 	struct gnttab_unmap_grant_ref op;
 
@@ -246,12 +249,12 @@ static void unmap_frontend_pages(netif_t *netif)
 		BUG();
 }
 
-int netif_map(netif_t *netif, unsigned long tx_ring_ref,
+int netif_map(struct xen_netif *netif, unsigned long tx_ring_ref,
 	      unsigned long rx_ring_ref, unsigned int evtchn)
 {
 	int err = -ENOMEM;
-	netif_tx_sring_t *txs;
-	netif_rx_sring_t *rxs;
+	struct xen_netif_tx_sring *txs;
+	struct xen_netif_rx_sring *rxs;
 
 	/* Already connected through? */
 	if (netif->irq)
@@ -276,10 +279,10 @@ int netif_map(netif_t *netif, unsigned long tx_ring_ref,
 	netif->irq = err;
 	disable_irq(netif->irq);
 
-	txs = (netif_tx_sring_t *)netif->tx_comms_area->addr;
+	txs = (struct xen_netif_tx_sring *)netif->tx_comms_area->addr;
 	BACK_RING_INIT(&netif->tx, txs, PAGE_SIZE);
 
-	rxs = (netif_rx_sring_t *)
+	rxs = (struct xen_netif_rx_sring *)
 		((char *)netif->rx_comms_area->addr);
 	BACK_RING_INIT(&netif->rx, rxs, PAGE_SIZE);
 
@@ -303,7 +306,7 @@ err_rx:
 	return err;
 }
 
-void netif_disconnect(netif_t *netif)
+void netif_disconnect(struct xen_netif *netif)
 {
 	if (netback_carrier_ok(netif)) {
 		rtnl_lock();

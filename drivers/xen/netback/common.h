@@ -43,8 +43,7 @@
 #include <asm/io.h>
 #include <asm/pgalloc.h>
 #include <xen/interface/grant_table.h>
-#include <xen/gnttab.h>
-#include <xen/driver_util.h>
+#include <xen/grant_table.h>
 #include <xen/xenbus.h>
 
 #define DPRINTK(_f, _a...)			\
@@ -55,7 +54,7 @@
 #define WPRINTK(fmt, args...)				\
 	printk(KERN_WARNING "xen_net: " fmt, ##args)
 
-typedef struct netif_st {
+struct xen_netif {
 	/* Unique identifier for this interface. */
 	domid_t          domid;
 	unsigned int     handle;
@@ -70,8 +69,8 @@ typedef struct netif_st {
 	unsigned int     irq;
 
 	/* The shared rings and indexes. */
-	netif_tx_back_ring_t tx;
-	netif_rx_back_ring_t rx;
+	struct xen_netif_tx_back_ring tx;
+	struct xen_netif_rx_back_ring rx;
 	struct vm_struct *tx_comms_area;
 	struct vm_struct *rx_comms_area;
 
@@ -103,7 +102,7 @@ typedef struct netif_st {
 	unsigned int carrier;
 
 	wait_queue_head_t waiting_to_free;
-} netif_t;
+};
 
 /*
  * Implement our own carrier flag: the network stack's version causes delays
@@ -141,7 +140,7 @@ struct netback_accelerator {
 
 struct backend_info {
 	struct xenbus_device *dev;
-	netif_t *netif;
+	struct xen_netif *netif;
 	enum xenbus_state frontend_state;
 
 	/* State relating to the netback accelerator */
@@ -174,13 +173,13 @@ extern
 void netif_accel_init(void);
 
 
-#define NET_TX_RING_SIZE __RING_SIZE((netif_tx_sring_t *)0, PAGE_SIZE)
-#define NET_RX_RING_SIZE __RING_SIZE((netif_rx_sring_t *)0, PAGE_SIZE)
+#define NET_TX_RING_SIZE __RING_SIZE((struct xen_netif_tx_sring *)0, PAGE_SIZE)
+#define NET_RX_RING_SIZE __RING_SIZE((struct xen_netif_rx_sring *)0, PAGE_SIZE)
 
-void netif_disconnect(netif_t *netif);
+void netif_disconnect(struct xen_netif *netif);
 
-netif_t *netif_alloc(domid_t domid, unsigned int handle);
-int netif_map(netif_t *netif, unsigned long tx_ring_ref,
+struct xen_netif *netif_alloc(domid_t domid, unsigned int handle);
+int netif_map(struct xen_netif *netif, unsigned long tx_ring_ref,
 	      unsigned long rx_ring_ref, unsigned int evtchn);
 
 #define netif_get(_b) (atomic_inc(&(_b)->refcnt))
@@ -195,22 +194,22 @@ void netif_xenbus_init(void);
 #define netif_schedulable(netif)				\
 	(netif_running((netif)->dev) && netback_carrier_ok(netif))
 
-void netif_schedule_work(netif_t *netif);
-void netif_deschedule_work(netif_t *netif);
+void netif_schedule_work(struct xen_netif *netif);
+void netif_deschedule_work(struct xen_netif *netif);
 
 int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev);
 struct net_device_stats *netif_be_get_stats(struct net_device *dev);
-irqreturn_t netif_be_int(int irq, void *dev_id, struct pt_regs *regs);
+irqreturn_t netif_be_int(int irq, void *dev_id);
 
 static inline int netbk_can_queue(struct net_device *dev)
 {
-	netif_t *netif = netdev_priv(dev);
+	struct xen_netif *netif = netdev_priv(dev);
 	return netif->can_queue;
 }
 
 static inline int netbk_can_sg(struct net_device *dev)
 {
-	netif_t *netif = netdev_priv(dev);
+	struct xen_netif *netif = netdev_priv(dev);
 	return netif->features & NETIF_F_SG;
 }
 
