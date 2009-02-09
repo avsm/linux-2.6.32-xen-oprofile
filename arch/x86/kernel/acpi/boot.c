@@ -42,6 +42,8 @@
 #include <asm/mpspec.h>
 #include <asm/smp.h>
 
+#include <asm/xen/pci.h>
+
 #include <asm/xen/hypervisor.h>
 
 static int __initdata acpi_force = 0;
@@ -531,8 +533,12 @@ int acpi_gsi_to_irq(u32 gsi, unsigned int *irq)
  */
 int acpi_register_gsi(struct device *dev, u32 gsi, int trigger, int polarity)
 {
-	unsigned int irq;
+	int irq;
 	unsigned int plat_gsi = gsi;
+
+	irq = xen_register_gsi(gsi, trigger, polarity);
+	if (irq >= 0)
+		return irq;
 
 #ifdef CONFIG_PCI
 	/*
