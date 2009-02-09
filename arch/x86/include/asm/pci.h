@@ -21,6 +21,7 @@ struct pci_sysdata {
 extern int pci_routeirq;
 extern int noioapicquirk;
 extern int noioapicreroute;
+extern int pci_scan_all_fns;
 
 /* scan a bus after allocating a pci_sysdata for it */
 extern struct pci_bus *pci_scan_bus_on_node(int busno, struct pci_ops *ops,
@@ -48,7 +49,11 @@ extern unsigned int pcibios_assign_all_busses(void);
 #else
 #define pcibios_assign_all_busses()	0
 #endif
-#define pcibios_scan_all_fns(a, b)	0
+
+static inline int pcibios_scan_all_fns(struct pci_bus *bus, int devfn)
+{
+	return pci_scan_all_fns;
+}
 
 extern unsigned long pci_mem_start;
 #define PCIBIOS_MIN_IO		0x1000
@@ -129,6 +134,7 @@ extern void pci_iommu_alloc(void);
 #include <asm-generic/pci-dma-compat.h>
 
 /* generic pci stuff */
+#define HAVE_ARCH_PCIBIOS_SCAN_ALL_FNS
 #include <asm-generic/pci.h>
 
 #ifdef CONFIG_NUMA
