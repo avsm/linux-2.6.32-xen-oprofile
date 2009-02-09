@@ -10,6 +10,7 @@
 #include <asm/gart.h>
 #include <asm/calgary.h>
 #include <asm/amd_iommu.h>
+#include <asm/xen/iommu.h>
 
 static int forbid_dac __read_mostly;
 
@@ -274,6 +275,8 @@ static int __init pci_iommu_init(void)
 #ifdef CONFIG_PCI
 	dma_debug_add_bus(&pci_bus_type);
 #endif
+
+	xen_iommu_init();
 
 	calgary_iommu_init();
 

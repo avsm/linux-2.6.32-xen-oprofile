@@ -7,6 +7,8 @@
 #include <asm-generic/int-ll64.h>
 #include <asm/page.h>
 
+extern int isapnp_disable;
+
 #define build_mmio_read(name, size, type, reg, barrier) \
 static inline type name(const volatile void __iomem *addr) \
 { type ret; asm volatile("mov" size " %1,%0":reg (ret) \
