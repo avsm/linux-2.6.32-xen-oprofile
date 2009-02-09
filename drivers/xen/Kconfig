@@ -36,6 +36,13 @@ config XEN_BACKEND
 	  Support for backend device drivers that provide I/O services
 	  to other virtual machines.
 
+config XEN_NETDEV_BACKEND
+       bool "Xen backend network device"
+       depends on XEN_BACKEND && NET
+       help
+         Implement the network backend driver, which passes packets
+         from the guest domain's frontend drivers to the network.
+
 config XENFS
 	tristate "Xen filesystem"
 	depends on XEN
