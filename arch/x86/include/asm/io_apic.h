@@ -184,4 +184,10 @@ static inline void ioapic_init_mappings(void)	{ }
 static inline void probe_nr_irqs_gsi(void)	{ }
 #endif
 
+void xen_io_apic_init(void);
+unsigned int xen_io_apic_read(unsigned apic, unsigned reg);
+void xen_io_apic_write(unsigned int apic,
+		       unsigned int reg, unsigned int value);
+
+
 #endif /* _ASM_X86_IO_APIC_H */

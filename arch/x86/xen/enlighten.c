@@ -1054,6 +1054,9 @@ asmlinkage void __init xen_start_kernel(void)
 	if (xen_feature(XENFEAT_supervisor_mode_kernel))
 		pv_info.kernel_rpl = 0;
 
+	if (xen_initial_domain())
+		xen_init_apic();
+
 	/* set the limit of our address space */
 	xen_reserve_top();
 
