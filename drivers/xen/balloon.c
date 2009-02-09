@@ -464,6 +464,101 @@ static void balloon_exit(void)
 
 module_exit(balloon_exit);
 
+static int dealloc_pte_fn(pte_t *pte, struct page *pmd_page,
+			  unsigned long addr, void *data)
+{
+	unsigned long mfn = pte_mfn(*pte);
+	int ret;
+	struct xen_memory_reservation reservation = {
+		.nr_extents   = 1,
+		.extent_order = 0,
+		.domid        = DOMID_SELF
+	};
+
+	set_xen_guest_handle(reservation.extent_start, &mfn);
+	set_pte_at(&init_mm, addr, pte, __pte_ma(0));
+	set_phys_to_machine(__pa(addr) >> PAGE_SHIFT, INVALID_P2M_ENTRY);
+
+	ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
+	BUG_ON(ret != 1);
+
+	return 0;
+}
+
+struct page **alloc_empty_pages_and_pagevec(int nr_pages)
+{
+	struct page *page, **pagevec;
+	int i, ret;
+
+	pagevec = kmalloc(sizeof(page) * nr_pages, GFP_KERNEL);
+	if (pagevec == NULL)
+		return NULL;
+
+	for (i = 0; i < nr_pages; i++) {
+		void *v;
+
+		page = pagevec[i] = alloc_page(GFP_KERNEL|__GFP_COLD);
+		if (page == NULL)
+			goto err;
+
+		scrub_page(page);
+
+		mutex_lock(&balloon_mutex);
+
+		v = page_address(page);
+
+		ret = apply_to_page_range(&init_mm, (unsigned long)v,
+					  PAGE_SIZE, dealloc_pte_fn,
+					  NULL);
+
+		if (ret != 0) {
+			mutex_unlock(&balloon_mutex);
+			//balloon_free_page(page); /* tries to use free_cold_page */
+			__free_page(page);
+			goto err;
+		}
+
+		totalram_pages = --balloon_stats.current_pages;
+
+		mutex_unlock(&balloon_mutex);
+	}
+
+ out:
+	schedule_work(&balloon_worker);
+	flush_tlb_all();
+	return pagevec;
+
+ err:
+	mutex_lock(&balloon_mutex);
+	while (--i >= 0)
+		balloon_append(pagevec[i]);
+	mutex_unlock(&balloon_mutex);
+	kfree(pagevec);
+	pagevec = NULL;
+	goto out;
+}
+EXPORT_SYMBOL_GPL(alloc_empty_pages_and_pagevec);
+
+void free_empty_pages_and_pagevec(struct page **pagevec, int nr_pages)
+{
+	int i;
+
+	if (pagevec == NULL)
+		return;
+
+	mutex_lock(&balloon_mutex);
+	for (i = 0; i < nr_pages; i++) {
+		BUG_ON(page_count(pagevec[i]) != 1);
+		balloon_append(pagevec[i]);
+	}
+	mutex_unlock(&balloon_mutex);
+
+	kfree(pagevec);
+
+	schedule_work(&balloon_worker);
+}
+EXPORT_SYMBOL_GPL(free_empty_pages_and_pagevec);
+
 #define BALLOON_SHOW(name, format, args...)				\
 	static ssize_t show_##name(struct sys_device *dev,		\
 				   struct sysdev_attribute *attr,	\
