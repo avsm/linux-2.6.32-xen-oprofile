@@ -97,6 +97,8 @@ DEFINE_GUEST_HANDLE(void);
 #define TI_SET_IF(_ti, _if)	((_ti)->flags |= ((!!(_if))<<2))
 
 #ifndef __ASSEMBLY__
+#include <linux/types.h>
+
 struct trap_info {
     uint8_t       vector;  /* exception vector                              */
     uint8_t       flags;   /* 0-3: privilege level; 4: clear event enable?  */

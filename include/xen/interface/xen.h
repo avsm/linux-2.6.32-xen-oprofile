@@ -184,6 +184,8 @@
 #define MMUEXT_NEW_USER_BASEPTR 15
 
 #ifndef __ASSEMBLY__
+#include <linux/types.h>
+
 struct mmuext_op {
 	unsigned int cmd;
 	union {
