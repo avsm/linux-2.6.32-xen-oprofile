@@ -1051,10 +1051,10 @@ asmlinkage void __init xen_start_kernel(void)
 
 	/* Prevent unwanted bits from being set in PTEs. */
 	__supported_pte_mask &= ~_PAGE_GLOBAL;
-	if (xen_initial_domain())
-		__supported_pte_mask |= _PAGE_IOMAP;
-	else
+	if (!xen_initial_domain())
 		__supported_pte_mask &= ~(_PAGE_PWT | _PAGE_PCD);
+
+	__supported_pte_mask |= _PAGE_IOMAP;
 
 #ifdef CONFIG_X86_64
 	/* Work out if we support NX */
