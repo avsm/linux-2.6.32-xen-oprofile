@@ -37,10 +37,14 @@
 #ifndef __ASM_GNTTAB_H__
 #define __ASM_GNTTAB_H__
 
-#include <asm/xen/hypervisor.h>
-#include <xen/interface/grant_table.h>
 #include <asm/page.h>
+
+#include <xen/interface/xen.h>
+#include <xen/interface/grant_table.h>
+
+#include <asm/xen/hypervisor.h>
 #include <asm/xen/grant_table.h>
+
 #include <xen/features.h>
 
 /* NR_GRANT_FRAMES must be less than or equal to that configured in Xen */
