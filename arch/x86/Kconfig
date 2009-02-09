@@ -1883,8 +1883,8 @@ config PCI_OLPC
 	depends on PCI && OLPC && (PCI_GOOLPC || PCI_GOANY)
 
 config PCI_XEN
-	def_bool y
-	depends on XEN_PCI_PASSTHROUGH || XEN_DOM0_PCI
+	bool
+	select SWIOTLB
 
 config PCI_DOMAINS
 	def_bool y
