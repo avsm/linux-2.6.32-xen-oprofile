@@ -1093,6 +1093,16 @@ asmlinkage void __init xen_start_kernel(void)
 		add_preferred_console("xenboot", 0, NULL);
 		add_preferred_console("tty", 0, NULL);
 		add_preferred_console("hvc", 0, NULL);
+
+		boot_params.screen_info.orig_video_isVGA = 0;
+	} else {
+		const struct dom0_vga_console_info *info =
+			(void *)((char *)xen_start_info +
+				 xen_start_info->console.dom0.info_off);
+
+		xen_init_vga(info, xen_start_info->console.dom0.info_size);
+		xen_start_info->console.domU.mfn = 0;
+		xen_start_info->console.domU.evtchn = 0;
 	}
 
 	xen_raw_console_write("about to get started...\n");

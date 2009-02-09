@@ -83,6 +83,17 @@ static inline void xen_uninit_lock_cpu(int cpu)
 }
 #endif
 
+struct dom0_vga_console_info;
+
+#ifdef CONFIG_XEN_DOM0
+void xen_init_vga(const struct dom0_vga_console_info *, size_t size);
+#else
+static inline void xen_init_vga(const struct dom0_vga_console_info *info,
+				size_t size)
+{
+}
+#endif
+
 /* Declare an asm function, along with symbols needed to make it
    inlineable */
 #define DECL_ASM(ret, name, ...)		\
