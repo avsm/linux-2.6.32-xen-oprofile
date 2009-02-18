@@ -334,7 +334,7 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			 */
 			netif->tx_queue_timeout.data = (unsigned long)netif;
 			netif->tx_queue_timeout.function = tx_queue_callback;
-			__mod_timer(&netif->tx_queue_timeout, jiffies + HZ/2);
+			mod_timer(&netif->tx_queue_timeout, jiffies + HZ/2);
 		}
 	}
 
@@ -1299,7 +1299,7 @@ static void net_tx_action(unsigned long unused)
 					(unsigned long)netif;
 				netif->credit_timeout.function =
 					tx_credit_callback;
-				__mod_timer(&netif->credit_timeout,
+				mod_timer(&netif->credit_timeout,
 					    next_credit);
 				netif_put(netif);
 				continue;
