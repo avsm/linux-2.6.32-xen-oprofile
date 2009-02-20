@@ -397,6 +397,9 @@ static inline unsigned long pages_to_mb(unsigned long npg)
 #define io_remap_pfn_range(vma, vaddr, pfn, size, prot)	\
 	remap_pfn_range(vma, vaddr, pfn, size, prot)
 
+#define arch_vm_get_page_prot arch_vm_get_page_prot
+extern pgprot_t arch_vm_get_page_prot(unsigned vm_flags);
+
 #if PAGETABLE_LEVELS > 2
 static inline int pud_none(pud_t pud)
 {
