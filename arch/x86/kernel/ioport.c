@@ -31,7 +31,7 @@ static void set_bitmap(unsigned long *bitmap, unsigned int base,
 }
 
 void native_set_io_bitmap(struct thread_struct *t,
-			  int changed, unsigned long bytes_updated)
+			  unsigned long bytes_updated)
 {
 	struct tss_struct *tss;
 
@@ -54,7 +54,6 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 {
 	struct thread_struct *t = &current->thread;
 	unsigned int i, max_long, bytes, bytes_updated;
-	int changed;
 
 	if ((from + num <= from) || (from + num > IO_BITMAP_BITS))
 		return -EINVAL;
@@ -75,9 +74,7 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 		memset(bitmap, 0xff, IO_BITMAP_BYTES);
 		t->io_bitmap_ptr = bitmap;
 		set_thread_flag(TIF_IO_BITMAP);
-		changed = 1;
-	} else
-		changed = 0;
+	}
 
 	/*
 	 * do it in the per-thread copy
@@ -104,7 +101,7 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 
 	t->io_bitmap_max = bytes;
 
-	set_io_bitmap(t, changed, bytes_updated);
+	set_io_bitmap(t, bytes_updated);
 
 	preempt_enable();
 

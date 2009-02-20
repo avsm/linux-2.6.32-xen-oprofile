@@ -157,7 +157,7 @@ struct pv_cpu_ops {
 
 	void (*set_iopl_mask)(unsigned mask);
 	void (*set_io_bitmap)(struct thread_struct *thread,
-	                      int changed, unsigned long bytes_updated);
+			      unsigned long bytes_updated);
 
 	void (*wbinvd)(void);
 	void (*io_delay)(void);
@@ -1005,9 +1005,9 @@ static inline void set_iopl_mask(unsigned mask)
 }
 
 static inline void set_io_bitmap(struct thread_struct *thread,
-                                 int changed, unsigned long bytes_updated)
+				 unsigned long bytes_updated)
 {
-	PVOP_VCALL3(pv_cpu_ops.set_io_bitmap, thread, changed, bytes_updated);
+	PVOP_VCALL2(pv_cpu_ops.set_io_bitmap, thread, bytes_updated);
 }
 
 /* The paravirtualized I/O functions */

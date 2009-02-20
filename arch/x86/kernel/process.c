@@ -79,7 +79,7 @@ void exit_thread(void)
 		preempt_disable();
 		t->io_bitmap_ptr = NULL;
 		clear_thread_flag(TIF_IO_BITMAP);
-		set_io_bitmap(t, 1, t->io_bitmap_max);
+		set_io_bitmap(t, t->io_bitmap_max);
 		t->io_bitmap_max = 0;
 		preempt_enable();
 		kfree(bp);
@@ -212,7 +212,7 @@ void __switch_to_xtra(struct task_struct *prev_p, struct task_struct *next_p,
 
 	if (test_tsk_thread_flag(next_p, TIF_IO_BITMAP) ||
 	    test_tsk_thread_flag(prev_p, TIF_IO_BITMAP))
-		set_io_bitmap(next, 1,
+		set_io_bitmap(next,
 			      max(prev->io_bitmap_max, next->io_bitmap_max));
 }
 
