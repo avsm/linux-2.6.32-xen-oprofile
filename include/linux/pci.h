@@ -1261,5 +1261,11 @@ static inline irqreturn_t pci_sriov_migration(struct pci_dev *dev)
 }
 #endif
 
+#ifdef CONFIG_PCI_MSI
+void pci_no_msi(void);
+#else
+static inline void pci_no_msi(void) { }
+#endif
+
 #endif /* __KERNEL__ */
 #endif /* LINUX_PCI_H */
