@@ -297,6 +297,8 @@ static int __cpuinit xen_cpu_up(unsigned int cpu)
 	xen_setup_timer(cpu);
 	xen_init_lock_cpu(cpu);
 
+	cpumask_set_cpu(cpu, cpu_callout_mask);
+
 	per_cpu(cpu_state, cpu) = CPU_UP_PREPARE;
 
 	/* make sure interrupts start blocked */
