@@ -1290,5 +1290,11 @@ extern void pci_hp_create_module_link(struct pci_slot *pci_slot);
 extern void pci_hp_remove_module_link(struct pci_slot *pci_slot);
 #endif
 
+#ifdef CONFIG_PCI_MSI
+void pci_no_msi(void);
+#else
+static inline void pci_no_msi(void) { }
+#endif
+
 #endif /* __KERNEL__ */
 #endif /* LINUX_PCI_H */
