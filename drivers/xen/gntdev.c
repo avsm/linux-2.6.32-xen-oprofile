@@ -47,26 +47,26 @@ static int limit = 1024;
 module_param(limit, int, 0644);
 
 struct gntdev_priv {
-        struct list_head maps;
-        uint32_t used;
+	struct list_head maps;
+	uint32_t used;
 	uint32_t limit;
 	struct rw_semaphore sem;
-        struct mm_struct *mm;
-        struct mmu_notifier mn;
+	struct mm_struct *mm;
+	struct mmu_notifier mn;
 };
 
 struct grant_info {
-        domid_t domid;
-        grant_ref_t ref;
-        grant_handle_t handle;
+	domid_t domid;
+	grant_ref_t ref;
+	grant_handle_t handle;
 };
 
 struct grant_map {
-        struct list_head next;
-        struct gntdev_priv *priv;
-        struct vm_area_struct *vma;
-        int index;
-        int count;
+	struct list_head next;
+	struct gntdev_priv *priv;
+	struct vm_area_struct *vma;
+	int index;
+	int count;
 	int flags;
 	int is_mapped;
 	struct ioctl_gntdev_grant_ref *grants;
@@ -226,8 +226,11 @@ static int map_grant_pages(struct grant_map *map)
 
 	if (debug)
 		printk("%s: map %d+%d\n", __FUNCTION__, map->index, map->count);
-        BUG_ON(HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
-					 map->map_ops, map->count));
+        err = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
+					map->map_ops, map->count);
+	if (WARN_ON(err))
+		return err;
+
 	for (i = 0; i < map->count; i++) {
 		if (map->map_ops[i].status)
 			err = -EINVAL;
@@ -243,8 +246,11 @@ static int unmap_grant_pages(struct grant_map *map, int offset, int pages)
 	if (debug)
 		printk("%s: map %d+%d [%d+%d]\n", __FUNCTION__,
 		       map->index, map->count, offset, pages);
-	BUG_ON(HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
-					 map->unmap_ops + offset, pages));
+	err = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
+					map->unmap_ops + offset, pages);
+	if (WARN_ON(err))
+		return err;
+
 	for (i = 0; i < pages; i++) {
 		if (map->unmap_ops[offset+i].status)
 			err = -EINVAL;
@@ -388,6 +394,99 @@ static int gntdev_release(struct inode *inode, struct file *flip)
 	return 0;
 }
 
+static long gntdev_ioctl_map_grant_ref(struct gntdev_priv *priv,
+				       struct ioctl_gntdev_map_grant_ref __user *u)
+{
+	struct ioctl_gntdev_map_grant_ref op;
+	struct grant_map *map;
+
+	if (copy_from_user(&op, u, sizeof(op)) != 0)
+		return -EFAULT;
+	if (debug > 1)
+		printk("%s: priv %p, add %d\n", __FUNCTION__, priv,
+		       op.count);
+	if (unlikely(op.count <= 0))
+		return -EINVAL;
+	if (unlikely(op.count > priv->limit))
+		return -EINVAL;
+
+	map = gntdev_add_map(priv, op.count);
+	if (!map)
+		return -ENOMEM;
+	if (copy_from_user(map->grants, &u->refs,
+			   sizeof(map->grants[0]) * op.count) != 0) {
+		gntdev_del_map(priv, map->index, map->count);
+		return -EFAULT;
+	}
+
+	op.index = map->index << PAGE_SHIFT;
+	if (copy_to_user(u, &op, sizeof(op)) != 0) {
+		gntdev_del_map(priv, map->index, map->count);
+		return -EFAULT;
+	}
+
+	return 0;
+}
+
+static long gntdev_ioctl_unmap_grant_ref(struct gntdev_priv *priv,
+					 struct ioctl_gntdev_unmap_grant_ref __user *u)
+{
+	struct ioctl_gntdev_unmap_grant_ref op;
+
+	if (copy_from_user(&op, u, sizeof(op)) != 0)
+		return -EFAULT;
+	if (debug > 1)
+		printk("%s: priv %p, del %d+%d\n", __FUNCTION__, priv,
+		       (int)op.index, (int)op.count);
+
+	return gntdev_del_map(priv, op.index >> PAGE_SHIFT, op.count);
+}
+
+static long gntdev_ioctl_get_offset_for_vaddr(struct gntdev_priv *priv,
+					      struct ioctl_gntdev_get_offset_for_vaddr __user *u)
+{
+	struct ioctl_gntdev_get_offset_for_vaddr op;
+	struct grant_map *map;
+
+	if (copy_from_user(&op, u, sizeof(op)) != 0)
+		return -EFAULT;
+	if (debug > 1)
+		printk("%s: priv %p, offset for vaddr %lx\n", __FUNCTION__, priv,
+		       (unsigned long)op.vaddr);
+
+	down_read(&priv->sem);
+	map = gntdev_find_map_vaddr(priv, op.vaddr);
+	if (map == NULL ||
+	    map->vma->vm_start != op.vaddr) {
+		up_read(&priv->sem);
+		return -EINVAL;
+	}
+	op.offset = map->index << PAGE_SHIFT;
+	op.count = map->count;
+	up_read(&priv->sem);
+
+	if (copy_to_user(u, &op, sizeof(op)) != 0)
+		return -EFAULT;
+	return 0;
+}
+
+static long gntdev_ioctl_set_max_grants(struct gntdev_priv *priv,
+					struct ioctl_gntdev_set_max_grants __user *u)
+{
+	struct ioctl_gntdev_set_max_grants op;
+
+	if (copy_from_user(&op, u, sizeof(op)) != 0)
+		return -EFAULT;
+	if (debug)
+		printk("%s: priv %p, limit %d\n", __FUNCTION__, priv, op.count);
+	if (op.count > limit)
+		return -EINVAL;
+	down_write(&priv->sem);
+	priv->limit = op.count;
+	up_write(&priv->sem);
+	return 0;
+}
+
 static long gntdev_ioctl(struct file *flip,
 			 unsigned int cmd, unsigned long arg)
 {
@@ -396,94 +495,21 @@ static long gntdev_ioctl(struct file *flip,
 
 	switch (cmd) {
 	case IOCTL_GNTDEV_MAP_GRANT_REF:
-	{
-		struct ioctl_gntdev_map_grant_ref op;
-		struct ioctl_gntdev_map_grant_ref __user *u = ptr;
-		struct grant_map *map;
+		return gntdev_ioctl_map_grant_ref(priv, ptr);
 
-		if (copy_from_user(&op, u, sizeof(op)) != 0)
-                        return -EFAULT;
-		if (debug > 1)
-			printk("%s: priv %p, add %d\n", __FUNCTION__, priv,
-			       op.count);
-		if (unlikely(op.count <= 0))
-                        return -EINVAL;
-		if (unlikely(op.count > priv->limit))
-                        return -EINVAL;
-
-		map = gntdev_add_map(priv, op.count);
-                if (!map)
-                        return -ENOMEM;
-		if (copy_from_user(map->grants, &u->refs,
-				   sizeof(map->grants[0]) * op.count) != 0) {
-			gntdev_del_map(priv, map->index, map->count);
-			return -EFAULT;
-		}
-
-                op.index = map->index << PAGE_SHIFT;
-		if (copy_to_user(u, &op, sizeof(op)) != 0) {
-			gntdev_del_map(priv, map->index, map->count);
-                        return -EFAULT;
-		}
-
-                return 0;
-	}
 	case IOCTL_GNTDEV_UNMAP_GRANT_REF:
-	{
-		struct ioctl_gntdev_unmap_grant_ref op;
+		return gntdev_ioctl_unmap_grant_ref(priv, ptr);
 
-		if (copy_from_user(&op, ptr, sizeof(op)) != 0)
-                        return -EFAULT;
-		if (debug > 1)
-			printk("%s: priv %p, del %d+%d\n", __FUNCTION__, priv,
-			       (int)op.index, (int)op.count);
-
-                return gntdev_del_map(priv, op.index >> PAGE_SHIFT, op.count);
-	}
 	case IOCTL_GNTDEV_GET_OFFSET_FOR_VADDR:
-	{
-		struct ioctl_gntdev_get_offset_for_vaddr op;
-		struct grant_map *map;
+		return gntdev_ioctl_get_offset_for_vaddr(priv, ptr);
 
-		if (copy_from_user(&op, ptr, sizeof(op)) != 0)
-			return -EFAULT;
-		if (debug > 1)
-			printk("%s: priv %p, offset for vaddr %lx\n", __FUNCTION__, priv,
-			       (unsigned long)op.vaddr);
-
-		down_read(&priv->sem);
-		map = gntdev_find_map_vaddr(priv, op.vaddr);
-		if (map == NULL ||
-		    map->vma->vm_start != op.vaddr) {
-			up_read(&priv->sem);
-			return -EINVAL;
-		}
-		op.offset = map->index << PAGE_SHIFT;
-		op.count = map->count;
-		up_read(&priv->sem);
-
-		if (copy_to_user(ptr, &op, sizeof(op)) != 0)
-			return -EFAULT;
-		return 0;
-	}
 	case IOCTL_GNTDEV_SET_MAX_GRANTS:
-	{
-		struct ioctl_gntdev_set_max_grants op;
+		return gntdev_ioctl_set_max_grants(priv, ptr);
 
-		if (copy_from_user(&op, ptr, sizeof(op)) != 0)
-                        return -EFAULT;
-		if (debug)
-			printk("%s: priv %p, limit %d\n", __FUNCTION__, priv, op.count);
-                if (op.count > limit)
-                        return -EINVAL;
-                down_write(&priv->sem);
-                priv->limit = op.count;
-                up_write(&priv->sem);
-		return 0;
-	}
 	default:
 		if (debug)
-			printk("%s: priv %p, unknown cmd %x\n", __FUNCTION__, priv, cmd);
+			printk("%s: priv %p, unknown cmd %x\n",
+			       __FUNCTION__, priv, cmd);
 		return -ENOIOCTLCMD;
 	}
 
