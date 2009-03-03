@@ -61,3 +61,11 @@ config XEN_SYS_HYPERVISOR
 	 hypervisor environment.  When running native or in another
 	 virtual environment, /sys/hypervisor will still be present,
 	 but will have no xen contents.
+
+config XEN_GNTDEV
+	bool "userspace grant access device driver"
+	depends on XEN
+	default XEN_DOM0
+	select MMU_NOTIFIER
+	help
+	  Allows userspace processes use grants.
