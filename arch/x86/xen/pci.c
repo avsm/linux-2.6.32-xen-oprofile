@@ -69,13 +69,12 @@ void __init xen_setup_pirqs(void)
 	/*
 	 * Set up acpi interrupt in acpi_gbl_FADT.sci_interrupt.
 	 */
-	irq = xen_allocate_pirq(acpi_gbl_FADT.sci_interrupt);
+	if (acpi_gbl_FADT.sci_interrupt > 0) {
+		irq = xen_allocate_pirq(acpi_gbl_FADT.sci_interrupt);
 
-	printk(KERN_INFO "xen: allocated irq %d for acpi %d\n",
-	       irq, acpi_gbl_FADT.sci_interrupt);
-
-	/* Blerk. */
-	acpi_gbl_FADT.sci_interrupt = irq;
+		printk(KERN_INFO "xen: allocated irq %d for acpi %d\n",
+		       irq, acpi_gbl_FADT.sci_interrupt);
+	}
 #endif
 
 	/* Pre-allocate legacy irqs */
