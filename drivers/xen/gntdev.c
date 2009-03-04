@@ -38,7 +38,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Derek G. Murray <Derek.Murray@cl.cam.ac.uk>, "
-              "Gerd Hoffmann <kraxel@redhat.com>");
+	      "Gerd Hoffmann <kraxel@redhat.com>");
 MODULE_DESCRIPTION("User-space granted page access driver");
 
 static int debug = 0;
@@ -71,25 +71,25 @@ struct grant_map {
 /* ------------------------------------------------------------------ */
 
 static void gntdev_print_maps(struct gntdev_priv *priv,
-                              char *text, int text_index)
+			      char *text, int text_index)
 {
-        struct grant_map *map;
+	struct grant_map *map;
 
-        printk("%s: maps list (priv %p, usage %d/%d)\n",
-               __FUNCTION__, priv, priv->used, priv->limit);
-        list_for_each_entry(map, &priv->maps, next)
-                printk("  index %2d, count %2d %s\n",
-                       map->index, map->count,
-                       map->index == text_index && text ? text : "");
+	printk("%s: maps list (priv %p, usage %d/%d)\n",
+	       __FUNCTION__, priv, priv->used, priv->limit);
+	list_for_each_entry(map, &priv->maps, next)
+		printk("  index %2d, count %2d %s\n",
+		       map->index, map->count,
+		       map->index == text_index && text ? text : "");
 }
 
 static struct grant_map *gntdev_add_map(struct gntdev_priv *priv, int count)
 {
-        struct grant_map *map, *add;
+	struct grant_map *map, *add;
 
-        add = kzalloc(sizeof(struct grant_map), GFP_KERNEL);
-        if (NULL == add)
-                return NULL;
+	add = kzalloc(sizeof(struct grant_map), GFP_KERNEL);
+	if (NULL == add)
+		return NULL;
 
 	add->grants    = kzalloc(sizeof(add->grants[0])    * count, GFP_KERNEL);
 	add->map_ops   = kzalloc(sizeof(add->map_ops[0])   * count, GFP_KERNEL);
@@ -99,27 +99,27 @@ static struct grant_map *gntdev_add_map(struct gntdev_priv *priv, int count)
 	    NULL == add->unmap_ops)
 		goto err;
 
-        add->index = 0;
-        add->count = count;
-        add->priv  = priv;
+	add->index = 0;
+	add->count = count;
+	add->priv  = priv;
 
-        if (add->count + priv->used > priv->limit)
+	if (add->count + priv->used > priv->limit)
 		goto err;
 
-        list_for_each_entry(map, &priv->maps, next) {
-                if (add->index + add->count < map->index) {
-                        list_add_tail(&add->next, &map->next);
-                        goto done;
-                }
-                add->index = map->index + map->count;
-        }
-        list_add_tail(&add->next, &priv->maps);
+	list_for_each_entry(map, &priv->maps, next) {
+		if (add->index + add->count < map->index) {
+			list_add_tail(&add->next, &map->next);
+			goto done;
+		}
+		add->index = map->index + map->count;
+	}
+	list_add_tail(&add->next, &priv->maps);
 
 done:
-        priv->used += add->count;
-        if (debug)
-                gntdev_print_maps(priv, "[new]", add->index);
-        return add;
+	priv->used += add->count;
+	if (debug)
+		gntdev_print_maps(priv, "[new]", add->index);
+	return add;
 
 err:
 	kfree(add->grants);
@@ -132,33 +132,33 @@ err:
 static struct grant_map *gntdev_find_map_index(struct gntdev_priv *priv, int index,
 					       int count)
 {
-        struct grant_map *map;
+	struct grant_map *map;
 
-        list_for_each_entry(map, &priv->maps, next) {
-                if (map->index != index)
-                        continue;
-                if (map->count != count)
-                        continue;
-                return map;
-        }
-        return NULL;
+	list_for_each_entry(map, &priv->maps, next) {
+		if (map->index != index)
+			continue;
+		if (map->count != count)
+			continue;
+		return map;
+	}
+	return NULL;
 }
 
 static struct grant_map *gntdev_find_map_vaddr(struct gntdev_priv *priv,
 					       unsigned long vaddr)
 {
-        struct grant_map *map;
+	struct grant_map *map;
 
-        list_for_each_entry(map, &priv->maps, next) {
+	list_for_each_entry(map, &priv->maps, next) {
 		if (!map->vma)
 			continue;
 		if (vaddr < map->vma->vm_start)
 			continue;
 		if (vaddr >= map->vma->vm_end)
 			continue;
-                return map;
-        }
-        return NULL;
+		return map;
+	}
+	return NULL;
 }
 
 static int gntdev_del_map(struct grant_map *map)
@@ -167,16 +167,16 @@ static int gntdev_del_map(struct grant_map *map)
 
 	if (map->vma)
 		return -EBUSY;
-        for (i = 0; i < map->count; i++)
-                if (map->unmap_ops[i].handle)
+	for (i = 0; i < map->count; i++)
+		if (map->unmap_ops[i].handle)
 			return -EBUSY;
 
-        map->priv->used -= map->count;
-        list_del(&map->next);
-        kfree(map->grants);
-        kfree(map->map_ops);
-        kfree(map->unmap_ops);
-        kfree(map);
+	map->priv->used -= map->count;
+	list_del(&map->next);
+	kfree(map->grants);
+	kfree(map->map_ops);
+	kfree(map->unmap_ops);
+	kfree(map);
 	return 0;
 }
 
@@ -184,19 +184,19 @@ static int gntdev_del_map(struct grant_map *map)
 
 static int find_grant_ptes(pte_t *pte, pgtable_t token, unsigned long addr, void *data)
 {
-        struct grant_map *map = data;
-        unsigned int pgnr = (addr - map->vma->vm_start) >> PAGE_SHIFT;
+	struct grant_map *map = data;
+	unsigned int pgnr = (addr - map->vma->vm_start) >> PAGE_SHIFT;
 	u64 pte_maddr;
 
 	BUG_ON(pgnr >= map->count);
- 	pte_maddr  = (u64)pfn_to_mfn(page_to_pfn(token)) << PAGE_SHIFT;
- 	pte_maddr += (unsigned long)pte & ~PAGE_MASK;
-        gnttab_set_map_op(&map->map_ops[pgnr], pte_maddr, map->flags,
-                          map->grants[pgnr].ref,
-                          map->grants[pgnr].domid);
-        gnttab_set_unmap_op(&map->unmap_ops[pgnr], pte_maddr, map->flags,
+	pte_maddr  = (u64)pfn_to_mfn(page_to_pfn(token)) << PAGE_SHIFT;
+	pte_maddr += (unsigned long)pte & ~PAGE_MASK;
+	gnttab_set_map_op(&map->map_ops[pgnr], pte_maddr, map->flags,
+			  map->grants[pgnr].ref,
+			  map->grants[pgnr].domid);
+	gnttab_set_unmap_op(&map->unmap_ops[pgnr], pte_maddr, map->flags,
 			    0 /* handle */);
-        return 0;
+	return 0;
 }
 
 static int map_grant_pages(struct grant_map *map)
@@ -205,7 +205,7 @@ static int map_grant_pages(struct grant_map *map)
 
 	if (debug)
 		printk("%s: map %d+%d\n", __FUNCTION__, map->index, map->count);
-        err = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
+	err = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
 					map->map_ops, map->count);
 	if (WARN_ON(err))
 		return err;
@@ -242,10 +242,10 @@ static int unmap_grant_pages(struct grant_map *map, int offset, int pages)
 
 static void gntdev_vma_close(struct vm_area_struct *vma)
 {
-        struct grant_map *map = vma->vm_private_data;
+	struct grant_map *map = vma->vm_private_data;
 
-        if (debug)
-                printk("%s\n", __FUNCTION__);
+	if (debug)
+		printk("%s\n", __FUNCTION__);
 	map->is_mapped = 0;
 	map->vma = NULL;
 	vma->vm_private_data = NULL;
@@ -253,11 +253,11 @@ static void gntdev_vma_close(struct vm_area_struct *vma)
 
 static int gntdev_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-        if (debug)
-                printk("%s: vaddr %p, pgoff %ld (shouldn't happen)\n",
+	if (debug)
+		printk("%s: vaddr %p, pgoff %ld (shouldn't happen)\n",
 		       __FUNCTION__, vmf->virtual_address, vmf->pgoff);
 	vmf->flags = VM_FAULT_ERROR;
-        return 0;
+	return 0;
 }
 
 static struct vm_operations_struct gntdev_vmops = {
@@ -271,33 +271,33 @@ static void mn_invl_range_start(struct mmu_notifier *mn,
 				struct mm_struct *mm,
 				unsigned long start, unsigned long end)
 {
-        struct gntdev_priv *priv = container_of(mn, struct gntdev_priv, mn);
-        struct grant_map *map;
+	struct gntdev_priv *priv = container_of(mn, struct gntdev_priv, mn);
+	struct grant_map *map;
 	unsigned long mstart, mend;
 	int err;
 
 	down_read(&priv->sem);
-        list_for_each_entry(map, &priv->maps, next) {
-                if (!map->vma)
-                        continue;
-                if (!map->is_mapped)
-                        continue;
-                if (map->vma->vm_start >= end)
-                        continue;
-                if (map->vma->vm_end <= start)
-                        continue;
+	list_for_each_entry(map, &priv->maps, next) {
+		if (!map->vma)
+			continue;
+		if (!map->is_mapped)
+			continue;
+		if (map->vma->vm_start >= end)
+			continue;
+		if (map->vma->vm_end <= start)
+			continue;
 		mstart = max(start, map->vma->vm_start);
 		mend   = min(end,   map->vma->vm_end);
-                if (debug)
-                        printk("%s: map %d+%d (%lx %lx), range %lx %lx, mrange %lx %lx\n",
-                               __FUNCTION__, map->index, map->count,
-                               map->vma->vm_start, map->vma->vm_end,
+		if (debug)
+			printk("%s: map %d+%d (%lx %lx), range %lx %lx, mrange %lx %lx\n",
+			       __FUNCTION__, map->index, map->count,
+			       map->vma->vm_start, map->vma->vm_end,
 			       start, end, mstart, mend);
 		err = unmap_grant_pages(map,
 					(mstart - map->vma->vm_start) >> PAGE_SHIFT,
 					(mend - mstart) >> PAGE_SHIFT);
 		WARN_ON(err);
-        }
+	}
 	up_read(&priv->sem);
 }
 
@@ -311,78 +311,78 @@ static void mn_invl_page(struct mmu_notifier *mn,
 static void mn_release(struct mmu_notifier *mn,
 		       struct mm_struct *mm)
 {
-        struct gntdev_priv *priv = container_of(mn, struct gntdev_priv, mn);
-        struct grant_map *map;
+	struct gntdev_priv *priv = container_of(mn, struct gntdev_priv, mn);
+	struct grant_map *map;
 	int err;
 
 	down_read(&priv->sem);
-        list_for_each_entry(map, &priv->maps, next) {
-                if (!map->vma)
-                        continue;
-                if (debug)
-                        printk("%s: map %d+%d (%lx %lx)\n",
-                               __FUNCTION__, map->index, map->count,
-                               map->vma->vm_start, map->vma->vm_end);
+	list_for_each_entry(map, &priv->maps, next) {
+		if (!map->vma)
+			continue;
+		if (debug)
+			printk("%s: map %d+%d (%lx %lx)\n",
+			       __FUNCTION__, map->index, map->count,
+			       map->vma->vm_start, map->vma->vm_end);
 		err = unmap_grant_pages(map, 0, map->count);
 		WARN_ON(err);
-        }
+	}
 	up_read(&priv->sem);
 }
 
 struct mmu_notifier_ops gntdev_mmu_ops = {
-        .release                = mn_release,
-        .invalidate_page        = mn_invl_page,
-        .invalidate_range_start = mn_invl_range_start,
+	.release                = mn_release,
+	.invalidate_page        = mn_invl_page,
+	.invalidate_range_start = mn_invl_range_start,
 };
 
 /* ------------------------------------------------------------------ */
 
 static int gntdev_open(struct inode *inode, struct file *flip)
 {
-        struct gntdev_priv *priv;
+	struct gntdev_priv *priv;
 
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
 	if (!priv)
-                return -ENOMEM;
+		return -ENOMEM;
 
-        INIT_LIST_HEAD(&priv->maps);
+	INIT_LIST_HEAD(&priv->maps);
 	init_rwsem(&priv->sem);
-        priv->limit = limit;
+	priv->limit = limit;
 
-        priv->mm = get_task_mm(current);
+	priv->mm = get_task_mm(current);
 	if (!priv->mm) {
 		kfree(priv);
 		return -ENOMEM;
 	}
-        priv->mn.ops = &gntdev_mmu_ops;
-        mmu_notifier_register(&priv->mn, priv->mm);
-        mmput(priv->mm);
+	priv->mn.ops = &gntdev_mmu_ops;
+	mmu_notifier_register(&priv->mn, priv->mm);
+	mmput(priv->mm);
 
 	flip->private_data = priv;
-        if (debug)
-                printk("%s: priv %p\n", __FUNCTION__, priv);
+	if (debug)
+		printk("%s: priv %p\n", __FUNCTION__, priv);
 
 	return 0;
 }
 
 static int gntdev_release(struct inode *inode, struct file *flip)
 {
-        struct gntdev_priv *priv = flip->private_data;
+	struct gntdev_priv *priv = flip->private_data;
 	struct grant_map *map;
 	int err;
 
-        if (debug)
-                printk("%s: priv %p\n", __FUNCTION__, priv);
+	if (debug)
+		printk("%s: priv %p\n", __FUNCTION__, priv);
 
-        down_write(&priv->sem);
+	down_write(&priv->sem);
 	while (!list_empty(&priv->maps)) {
 		map = list_entry(priv->maps.next, struct grant_map, next);
 		err = gntdev_del_map(map);
 		WARN_ON(err);
 	}
 	up_write(&priv->sem);
-        mmu_notifier_unregister(&priv->mn, priv->mm);
-        kfree(priv);
+	mmu_notifier_unregister(&priv->mn, priv->mm);
+	kfree(priv);
 	return 0;
 }
 
@@ -403,7 +403,7 @@ static long gntdev_ioctl_map_grant_ref(struct gntdev_priv *priv,
 	if (unlikely(op.count > priv->limit))
 		return -EINVAL;
 
-        down_write(&priv->sem);
+	down_write(&priv->sem);
 	err = -ENOMEM;
 	map = gntdev_add_map(priv, op.count);
 	if (!map)
@@ -439,9 +439,9 @@ static long gntdev_ioctl_unmap_grant_ref(struct gntdev_priv *priv,
 		printk("%s: priv %p, del %d+%d\n", __FUNCTION__, priv,
 		       (int)op.index, (int)op.count);
 
-        down_write(&priv->sem);
-        map = gntdev_find_map_index(priv, op.index >> PAGE_SHIFT, op.count);
-        if (map)
+	down_write(&priv->sem);
+	map = gntdev_find_map_index(priv, op.index >> PAGE_SHIFT, op.count);
+	if (map)
 		err = gntdev_del_map(map);
 	up_write(&priv->sem);
 	return err;
@@ -496,8 +496,8 @@ static long gntdev_ioctl_set_max_grants(struct gntdev_priv *priv,
 static long gntdev_ioctl(struct file *flip,
 			 unsigned int cmd, unsigned long arg)
 {
-        struct gntdev_priv *priv = flip->private_data;
-        void __user *ptr = (void __user *)arg;
+	struct gntdev_priv *priv = flip->private_data;
+	void __user *ptr = (void __user *)arg;
 
 	switch (cmd) {
 	case IOCTL_GNTDEV_MAP_GRANT_REF:
@@ -522,31 +522,31 @@ static long gntdev_ioctl(struct file *flip,
 	return 0;
 }
 
-static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma) 
+static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 {
-        struct gntdev_priv *priv = flip->private_data;
-        int index = vma->vm_pgoff;
-        int count = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
-        struct grant_map *map;
-        int err = -EINVAL;
+	struct gntdev_priv *priv = flip->private_data;
+	int index = vma->vm_pgoff;
+	int count = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
+	struct grant_map *map;
+	int err = -EINVAL;
 
 	if ((vma->vm_flags & VM_WRITE) && !(vma->vm_flags & VM_SHARED))
 		return -EINVAL;
 
-        if (debug)
-                printk("%s: map %d+%d at %lx (pgoff %lx)\n", __FUNCTION__,
+	if (debug)
+		printk("%s: map %d+%d at %lx (pgoff %lx)\n", __FUNCTION__,
 		       index, count, vma->vm_start, vma->vm_pgoff);
 
 	down_read(&priv->sem);
-        map = gntdev_find_map_index(priv, index, count);
-        if (!map)
-                goto unlock_out;
-        if (map->vma)
-                goto unlock_out;
-        if (priv->mm != vma->vm_mm) {
-                printk("%s: Huh? Other mm?\n", __FUNCTION__);
-                goto unlock_out;
-        }
+	map = gntdev_find_map_index(priv, index, count);
+	if (!map)
+		goto unlock_out;
+	if (map->vma)
+		goto unlock_out;
+	if (priv->mm != vma->vm_mm) {
+		printk("%s: Huh? Other mm?\n", __FUNCTION__);
+		goto unlock_out;
+	}
 
 	vma->vm_ops = &gntdev_vmops;
 
@@ -555,13 +555,13 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 	vma->vm_flags |= VM_DONTEXPAND;
 
 	vma->vm_private_data = map;
-        map->vma = vma;
+	map->vma = vma;
 
-        map->flags = GNTMAP_host_map | GNTMAP_application_map | GNTMAP_contains_pte;
-        if (!(vma->vm_flags & VM_WRITE))
-                map->flags |= GNTMAP_readonly;
+	map->flags = GNTMAP_host_map | GNTMAP_application_map | GNTMAP_contains_pte;
+	if (!(vma->vm_flags & VM_WRITE))
+		map->flags |= GNTMAP_readonly;
 
-        err = apply_to_page_range(vma->vm_mm, vma->vm_start,
+	err = apply_to_page_range(vma->vm_mm, vma->vm_start,
 				  vma->vm_end - vma->vm_start,
 				  find_grant_ptes, map);
 	if (err) {
@@ -570,7 +570,7 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 			printk("%s: find_grant_ptes() failure.\n", __FUNCTION__);
 	}
 
-        err = map_grant_pages(map);
+	err = map_grant_pages(map);
 	if (err) {
 		goto unlock_out;
 		if (debug)
@@ -580,7 +580,7 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 
 unlock_out:
 	up_read(&priv->sem);
-        return err;
+	return err;
 }
 
 static const struct file_operations gntdev_fops = {
@@ -592,22 +592,22 @@ static const struct file_operations gntdev_fops = {
 };
 
 static struct miscdevice gntdev_miscdev = {
-        .minor        = MISC_DYNAMIC_MINOR,
-        .name         = "gntdev",
-        .fops         = &gntdev_fops,
+	.minor        = MISC_DYNAMIC_MINOR,
+	.name         = "gntdev",
+	.fops         = &gntdev_fops,
 };
 
 /* ------------------------------------------------------------------ */
 
 static int __init gntdev_init(void)
 {
-        int err;
+	int err;
 
 	if (!xen_domain())
 		return -ENODEV;
 
-        err = misc_register(&gntdev_miscdev);
-        if (err != 0) {
+	err = misc_register(&gntdev_miscdev);
+	if (err != 0) {
 		printk(KERN_ERR "Could not register gntdev device\n");
 		return err;
 	}
@@ -616,11 +616,10 @@ static int __init gntdev_init(void)
 
 static void __exit gntdev_exit(void)
 {
-        misc_deregister(&gntdev_miscdev);
+	misc_deregister(&gntdev_miscdev);
 }
 
 module_init(gntdev_init);
 module_exit(gntdev_exit);
 
 /* ------------------------------------------------------------------ */
-
