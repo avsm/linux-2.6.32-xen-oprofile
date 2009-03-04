@@ -65,19 +65,15 @@ void __init xen_setup_pirqs(void)
 {
 	int irq;
 
-#ifdef CONFIG_ACPI
-	/*
-	 * Set up acpi interrupt in acpi_gbl_FADT.sci_interrupt.
-	 */
-	if (acpi_gbl_FADT.sci_interrupt > 0) {
-		irq = xen_allocate_pirq(acpi_gbl_FADT.sci_interrupt);
-
-		printk(KERN_INFO "xen: allocated irq %d for acpi %d\n",
-		       irq, acpi_gbl_FADT.sci_interrupt);
-	}
-#endif
-
 	/* Pre-allocate legacy irqs */
-	for (irq = 0; irq < NR_IRQS_LEGACY; irq++)
-		xen_allocate_pirq(irq);
+	for (irq=0; irq < NR_IRQS_LEGACY; irq++) {
+		int trigger, polarity;
+
+		if (acpi_get_override_irq(irq, &trigger, &polarity) == -1)
+			continue;
+
+		xen_register_gsi(irq,
+			trigger ? ACPI_LEVEL_SENSITIVE : ACPI_EDGE_SENSITIVE,
+			polarity ? ACPI_ACTIVE_LOW : ACPI_ACTIVE_HIGH);
+	}
 }
