@@ -53,7 +53,7 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 
 	printk(KERN_DEBUG "xen: --> irq=%d\n", irq);
 
-	if (irq > 0)
+	if (irq >= 0)
 		xen_set_io_apic_routing(irq,
 					triggering == ACPI_EDGE_SENSITIVE ? 0 : 1,
 					polarity == ACPI_ACTIVE_HIGH ? 0 : 1);
