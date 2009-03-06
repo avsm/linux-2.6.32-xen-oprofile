@@ -222,6 +222,12 @@ static int map_frontend_pages(
 		BUG();
 
 	if (op.status) {
+		struct gnttab_unmap_grant_ref unop;
+
+		gnttab_set_unmap_op(&unop,
+				    (unsigned long)netif->tx_comms_area->addr,
+				    GNTMAP_host_map, netif->tx_shmem_handle);
+		HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref, &unop, 1);
 		DPRINTK(" Gnttab failure mapping rx_ring_ref!\n");
 		return op.status;
 	}
