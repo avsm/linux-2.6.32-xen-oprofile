@@ -52,7 +52,7 @@
  * blocked.
  */
 static unsigned long netbk_queue_length = 32;
-module_param_named(queue_length, netbk_queue_length, ulong, 0);
+module_param_named(queue_length, netbk_queue_length, ulong, 0644);
 
 static void __netif_up(struct xen_netif *netif)
 {
@@ -123,6 +123,7 @@ static void netbk_get_drvinfo(struct net_device *dev,
 			      struct ethtool_drvinfo *info)
 {
 	strcpy(info->driver, "netbk");
+	strcpy(info->bus_info, dev->dev.parent->bus_id);
 }
 
 static const struct netif_stat {

@@ -200,6 +200,7 @@ static void backend_create_netif(struct backend_info *be)
 		xenbus_dev_fatal(dev, err, "creating interface");
 		return;
 	}
+	SET_NETDEV_DEV(be->netif->dev, &dev->dev);
 
 	kobject_uevent(&dev->dev.kobj, KOBJ_ONLINE);
 }
