@@ -92,6 +92,9 @@ struct xen_netif {
 	/* Enforce draining of the transmit queue. */
 	struct timer_list tx_queue_timeout;
 
+	/* Statistics */
+	int nr_copied_skbs;
+
 	/* Miscellaneous private stuff. */
 	struct list_head list;  /* scheduling list */
 	atomic_t         refcnt;
