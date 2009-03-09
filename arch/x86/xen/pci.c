@@ -49,7 +49,8 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 	printk(KERN_DEBUG "xen: registering gsi %u triggering %d polarity %d\n",
 	       gsi, triggering, polarity);
 
-	irq = xen_allocate_pirq(gsi);
+	irq = xen_allocate_pirq(gsi, (triggering == ACPI_EDGE_SENSITIVE)
+				     ? "ioapic-edge" : "ioapic-level");
 
 	printk(KERN_DEBUG "xen: --> irq=%d\n", irq);
 
