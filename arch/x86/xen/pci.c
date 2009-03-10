@@ -66,8 +66,14 @@ void __init xen_setup_pirqs(void)
 {
 	int irq;
 
+	if (0 == nr_ioapics) {
+		for (irq = 0; irq < NR_IRQS_LEGACY; irq++)
+			xen_allocate_pirq(irq, "xt-pic");
+		return;
+	}
+
 	/* Pre-allocate legacy irqs */
-	for (irq=0; irq < NR_IRQS_LEGACY; irq++) {
+	for (irq = 0; irq < NR_IRQS_LEGACY; irq++) {
 		int trigger, polarity;
 
 		if (acpi_get_override_irq(irq, &trigger, &polarity) == -1)
