@@ -178,7 +178,7 @@ static struct ethtool_ops network_ethtool_ops =
 	.get_strings = netbk_get_strings,
 };
 
-struct xen_netif *netif_alloc(domid_t domid, unsigned int handle)
+struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int handle)
 {
 	int err = 0;
 	struct net_device *dev;
@@ -191,6 +191,8 @@ struct xen_netif *netif_alloc(domid_t domid, unsigned int handle)
 		DPRINTK("Could not create netif: out of memory\n");
 		return ERR_PTR(-ENOMEM);
 	}
+
+	SET_NETDEV_DEV(dev, parent);
 
 	netif = netdev_priv(dev);
 	memset(netif, 0, sizeof(*netif));

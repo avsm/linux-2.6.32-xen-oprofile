@@ -180,7 +180,7 @@ void netif_accel_init(void);
 
 void netif_disconnect(struct xen_netif *netif);
 
-struct xen_netif *netif_alloc(domid_t domid, unsigned int handle);
+struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int handle);
 int netif_map(struct xen_netif *netif, unsigned long tx_ring_ref,
 	      unsigned long rx_ring_ref, unsigned int evtchn);
 
