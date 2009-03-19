@@ -128,7 +128,11 @@ static inline pending_ring_idx_t pending_index(unsigned i)
 }
 
 static pending_ring_idx_t pending_prod, pending_cons;
-#define NR_PENDING_REQS (MAX_PENDING_REQS - pending_prod + pending_cons)
+
+static inline pending_ring_idx_t nr_pending_reqs(void)
+{
+	return MAX_PENDING_REQS - pending_prod + pending_cons;
+}
 
 /* Freed TX SKBs get batched on this ring before return to pending_ring. */
 static u16 dealloc_ring[MAX_PENDING_REQS];
@@ -167,7 +171,7 @@ static inline unsigned long alloc_mfn(void)
 static inline void maybe_schedule_tx_action(void)
 {
 	smp_mb();
-	if ((NR_PENDING_REQS < (MAX_PENDING_REQS/2)) &&
+	if ((nr_pending_reqs() < (MAX_PENDING_REQS/2)) &&
 	    !list_empty(&net_schedule_list))
 		tasklet_schedule(&net_tx_tasklet);
 }
@@ -1060,7 +1064,7 @@ static void net_tx_action(unsigned long unused)
 		net_tx_action_dealloc();
 
 	mop = tx_map_ops;
-	while (((NR_PENDING_REQS + MAX_SKB_FRAGS) < MAX_PENDING_REQS) &&
+	while (((nr_pending_reqs() + MAX_SKB_FRAGS) < MAX_PENDING_REQS) &&
 		!list_empty(&net_schedule_list)) {
 		/* Get a netif from the list with work to do. */
 		ent = net_schedule_list.next;
