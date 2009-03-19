@@ -78,7 +78,6 @@ struct xen_netif {
 
 	/* Internal feature information. */
 	u8 can_queue:1;	/* can queue packets for receiver? */
-	u8 copying_receiver:1;	/* copy packets to receiver?       */
 
 	/* Allow netif_be_start_xmit() to peek ahead in the rx request ring. */
 	RING_IDX rx_req_cons_peek;

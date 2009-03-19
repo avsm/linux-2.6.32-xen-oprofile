@@ -378,7 +378,8 @@ static int connect_rings(struct backend_info *be)
 				 dev->otherend);
 		return err;
 	}
-	be->netif->copying_receiver = !!rx_copy;
+	if (!rx_copy)
+		return -EOPNOTSUPP;
 
 	if (be->netif->dev->tx_queue_len != 0) {
 		if (xenbus_scanf(XBT_NIL, dev->otherend,
