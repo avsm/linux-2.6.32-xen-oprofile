@@ -120,19 +120,19 @@ static struct pending_tx_info {
 	struct xen_netif *netif;
 } pending_tx_info[MAX_PENDING_REQS];
 static u16 pending_ring[MAX_PENDING_REQS];
-typedef unsigned int PEND_RING_IDX;
+typedef unsigned int pending_ring_idx_t;
 
-static inline PEND_RING_IDX pending_index(unsigned i)
+static inline pending_ring_idx_t pending_index(unsigned i)
 {
 	return i & (MAX_PENDING_REQS-1);
 }
 
-static PEND_RING_IDX pending_prod, pending_cons;
+static pending_ring_idx_t pending_prod, pending_cons;
 #define NR_PENDING_REQS (MAX_PENDING_REQS - pending_prod + pending_cons)
 
 /* Freed TX SKBs get batched on this ring before return to pending_ring. */
 static u16 dealloc_ring[MAX_PENDING_REQS];
-static PEND_RING_IDX dealloc_prod, dealloc_cons;
+static pending_ring_idx_t dealloc_prod, dealloc_cons;
 
 /* Doubly-linked list of in-use pending entries. */
 static struct netbk_tx_pending_inuse pending_inuse[MAX_PENDING_REQS];
@@ -669,7 +669,7 @@ static void tx_credit_callback(unsigned long data)
 	netif_schedule_work(netif);
 }
 
-static inline int copy_pending_req(PEND_RING_IDX pending_idx)
+static inline int copy_pending_req(pending_ring_idx_t pending_idx)
 {
 	return gnttab_copy_grant_page(grant_tx_handle[pending_idx],
 				      &mmap_pages[pending_idx]);
@@ -680,7 +680,7 @@ inline static void net_tx_action_dealloc(void)
 	struct netbk_tx_pending_inuse *inuse, *n;
 	struct gnttab_unmap_grant_ref *gop;
 	u16 pending_idx;
-	PEND_RING_IDX dc, dp;
+	pending_ring_idx_t dc, dp;
 	struct xen_netif *netif;
 	int ret;
 	LIST_HEAD(list);
