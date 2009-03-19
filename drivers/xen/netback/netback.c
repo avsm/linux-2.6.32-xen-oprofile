@@ -615,23 +615,11 @@ static void add_to_net_schedule_list_tail(struct xen_netif *netif)
 	spin_unlock_irq(&net_schedule_list_lock);
 }
 
-/*
- * Note on CONFIG_XEN_NETDEV_PIPELINED_TRANSMITTER:
- * If this driver is pipelining transmit requests then we can be very
- * aggressive in avoiding new-packet notifications -- frontend only needs to
- * send a notification if there are no outstanding unreceived responses.
- * If we may be buffer transmit buffers for any reason then we must be rather
- * more conservative and treat this as the final check for pending work.
- */
 void netif_schedule_work(struct xen_netif *netif)
 {
 	int more_to_do;
 
-#ifdef CONFIG_XEN_NETDEV_PIPELINED_TRANSMITTER
-	more_to_do = RING_HAS_UNCONSUMED_REQUESTS(&netif->tx);
-#else
 	RING_FINAL_CHECK_FOR_REQUESTS(&netif->tx, more_to_do);
-#endif
 
 	if (more_to_do) {
 		add_to_net_schedule_list_tail(netif);
@@ -1355,15 +1343,6 @@ static void make_tx_response(struct xen_netif *netif,
 	RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(&netif->tx, notify);
 	if (notify)
 		notify_remote_via_irq(netif->irq);
-
-#ifdef CONFIG_XEN_NETDEV_PIPELINED_TRANSMITTER
-	if (i == netif->tx.req_cons) {
-		int more_to_do;
-		RING_FINAL_CHECK_FOR_REQUESTS(&netif->tx, more_to_do);
-		if (more_to_do)
-			add_to_net_schedule_list_tail(netif);
-	}
-#endif
 }
 
 static struct xen_netif_rx_response *make_rx_response(struct xen_netif *netif,
