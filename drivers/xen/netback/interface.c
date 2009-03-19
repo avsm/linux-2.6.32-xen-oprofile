@@ -201,6 +201,7 @@ struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int
 	atomic_set(&netif->refcnt, 1);
 	init_waitqueue_head(&netif->waiting_to_free);
 	netif->dev = dev;
+	INIT_LIST_HEAD(&netif->list);
 
 	netback_carrier_off(netif);
 

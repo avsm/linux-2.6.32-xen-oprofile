@@ -148,8 +148,8 @@ static grant_handle_t grant_tx_handle[MAX_PENDING_REQS];
 static struct gnttab_unmap_grant_ref tx_unmap_ops[MAX_PENDING_REQS];
 static struct gnttab_map_grant_ref tx_map_ops[MAX_PENDING_REQS];
 
-static struct list_head net_schedule_list;
-static spinlock_t net_schedule_list_lock;
+static LIST_HEAD(net_schedule_list);
+static DEFINE_SPINLOCK(net_schedule_list_lock);
 
 #define MAX_MFN_ALLOC 64
 static unsigned long mfn_list[MAX_MFN_ALLOC];
@@ -588,15 +588,14 @@ struct net_device_stats *netif_be_get_stats(struct net_device *dev)
 
 static int __on_net_schedule_list(struct xen_netif *netif)
 {
-	return netif->list.next != NULL;
+	return !list_empty(&netif->list);
 }
 
 static void remove_from_net_schedule_list(struct xen_netif *netif)
 {
 	spin_lock_irq(&net_schedule_list_lock);
 	if (likely(__on_net_schedule_list(netif))) {
-		list_del(&netif->list);
-		netif->list.next = NULL;
+		list_del_init(&netif->list);
 		netif_put(netif);
 	}
 	spin_unlock_irq(&net_schedule_list_lock);
@@ -1465,9 +1464,6 @@ static int __init netback_init(void)
 	pending_prod = MAX_PENDING_REQS;
 	for (i = 0; i < MAX_PENDING_REQS; i++)
 		pending_ring[i] = i;
-
-	spin_lock_init(&net_schedule_list_lock);
-	INIT_LIST_HEAD(&net_schedule_list);
 
 	netbk_copy_skb_mode = NETBK_DONT_COPY_SKB;
 	if (MODPARM_copy_skb) {
