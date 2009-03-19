@@ -121,7 +121,12 @@ static struct pending_tx_info {
 } pending_tx_info[MAX_PENDING_REQS];
 static u16 pending_ring[MAX_PENDING_REQS];
 typedef unsigned int PEND_RING_IDX;
-#define MASK_PEND_IDX(_i) ((_i)&(MAX_PENDING_REQS-1))
+
+static inline PEND_RING_IDX pending_index(unsigned i)
+{
+	return i & (MAX_PENDING_REQS-1);
+}
+
 static PEND_RING_IDX pending_prod, pending_cons;
 #define NR_PENDING_REQS (MAX_PENDING_REQS - pending_prod + pending_cons)
 
@@ -695,7 +700,7 @@ inline static void net_tx_action_dealloc(void)
 		while (dc != dp) {
 			unsigned long pfn;
 
-			pending_idx = dealloc_ring[MASK_PEND_IDX(dc++)];
+			pending_idx = dealloc_ring[pending_index(dc++)];
 			list_move_tail(&pending_inuse[pending_idx].list, &list);
 
 			pfn = idx_to_pfn(pending_idx);
@@ -754,7 +759,7 @@ inline static void net_tx_action_dealloc(void)
 		/* Ready for next use. */
 		gnttab_reset_grant_page(mmap_pages[pending_idx]);
 
-		pending_ring[MASK_PEND_IDX(pending_prod++)] = pending_idx;
+		pending_ring[pending_index(pending_prod++)] = pending_idx;
 
 		netif_put(netif);
 
@@ -831,7 +836,7 @@ static struct gnttab_map_grant_ref *netbk_get_requests(struct xen_netif *netif,
 	start = ((unsigned long)shinfo->frags[0].page == pending_idx);
 
 	for (i = start; i < shinfo->nr_frags; i++, txp++) {
-		pending_idx = pending_ring[MASK_PEND_IDX(pending_cons++)];
+		pending_idx = pending_ring[pending_index(pending_cons++)];
 
 		gnttab_set_map_op(mop++, idx_to_kaddr(pending_idx),
 				  GNTMAP_host_map | GNTMAP_readonly,
@@ -862,7 +867,7 @@ static int netbk_tx_check_mop(struct sk_buff *skb,
 	if (unlikely(err)) {
 		txp = &pending_tx_info[pending_idx].req;
 		make_tx_response(netif, txp, NETIF_RSP_ERROR);
-		pending_ring[MASK_PEND_IDX(pending_prod++)] = pending_idx;
+		pending_ring[pending_index(pending_prod++)] = pending_idx;
 		netif_put(netif);
 	} else {
 		set_phys_to_machine(
@@ -895,7 +900,7 @@ static int netbk_tx_check_mop(struct sk_buff *skb,
 		/* Error on this fragment: respond to client with an error. */
 		txp = &pending_tx_info[pending_idx].req;
 		make_tx_response(netif, txp, NETIF_RSP_ERROR);
-		pending_ring[MASK_PEND_IDX(pending_prod++)] = pending_idx;
+		pending_ring[pending_index(pending_prod++)] = pending_idx;
 		netif_put(netif);
 
 		/* Not the first error? Preceding frags already invalidated. */
@@ -1142,7 +1147,7 @@ static void net_tx_action(unsigned long unused)
 			continue;
 		}
 
-		pending_idx = pending_ring[MASK_PEND_IDX(pending_cons)];
+		pending_idx = pending_ring[pending_index(pending_cons)];
 
 		data_len = (txreq.size > PKT_PROT_LEN &&
 			    ret < MAX_SKB_FRAGS) ?
@@ -1298,7 +1303,7 @@ static void netif_idx_release(u16 pending_idx)
 	unsigned long flags;
 
 	spin_lock_irqsave(&_lock, flags);
-	dealloc_ring[MASK_PEND_IDX(dealloc_prod)] = pending_idx;
+	dealloc_ring[pending_index(dealloc_prod)] = pending_idx;
 	/* Sync with net_tx_action_dealloc: insert idx /then/ incr producer. */
 	smp_wmb();
 	dealloc_prod++;
