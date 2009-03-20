@@ -183,12 +183,16 @@ struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int
 int netif_map(struct xen_netif *netif, unsigned long tx_ring_ref,
 	      unsigned long rx_ring_ref, unsigned int evtchn);
 
-#define netif_get(_b) (atomic_inc(&(_b)->refcnt))
-#define netif_put(_b)						\
-	do {							\
-		if ( atomic_dec_and_test(&(_b)->refcnt) )	\
-			wake_up(&(_b)->waiting_to_free);	\
-	} while (0)
+static inline void netif_get(struct xen_netif *netif)
+{
+	atomic_inc(&netif->refcnt);
+}
+
+static inline void  netif_put(struct xen_netif *netif)
+{
+	if (atomic_dec_and_test(&netif->refcnt))
+		wake_up(&netif->waiting_to_free);
+}
 
 void netif_xenbus_init(void);
 
