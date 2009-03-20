@@ -773,7 +773,8 @@ static void netbk_tx_err(struct xen_netif *netif, struct xen_netif_tx_request *t
 	netif_put(netif);
 }
 
-static int netbk_count_requests(struct xen_netif *netif, struct xen_netif_tx_request *first,
+static int netbk_count_requests(struct xen_netif *netif,
+				struct xen_netif_tx_request *first,
 				struct xen_netif_tx_request *txp, int work_to_do)
 {
 	RING_IDX cons = netif->tx.req_cons;
@@ -1032,30 +1033,58 @@ out:
 	return err;
 }
 
-/* Called after netfront has transmitted */
-static void net_tx_action(unsigned long unused)
+static bool tx_credit_exceeded(struct xen_netif *netif, unsigned size)
 {
-	struct list_head *ent;
-	struct sk_buff *skb;
-	struct xen_netif *netif;
-	struct xen_netif_tx_request txreq;
-	struct xen_netif_tx_request txfrags[MAX_SKB_FRAGS];
-	struct xen_netif_extra_info extras[XEN_NETIF_EXTRA_TYPE_MAX - 1];
-	u16 pending_idx;
-	RING_IDX i;
-	struct gnttab_map_grant_ref *mop;
-	unsigned int data_len;
-	int ret, work_to_do;
+	unsigned long now = jiffies;
+	unsigned long next_credit =
+		netif->credit_timeout.expires +
+		msecs_to_jiffies(netif->credit_usec / 1000);
 
-	if (dealloc_cons != dealloc_prod)
-		net_tx_action_dealloc();
+	/* Timer could already be pending in rare cases. */
+	if (timer_pending(&netif->credit_timeout))
+		return true;
+
+	/* Passed the point where we can replenish credit? */
+	if (time_after_eq(now, next_credit)) {
+		netif->credit_timeout.expires = now;
+		tx_add_credit(netif);
+	}
+
+	/* Still too big to send right now? Set a callback. */
+	if (size > netif->remaining_credit) {
+		netif->credit_timeout.data     =
+			(unsigned long)netif;
+		netif->credit_timeout.function =
+			tx_credit_callback;
+		mod_timer(&netif->credit_timeout,
+			  next_credit);
+
+		return true;
+	}
+
+	return false;
+}
+
+static unsigned net_tx_build_mops(void)
+{
+	struct gnttab_map_grant_ref *mop;
+	struct sk_buff *skb;
+	int ret;
 
 	mop = tx_map_ops;
 	while (((nr_pending_reqs() + MAX_SKB_FRAGS) < MAX_PENDING_REQS) &&
 		!list_empty(&net_schedule_list)) {
+		struct xen_netif *netif;
+		struct xen_netif_tx_request txreq;
+		struct xen_netif_tx_request txfrags[MAX_SKB_FRAGS];
+		struct xen_netif_extra_info extras[XEN_NETIF_EXTRA_TYPE_MAX - 1];
+		u16 pending_idx;
+		RING_IDX idx;
+		int work_to_do;
+		unsigned int data_len;
+	
 		/* Get a netif from the list with work to do. */
-		ent = net_schedule_list.next;
-		netif = list_entry(ent, struct xen_netif, list);
+		netif = list_first_entry(&net_schedule_list, struct xen_netif, list);
 		netif_get(netif);
 		remove_from_net_schedule_list(netif);
 
@@ -1065,67 +1094,43 @@ static void net_tx_action(unsigned long unused)
 			continue;
 		}
 
-		i = netif->tx.req_cons;
+		idx = netif->tx.req_cons;
 		rmb(); /* Ensure that we see the request before we copy it. */
-		memcpy(&txreq, RING_GET_REQUEST(&netif->tx, i), sizeof(txreq));
+		memcpy(&txreq, RING_GET_REQUEST(&netif->tx, idx), sizeof(txreq));
 
 		/* Credit-based scheduling. */
-		if (txreq.size > netif->remaining_credit) {
-			unsigned long now = jiffies;
-			unsigned long next_credit =
-				netif->credit_timeout.expires +
-				msecs_to_jiffies(netif->credit_usec / 1000);
-
-			/* Timer could already be pending in rare cases. */
-			if (timer_pending(&netif->credit_timeout)) {
-				netif_put(netif);
-				continue;
-			}
-
-			/* Passed the point where we can replenish credit? */
-			if (time_after_eq(now, next_credit)) {
-				netif->credit_timeout.expires = now;
-				tx_add_credit(netif);
-			}
-
-			/* Still too big to send right now? Set a callback. */
-			if (txreq.size > netif->remaining_credit) {
-				netif->credit_timeout.data     =
-					(unsigned long)netif;
-				netif->credit_timeout.function =
-					tx_credit_callback;
-				mod_timer(&netif->credit_timeout,
-					    next_credit);
-				netif_put(netif);
-				continue;
-			}
+		if (txreq.size > netif->remaining_credit &&
+		    tx_credit_exceeded(netif, txreq.size)) {
+			netif_put(netif);
+			continue;
 		}
+
 		netif->remaining_credit -= txreq.size;
 
 		work_to_do--;
-		netif->tx.req_cons = ++i;
+		netif->tx.req_cons = ++idx;
 
 		memset(extras, 0, sizeof(extras));
 		if (txreq.flags & NETTXF_extra_info) {
 			work_to_do = netbk_get_extras(netif, extras,
 						      work_to_do);
-			i = netif->tx.req_cons;
+			idx = netif->tx.req_cons;
 			if (unlikely(work_to_do < 0)) {
-				netbk_tx_err(netif, &txreq, i);
+				netbk_tx_err(netif, &txreq, idx);
 				continue;
 			}
 		}
 
 		ret = netbk_count_requests(netif, &txreq, txfrags, work_to_do);
 		if (unlikely(ret < 0)) {
-			netbk_tx_err(netif, &txreq, i - ret);
+			netbk_tx_err(netif, &txreq, idx - ret);
 			continue;
 		}
-		i += ret;
+		idx += ret;
 
 		if (unlikely(txreq.size < ETH_HLEN)) {
 			DPRINTK("Bad packet size: %d\n", txreq.size);
-			netbk_tx_err(netif, &txreq, i);
+			netbk_tx_err(netif, &txreq, idx);
 			continue;
 		}
 
@@ -1134,7 +1139,7 @@ static void net_tx_action(unsigned long unused)
 			DPRINTK("txreq.offset: %x, size: %u, end: %lu\n",
 				txreq.offset, txreq.size,
 				(txreq.offset &~PAGE_MASK) + txreq.size);
-			netbk_tx_err(netif, &txreq, i);
+			netbk_tx_err(netif, &txreq, idx);
 			continue;
 		}
 
@@ -1148,7 +1153,7 @@ static void net_tx_action(unsigned long unused)
 				GFP_ATOMIC | __GFP_NOWARN);
 		if (unlikely(skb == NULL)) {
 			DPRINTK("Can't allocate a skb in start_xmit.\n");
-			netbk_tx_err(netif, &txreq, i);
+			netbk_tx_err(netif, &txreq, idx);
 			break;
 		}
 
@@ -1161,7 +1166,7 @@ static void net_tx_action(unsigned long unused)
 
 			if (netbk_set_skb_gso(skb, gso)) {
 				kfree_skb(skb);
-				netbk_tx_err(netif, &txreq, i);
+				netbk_tx_err(netif, &txreq, idx);
 				continue;
 			}
 		}
@@ -1199,23 +1204,27 @@ static void net_tx_action(unsigned long unused)
 
 		mop = netbk_get_requests(netif, skb, txfrags, mop);
 
-		netif->tx.req_cons = i;
+		netif->tx.req_cons = idx;
 		netif_schedule_work(netif);
 
 		if ((mop - tx_map_ops) >= ARRAY_SIZE(tx_map_ops))
 			break;
 	}
 
-	if (mop == tx_map_ops)
-		return;
+	return mop - tx_map_ops;
+}
 
-	ret = HYPERVISOR_grant_table_op(
-		GNTTABOP_map_grant_ref, tx_map_ops, mop - tx_map_ops);
-	BUG_ON(ret);
+static void net_tx_submit(void)
+{
+	struct gnttab_map_grant_ref *mop;
+	struct sk_buff *skb;
 
 	mop = tx_map_ops;
 	while ((skb = __skb_dequeue(&tx_queue)) != NULL) {
 		struct xen_netif_tx_request *txp;
+		struct xen_netif *netif;
+		u16 pending_idx;
+		unsigned data_len;
 
 		pending_idx = *((u16 *)skb->data);
 		netif       = pending_tx_info[pending_idx].netif;
@@ -1286,6 +1295,27 @@ static void net_tx_action(unsigned long unused)
 				    struct netbk_tx_pending_inuse, list);
 		mod_timer(&netbk_tx_pending_timer, oldest->alloc_time + HZ);
 	}
+}
+
+/* Called after netfront has transmitted */
+static void net_tx_action(unsigned long unused)
+{
+	unsigned nr_mops;
+	int ret;
+
+	if (dealloc_cons != dealloc_prod)
+		net_tx_action_dealloc();
+
+	nr_mops = net_tx_build_mops();
+
+	if (nr_mops == 0)
+		return;
+
+	ret = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
+					tx_map_ops, nr_mops);
+	BUG_ON(ret);
+
+	net_tx_submit();
 }
 
 static void netif_idx_release(u16 pending_idx)
