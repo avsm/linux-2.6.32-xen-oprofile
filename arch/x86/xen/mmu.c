@@ -186,6 +186,26 @@ static inline unsigned p2m_index(unsigned long pfn)
 	return pfn % P2M_ENTRIES_PER_PAGE;
 }
 
+static int lookup_pte_fn(
+	pte_t *pte, struct page *pmd_page, unsigned long addr, void *data)
+{
+	uint64_t *ptep = (uint64_t *)data;
+	if (ptep)
+		*ptep = ((uint64_t)pfn_to_mfn(page_to_pfn(pmd_page)) <<
+			 PAGE_SHIFT) | ((unsigned long)pte & ~PAGE_MASK);
+	return 0;
+}
+
+int create_lookup_pte_addr(struct mm_struct *mm,
+			   unsigned long address,
+			   uint64_t *ptep)
+{
+	return apply_to_page_range(mm, address, PAGE_SIZE,
+				   lookup_pte_fn, ptep);
+}
+
+EXPORT_SYMBOL(create_lookup_pte_addr);
+
 /* Build the parallel p2m_top_mfn structures */
 static void __init xen_build_mfn_list_list(void)
 {

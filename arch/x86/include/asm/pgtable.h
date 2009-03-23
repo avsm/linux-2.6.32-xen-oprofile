@@ -618,6 +618,9 @@ static inline void clone_pgd_range(pgd_t *dst, pgd_t *src, int count)
        memcpy(dst, src, count * sizeof(pgd_t));
 }
 
+int create_lookup_pte_addr(struct mm_struct *mm,
+                           unsigned long address,
+                           uint64_t *ptep);
 
 #include <asm-generic/pgtable.h>
 #endif	/* __ASSEMBLY__ */
