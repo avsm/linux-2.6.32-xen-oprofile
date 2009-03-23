@@ -13,6 +13,9 @@ typedef struct {
 	int size;
 	struct mutex lock;
 	void *vdso;
+#ifdef CONFIG_XEN
+	int has_foreign_mappings;
+#endif
 } mm_context_t;
 
 #ifdef CONFIG_SMP

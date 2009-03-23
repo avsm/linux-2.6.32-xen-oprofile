@@ -1728,6 +1728,10 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 
 	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP;
 
+#if CONFIG_XEN
+	vma->vm_mm->context.has_foreign_mappings = 1;
+#endif
+
 	err = track_pfn_vma_new(vma, &prot, pfn, PAGE_ALIGN(size));
 	if (err) {
 		/*

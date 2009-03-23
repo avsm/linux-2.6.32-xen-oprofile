@@ -252,6 +252,9 @@ int get_user_pages_fast(unsigned long start, int nr_pages, int write,
 					(void __user *)start, len)))
 		goto slow_irqon;
 
+	if (unlikely(mm->context.has_foreign_mappings))
+		goto slow_irqon;
+
 	/*
 	 * XXX: batch / limit 'nr', to avoid large irq off latency
 	 * needs some instrumenting to determine the common sizes used by

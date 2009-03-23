@@ -1291,7 +1291,7 @@ void xen_exit_mmap(struct mm_struct *mm)
 	spin_lock(&mm->page_table_lock);
 
 	/* pgd may not be pinned in the error exit path of execve */
-	if (xen_page_pinned(mm->pgd))
+	if (xen_page_pinned(mm->pgd) && !mm->context.has_foreign_mappings)
 		xen_pgd_unpin(mm);
 
 	spin_unlock(&mm->page_table_lock);
