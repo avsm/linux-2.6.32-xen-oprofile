@@ -519,6 +519,13 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 	}
 
 check_pfn:
+
+#if defined(CONFIG_XEN) && defined(CONFIG_X86)
+	/* XEN: Covers user-space grant mappings (even of local pages). */
+	if (unlikely(vma->vm_flags & VM_FOREIGN))
+		return NULL;
+#endif
+
 	if (unlikely(pfn > highest_memmap_pfn)) {
 		print_bad_pte(vma, addr, pte, NULL);
 		return NULL;
@@ -1276,6 +1283,27 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			len--;
 			continue;
 		}
+
+#ifdef CONFIG_XEN
+		if (vma && (vma->vm_flags & VM_FOREIGN)) {
+			struct page **map = vma->vm_private_data;
+			int offset = (start - vma->vm_start) >> PAGE_SHIFT;
+			if (map[offset] != NULL) {
+			        if (pages) {
+			                struct page *page = map[offset];
+
+					pages[i] = page;
+					get_page(page);
+				}
+				if (vmas)
+					vmas[i] = vma;
+				i++;
+				start += PAGE_SIZE;
+				len--;
+				continue;
+			}
+		}
+#endif
 
 		if (!vma ||
 		    (vma->vm_flags & (VM_IO | VM_PFNMAP)) ||
