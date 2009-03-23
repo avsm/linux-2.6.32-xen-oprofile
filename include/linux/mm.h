@@ -200,6 +200,10 @@ struct vm_operations_struct {
 	 * original value of @ptep. */
 	pte_t (*zap_pte)(struct vm_area_struct *vma, 
 			 unsigned long addr, pte_t *ptep, int is_fullmm);
+
+	/* called before close() to indicate no more pages should be mapped */
+	void (*unmap)(struct vm_area_struct *area);
+
 #ifdef CONFIG_NUMA
 	/*
 	 * set_policy() op must add a reference to any non-NULL @new mempolicy

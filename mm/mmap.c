@@ -1788,6 +1788,12 @@ static void unmap_region(struct mm_struct *mm,
 	tlb_finish_mmu(tlb, start, end);
 }
 
+static inline void unmap_vma(struct vm_area_struct *vma)
+{
+	if (unlikely(vma->vm_ops && vma->vm_ops->unmap))
+		vma->vm_ops->unmap(vma);
+}
+
 /*
  * Create a list of vma's touched by the unmap, removing them from the mm's
  * vma list as we go..
@@ -1803,6 +1809,7 @@ detach_vmas_to_be_unmapped(struct mm_struct *mm, struct vm_area_struct *vma,
 	insertion_point = (prev ? &prev->vm_next : &mm->mmap);
 	do {
 		rb_erase(&vma->vm_rb, &mm->mm_rb);
+		unmap_vma(vma);
 		mm->map_count--;
 		tail_vma = vma;
 		vma = vma->vm_next;
@@ -2085,7 +2092,7 @@ EXPORT_SYMBOL(do_brk);
 void exit_mmap(struct mm_struct *mm)
 {
 	struct mmu_gather *tlb;
-	struct vm_area_struct *vma;
+	struct vm_area_struct *vma, *vma_tmp;
 	unsigned long nr_accounted = 0;
 	unsigned long end;
 
@@ -2106,6 +2113,9 @@ void exit_mmap(struct mm_struct *mm)
 	vma = mm->mmap;
 	if (!vma)	/* Can happen if dup_mmap() received an OOM */
 		return;
+
+	for (vma_tmp = mm->mmap; vma_tmp; vma_tmp = vma_tmp->vm_next)
+		unmap_vma(vma_tmp);
 
 	lru_add_drain();
 	flush_cache_mm(mm);
