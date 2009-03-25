@@ -32,7 +32,6 @@ blkback_pagemap_set(int idx, struct page *page,
 	BUG_ON(!blkback_pagemap);
 	BUG_ON(idx >= blkback_pagemap_size);
 
-	SetPageBlkback(page);
 	set_page_private(page, idx);
 
 	entry = blkback_pagemap + idx;
@@ -42,6 +41,7 @@ blkback_pagemap_set(int idx, struct page *page,
 		BUG();
 	}
 
+	entry->page  = page;
 	entry->domid = domid;
 	entry->busid = busid;
 	entry->gref  = gref;
@@ -56,7 +56,6 @@ blkback_pagemap_clear(struct page *page)
 	idx = (int)page_private(page);
 
 	BUG_ON(!blkback_pagemap);
-	BUG_ON(!PageBlkback(page));
 	BUG_ON(idx >= blkback_pagemap_size);
 
 	entry = blkback_pagemap + idx;
@@ -77,7 +76,6 @@ blkback_pagemap_read(struct page *page)
 	idx = (int)page_private(page);
 
 	BUG_ON(!blkback_pagemap);
-	BUG_ON(!PageBlkback(page));
 	BUG_ON(idx >= blkback_pagemap_size);
 
 	entry = blkback_pagemap + idx;
@@ -89,3 +87,18 @@ blkback_pagemap_read(struct page *page)
 	return *entry;
 }
 EXPORT_SYMBOL(blkback_pagemap_read);
+
+int
+blkback_pagemap_contains_page(struct page *page)
+{
+	struct blkback_pagemap *entry;
+	int idx = (int)page_private(page);
+
+	if (idx < 0 || idx >= blkback_pagemap_size)
+		return 0;
+
+	entry = blkback_pagemap + idx;
+
+	return (entry->page == page);
+}
+EXPORT_SYMBOL(blkback_pagemap_contains_page);

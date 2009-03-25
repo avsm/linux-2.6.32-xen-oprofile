@@ -8,6 +8,12 @@
 
 #include "blktap.h"
 
+#ifdef CONFIG_XEN_BLKDEV_BACKEND
+#include "../blkback/blkback-pagemap.h"
+#else
+#define blkback_pagemap_contains_page(page) 0
+#endif
+
 static int blktap_ring_major;
 
 static inline struct blktap *
@@ -112,10 +118,8 @@ blktap_ring_clear_pte(struct vm_area_struct *vma,
 	page    = map[offset];
 	if (page) {
 		ClearPageReserved(page);
-		if (PageBlkback(page)) {
-			ClearPageBlkback(page);
+		if (blkback_pagemap_contains_page(page))
 			set_page_private(page, 0);
-		}
 	}
 	map[offset] = NULL;
 

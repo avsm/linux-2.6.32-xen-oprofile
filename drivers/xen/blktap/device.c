@@ -21,6 +21,7 @@
 #else
 struct blkback_pagemap { };
 #define blkback_pagemap_read(page) BUG();
+#define blkback_pagemap_contains_page(page) 0
 #endif
 
 #if 0
@@ -281,10 +282,8 @@ blktap_device_fast_flush(struct blktap *tap, struct blktap_request *request)
 		page = map[offset];
 		if (page) {
 			ClearPageReserved(map[offset]);
-			if (PageBlkback(page)) {
-				ClearPageBlkback(page);
+			if (blkback_pagemap_contains_page(page))
 				set_page_private(page, 0);
-			}
 		}
 		map[offset] = NULL;
 
@@ -427,7 +426,9 @@ blktap_prep_foreign(struct blktap *tap,
 {
 	uint64_t ptep;
 	uint32_t flags;
+#ifdef BLKTAP_CHAINED_BLKTAP
 	struct page *tap_page;
+#endif
 	struct blktap_ring *ring;
 	struct blkback_pagemap map;
 	unsigned long uvaddr, kvaddr;
@@ -445,10 +446,13 @@ blktap_prep_foreign(struct blktap *tap,
 			  kvaddr, flags, map.gref, map.domid);
 	table->cnt++;
 
+
+#ifdef BLKTAP_CHAINED_BLKTAP
 	/* enable chained tap devices */
 	tap_page = pfn_to_page(__pa(kvaddr) >> PAGE_SHIFT);
 	set_page_private(tap_page, page_private(page));
 	SetPageBlkback(tap_page);
+#endif
 
 	if (xen_feature(XENFEAT_auto_translated_physmap))
 		return 0;
@@ -618,7 +622,7 @@ blktap_device_process_request(struct blktap *tap,
 				.first_sect = fsect,
 				.last_sect  = lsect };
 
-			if (PageBlkback(bvec->bv_page)) {
+			if (blkback_pagemap_contains_page(bvec->bv_page)) {
 				/* foreign page -- use xen */
 				if (blktap_prep_foreign(tap,
 							request,
