@@ -155,7 +155,7 @@ blktap_sysfs_pause_device(struct device *dev,
 	err = blktap_device_pause(tap);
 	if (!err) {
 		device_remove_file(dev, &dev_attr_pause);
-		device_create_file(dev, &dev_attr_resume);
+		err = device_create_file(dev, &dev_attr_resume);
 	}
 
 out:
@@ -188,7 +188,7 @@ blktap_sysfs_resume_device(struct device *dev,
 	err = blktap_device_resume(tap);
 	if (!err) {
 		device_remove_file(dev, &dev_attr_resume);
-		device_create_file(dev, &dev_attr_pause);
+		err = device_create_file(dev, &dev_attr_pause);
 	}
 
 out:
@@ -298,6 +298,7 @@ blktap_sysfs_create(struct blktap *tap)
 {
 	struct blktap_ring *ring;
 	struct device *dev;
+	int err;
 
 	if (!class)
 		return -ENODEV;
@@ -309,17 +310,36 @@ blktap_sysfs_create(struct blktap *tap)
 	if (IS_ERR(dev))
 		return PTR_ERR(dev);
 
-	ring->dev       = dev;
+	ring->dev = dev;
 
 	mutex_init(&ring->sysfs_mutex);
 	atomic_set(&ring->sysfs_refcnt, 0);
 
-	device_create_file(dev, &dev_attr_name);
-	device_create_file(dev, &dev_attr_remove);
-	device_create_file(dev, &dev_attr_pause);
-	device_create_file(dev, &dev_attr_debug);
+
+	printk(KERN_CRIT "%s: adding attributes for dev %p\n", __func__, dev);
+	err = device_create_file(dev, &dev_attr_name);
+	if (err)
+		goto out;
+	err = device_create_file(dev, &dev_attr_remove);
+	if (err)
+		goto out_unregister_name;
+	err = device_create_file(dev, &dev_attr_pause);
+	if (err)
+		goto out_unregister_remove;
+	err = device_create_file(dev, &dev_attr_debug);
+	if (err)
+		goto out_unregister_pause;
 
 	return 0;
+
+out_unregister_pause:
+	device_remove_file(dev, &dev_attr_pause);
+out_unregister_remove:
+	device_remove_file(dev, &dev_attr_remove);
+out_unregister_name:
+	device_remove_file(dev, &dev_attr_name);
+out:
+	return err;
 }
 
 int
@@ -327,6 +347,8 @@ blktap_sysfs_destroy(struct blktap *tap)
 {
 	struct blktap_ring *ring;
 	struct device *dev;
+
+	printk(KERN_CRIT "%s\n", __func__);
 
 	ring = &tap->ring;
 	dev  = ring->dev;
@@ -338,23 +360,12 @@ blktap_sysfs_destroy(struct blktap *tap)
 				     !atomic_read(&tap->ring.sysfs_refcnt)))
 		return -EAGAIN;
 
-	printk(KERN_CRIT "%s: putting dev %p\n", __func__, dev);
 	put_device(dev);
+	device_schedule_callback(dev, device_unregister);
 
 	return 0;
 }
 
-static void
-blktap_sysfs_device_release(struct device *dev)
-{
-	printk(KERN_CRIT "%s: removing attributes for dev %p\n", __func__, dev);
-	device_remove_file(dev, &dev_attr_name);
-	device_remove_file(dev, &dev_attr_remove);
-	device_remove_file(dev, &dev_attr_pause);
-	device_remove_file(dev, &dev_attr_resume);
-	device_remove_file(dev, &dev_attr_debug);
-//	device_destroy(class, ring->devno);
-}
 static ssize_t
 blktap_sysfs_show_verbosity(struct class *class, char *buf)
 {
@@ -417,6 +428,7 @@ int
 blktap_sysfs_init(void)
 {
 	struct class *cls;
+	int err;
 
 	if (class)
 		return -EEXIST;
@@ -425,11 +437,16 @@ blktap_sysfs_init(void)
 	if (IS_ERR(cls))
 		return PTR_ERR(cls);
 
-	cls->dev_release = blktap_sysfs_device_release;
-
-	class_create_file(cls, &class_attr_verbosity);
-	class_create_file(cls, &class_attr_devices);
+	err = class_create_file(cls, &class_attr_verbosity);
+	if (err)
+		goto out_unregister;
+	err = class_create_file(cls, &class_attr_devices);
+	if (err)
+		goto out_unregister;
 
 	class = cls;
 	return 0;
+out_unregister:
+	class_destroy(cls);
+	return err;
 }
