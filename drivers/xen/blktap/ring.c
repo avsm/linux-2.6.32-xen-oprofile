@@ -1,5 +1,10 @@
 #include <linux/module.h>
 #include <linux/signal.h>
+#include <linux/sched.h>
+#include <linux/poll.h>
+
+#include <asm/xen/page.h>
+#include <asm/xen/hypercall.h>
 
 #include "blktap.h"
 
@@ -25,7 +30,7 @@ blktap_read_ring(struct blktap *tap)
 	/* This is called to read responses from the ring. */
 	int usr_idx;
 	RING_IDX rc, rp;
-	blkif_response_t res;
+	struct blkif_response res;
 	struct blktap_ring *ring;
 	struct blktap_request *request;
 
@@ -66,16 +71,9 @@ blktap_read_ring(struct blktap *tap)
 	return 0;
 }
 
-static struct page *
-blktap_ring_nopage(struct vm_area_struct *vma,
-		   unsigned long address, int *type)
+static int blktap_ring_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
-	/*
-	 * if the page has not been mapped in by the driver then return
-	 * NOPAGE_SIGBUS to the domain.
-	 */
-
-	return NOPAGE_SIGBUS;
+	return VM_FAULT_SIGBUS;
 }
 
 static pte_t
@@ -139,9 +137,9 @@ blktap_ring_clear_pte(struct vm_area_struct *vma,
 		BUG_ON(xen_feature(XENFEAT_auto_translated_physmap));
 
 		copy = *ptep;
-		gnttab_set_unmap_op(&unmap[count], virt_to_machine(ptep), 
-				    GNTMAP_host_map 
-				    | GNTMAP_application_map 
+		gnttab_set_unmap_op(&unmap[count], virt_to_machine(ptep).maddr,
+				    GNTMAP_host_map
+				    | GNTMAP_application_map
 				    | GNTMAP_contains_pte,
 				    khandle->user);
 		count++;
@@ -205,7 +203,7 @@ blktap_ring_vm_close(struct vm_area_struct *vma)
 static struct vm_operations_struct blktap_ring_vm_operations = {
 	.close    = blktap_ring_vm_close,
 	.unmap    = blktap_ring_vm_unmap,
-	.nopage   = blktap_ring_nopage,
+	.fault   = blktap_ring_fault,
 	.zap_pte  = blktap_ring_clear_pte,
 };
 
@@ -274,7 +272,7 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 	int size, err;
 	struct page **map;
 	struct blktap *tap;
-	blkif_sring_t *sring;
+	struct blkif_sring *sring;
 	struct blktap_ring *ring;
 
 	tap   = filp->private_data;
@@ -293,7 +291,7 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 	}
 
 	/* Allocate the fe ring. */
-	sring = (blkif_sring_t *)get_zeroed_page(GFP_KERNEL);
+	sring = (struct blkif_sring *)get_zeroed_page(GFP_KERNEL);
 	if (!sring) {
 		BTERR("Couldn't alloc sring.\n");
 		goto fail_mem;

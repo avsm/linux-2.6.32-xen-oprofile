@@ -1506,6 +1506,13 @@ static int xen_pgd_alloc(struct mm_struct *mm)
 	return ret;
 }
 
+void xen_late_unpin_pgd(struct mm_struct *mm, pgd_t *pgd)
+{
+	if (xen_page_pinned(pgd))
+		__xen_pgd_unpin(mm, pgd);
+
+}
+
 static void xen_pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
 #ifdef CONFIG_X86_64

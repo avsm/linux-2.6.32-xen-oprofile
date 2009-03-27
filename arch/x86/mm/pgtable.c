@@ -267,6 +267,9 @@ out:
 
 void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
+	/* EEW */
+	extern void xen_late_unpin_pgd(struct mm_struct *mm, pgd_t *pgd);
+	xen_late_unpin_pgd(mm, pgd);
 	pgd_mop_up_pmds(mm, pgd);
 	pgd_dtor(pgd);
 	paravirt_pgd_free(mm, pgd);

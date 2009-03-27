@@ -1,11 +1,11 @@
 #ifndef _BLKTAP_H_
 #define _BLKTAP_H_
 
+#include <linux/mm.h>
 #include <linux/fs.h>
-#include <linux/poll.h>
 #include <linux/cdev.h>
 #include <xen/blkif.h>
-#include <xen/gnttab.h>
+#include <xen/grant_table.h>
 
 //#define ENABLE_PASSTHROUGH
 
@@ -29,7 +29,6 @@ extern int blktap_debug_level;
 #define BLKTAP_RING_FD               2
 #define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
-#define BLKTAP_SYSFS                 5
 #define BLKTAP_PAUSE_REQUESTED       6
 #define BLKTAP_PAUSED                7
 #define BLKTAP_SHUTDOWN_REQUESTED    8
@@ -67,7 +66,7 @@ extern int blktap_debug_level;
  * mmap_alloc is initialised to 2 and should be adjustable on the fly via
  * sysfs.
  */
-#define BLK_RING_SIZE		__RING_SIZE((blkif_sring_t *)0, PAGE_SIZE)
+#define BLK_RING_SIZE		__RING_SIZE((struct blkif_sring *)0, PAGE_SIZE)
 #define MAX_DYNAMIC_MEM		BLK_RING_SIZE
 #define MAX_PENDING_REQS	BLK_RING_SIZE
 #define MMAP_PAGES (MAX_PENDING_REQS * BLKIF_MAX_SEGMENTS_PER_REQUEST)
@@ -115,7 +114,7 @@ struct blktap_device {
 
 struct blktap_ring {
 	struct vm_area_struct         *vma;
-	blkif_front_ring_t             ring;
+	struct blkif_front_ring             ring;
 	struct vm_foreign_map          foreign_map;
 	unsigned long                  ring_vstart;
 	unsigned long                  user_vstart;
@@ -125,7 +124,7 @@ struct blktap_ring {
 	wait_queue_head_t              poll_wait;
 
 	dev_t                          devno;
-	struct class_device           *dev;
+	struct device                 *dev;
 	atomic_t                       sysfs_refcnt;
 	struct mutex                   sysfs_mutex;
 };
@@ -222,7 +221,7 @@ int blktap_device_pause(struct blktap *);
 int blktap_device_resume(struct blktap *);
 void blktap_device_restart(struct blktap *);
 void blktap_device_finish_request(struct blktap *,
-				  blkif_response_t *,
+				  struct blkif_response *,
 				  struct blktap_request *);
 void blktap_device_fail_pending_requests(struct blktap *);
 #ifdef ENABLE_PASSTHROUGH

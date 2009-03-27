@@ -1,5 +1,6 @@
 #include <linux/spinlock.h>
 #include <xen/balloon.h>
+#include <linux/sched.h>
 
 #include "blktap.h"
 

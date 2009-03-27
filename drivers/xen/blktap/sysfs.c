@@ -1,6 +1,7 @@
 #include <linux/types.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/sched.h>
 
 #include "blktap.h"
 
@@ -36,16 +37,18 @@ blktap_sysfs_exit(struct blktap *tap)
 	blktap_sysfs_put(tap);
 }
 
-static ssize_t blktap_sysfs_pause_device(struct class_device *, const char *, size_t);
+#define CLASS_DEVICE_ATTR(a,b,c,d) DEVICE_ATTR(a,b,c,d)
+
+static ssize_t blktap_sysfs_pause_device(struct device *, struct device_attribute *, const char *, size_t);
 CLASS_DEVICE_ATTR(pause, S_IWUSR, NULL, blktap_sysfs_pause_device);
-static ssize_t blktap_sysfs_resume_device(struct class_device *, const char *, size_t);
+static ssize_t blktap_sysfs_resume_device(struct device *, struct device_attribute *, const char *, size_t);
 CLASS_DEVICE_ATTR(resume, S_IWUSR, NULL, blktap_sysfs_resume_device);
 
 static ssize_t
-blktap_sysfs_set_name(struct class_device *dev, const char *buf, size_t size)
+blktap_sysfs_set_name(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
 	int err;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	blktap_sysfs_enter(tap);
 
@@ -79,10 +82,10 @@ out:
 }
 
 static ssize_t
-blktap_sysfs_get_name(struct class_device *dev, char *buf)
+blktap_sysfs_get_name(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	ssize_t size;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	blktap_sysfs_enter(tap);
 
@@ -101,11 +104,12 @@ CLASS_DEVICE_ATTR(name, S_IRUSR | S_IWUSR,
 		  blktap_sysfs_get_name, blktap_sysfs_set_name);
 
 static ssize_t
-blktap_sysfs_remove_device(struct class_device *dev,
+blktap_sysfs_remove_device(struct device *dev,
+			   struct device_attribute *attr,
 			   const char *buf, size_t size)
 {
 	int err;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	if (!tap->ring.dev)
 		return size;
@@ -120,11 +124,12 @@ blktap_sysfs_remove_device(struct class_device *dev,
 CLASS_DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
 
 static ssize_t
-blktap_sysfs_pause_device(struct class_device *dev,
+blktap_sysfs_pause_device(struct device *dev,
+			  struct device_attribute *attr,
 			  const char *buf, size_t size)
 {
 	int err;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	blktap_sysfs_enter(tap);
 
@@ -149,8 +154,8 @@ blktap_sysfs_pause_device(struct class_device *dev,
 
 	err = blktap_device_pause(tap);
 	if (!err) {
-		class_device_remove_file(dev, &class_device_attr_pause);
-		class_device_create_file(dev, &class_device_attr_resume);
+		device_remove_file(dev, &dev_attr_pause);
+		device_create_file(dev, &dev_attr_resume);
 	}
 
 out:
@@ -160,11 +165,12 @@ out:
 }
 
 static ssize_t
-blktap_sysfs_resume_device(struct class_device *dev,
+blktap_sysfs_resume_device(struct device *dev,
+			   struct device_attribute *attr,
 			   const char *buf, size_t size)
 {
 	int err;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	blktap_sysfs_enter(tap);
 
@@ -181,8 +187,8 @@ blktap_sysfs_resume_device(struct class_device *dev,
 
 	err = blktap_device_resume(tap);
 	if (!err) {
-		class_device_remove_file(dev, &class_device_attr_resume);
-		class_device_create_file(dev, &class_device_attr_pause);
+		device_remove_file(dev, &dev_attr_resume);
+		device_create_file(dev, &dev_attr_pause);
 	}
 
 out:
@@ -194,12 +200,12 @@ out:
 
 #ifdef ENABLE_PASSTHROUGH
 static ssize_t
-blktap_sysfs_enable_passthrough(struct class_device *dev,
+blktap_sysfs_enable_passthrough(struct device *dev,
 				const char *buf, size_t size)
 {
 	int err;
 	unsigned major, minor;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	BTINFO("passthrough request enabled\n");
 
@@ -237,11 +243,11 @@ out:
 #endif
 
 static ssize_t
-blktap_sysfs_debug_device(struct class_device *dev, char *buf)
+blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	char *tmp;
 	int i, ret;
-	struct blktap *tap = (struct blktap *)dev->class_data;
+	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	tmp = buf;
 	blktap_sysfs_get(tap);
@@ -291,29 +297,27 @@ int
 blktap_sysfs_create(struct blktap *tap)
 {
 	struct blktap_ring *ring;
-	struct class_device *dev;
+	struct device *dev;
 
 	if (!class)
 		return -ENODEV;
 
 	ring = &tap->ring;
 
-	dev = class_device_create(class, NULL, ring->devno,
-				  NULL, "blktap%d", tap->minor);
+	dev = device_create(class, NULL, ring->devno,
+			    tap, "blktap%d", tap->minor);
 	if (IS_ERR(dev))
 		return PTR_ERR(dev);
 
 	ring->dev       = dev;
-	dev->class_data = tap;
 
 	mutex_init(&ring->sysfs_mutex);
 	atomic_set(&ring->sysfs_refcnt, 0);
-	set_bit(BLKTAP_SYSFS, &tap->dev_inuse);
 
-	class_device_create_file(dev, &class_device_attr_name);
-	class_device_create_file(dev, &class_device_attr_remove);
-	class_device_create_file(dev, &class_device_attr_pause);
-	class_device_create_file(dev, &class_device_attr_debug);
+	device_create_file(dev, &dev_attr_name);
+	device_create_file(dev, &dev_attr_remove);
+	device_create_file(dev, &dev_attr_pause);
+	device_create_file(dev, &dev_attr_debug);
 
 	return 0;
 }
@@ -322,7 +326,7 @@ int
 blktap_sysfs_destroy(struct blktap *tap)
 {
 	struct blktap_ring *ring;
-	struct class_device *dev;
+	struct device *dev;
 
 	ring = &tap->ring;
 	dev  = ring->dev;
@@ -334,19 +338,23 @@ blktap_sysfs_destroy(struct blktap *tap)
 				     !atomic_read(&tap->ring.sysfs_refcnt)))
 		return -EAGAIN;
 
-	/* XXX: is it safe to remove the class from a sysfs attribute? */
-	class_device_remove_file(dev, &class_device_attr_name);
-	class_device_remove_file(dev, &class_device_attr_remove);
-	class_device_remove_file(dev, &class_device_attr_pause);
-	class_device_remove_file(dev, &class_device_attr_resume);
-	class_device_remove_file(dev, &class_device_attr_debug);
-	class_device_destroy(class, ring->devno);
-
-	clear_bit(BLKTAP_SYSFS, &tap->dev_inuse);
+	printk(KERN_CRIT "%s: putting dev %p\n", __func__, dev);
+	put_device(dev);
 
 	return 0;
 }
 
+static void
+blktap_sysfs_device_release(struct device *dev)
+{
+	printk(KERN_CRIT "%s: removing attributes for dev %p\n", __func__, dev);
+	device_remove_file(dev, &dev_attr_name);
+	device_remove_file(dev, &dev_attr_remove);
+	device_remove_file(dev, &dev_attr_pause);
+	device_remove_file(dev, &dev_attr_resume);
+	device_remove_file(dev, &dev_attr_debug);
+//	device_destroy(class, ring->devno);
+}
 static ssize_t
 blktap_sysfs_show_verbosity(struct class *class, char *buf)
 {
@@ -416,6 +424,8 @@ blktap_sysfs_init(void)
 	cls = class_create(THIS_MODULE, "blktap2");
 	if (IS_ERR(cls))
 		return PTR_ERR(cls);
+
+	cls->dev_release = blktap_sysfs_device_release;
 
 	class_create_file(cls, &class_attr_verbosity);
 	class_create_file(cls, &class_attr_devices);

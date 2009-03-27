@@ -1,3 +1,4 @@
+#include <linux/version.h> /* XXX Remove uses of VERSION instead. */
 #include <linux/fs.h>
 #include <linux/blkdev.h>
 #include <linux/cdrom.h>
@@ -9,6 +10,9 @@
 
 #include <xen/xenbus.h>
 #include <xen/interface/io/blkif.h>
+
+#include <asm/xen/page.h>
+#include <asm/xen/hypercall.h>
 
 #include "blktap.h"
 
@@ -39,10 +43,10 @@ dev_to_blktap(struct blktap_device *dev)
 }
 
 static int
-blktap_device_open(struct inode *inode, struct file *filep)
+blktap_device_open(struct block_device * bd, fmode_t mode)
 {
 	struct blktap *tap;
-	struct blktap_device *dev = inode->i_bdev->bd_disk->private_data;
+	struct blktap_device *dev = bd->bd_disk->private_data;
 
 	if (!dev)
 		return -ENOENT;
@@ -58,9 +62,9 @@ blktap_device_open(struct inode *inode, struct file *filep)
 }
 
 static int
-blktap_device_release(struct inode *inode, struct file *filep)
+blktap_device_release(struct gendisk *gd, fmode_t mode)
 {
-	struct blktap_device *dev = inode->i_bdev->bd_disk->private_data;
+	struct blktap_device *dev = gd->private_data;
 	struct blktap *tap = dev_to_blktap(dev);
 
 	dev->users--;
@@ -88,7 +92,7 @@ blktap_device_getgeo(struct block_device *bd, struct hd_geometry *hg)
 }
 
 static int
-blktap_device_ioctl(struct inode *inode, struct file *filep,
+blktap_device_ioctl(struct block_device *bd, fmode_t mode,
 		    unsigned command, unsigned long argument)
 {
 	int i;
@@ -99,7 +103,6 @@ blktap_device_ioctl(struct inode *inode, struct file *filep,
 	switch (command) {
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,16)
 	case HDIO_GETGEO: {
-		struct block_device *bd = inode->i_bdev;
 		struct hd_geometry geo;
 		int ret;
 
@@ -163,7 +166,7 @@ blktap_map_uaddr_fn(pte_t *ptep, struct page *pmd_page,
 
 	BTDBG("ptep %p -> %012llx\n", ptep, pte_val(*pte));
 	set_pte(ptep, *pte);
-	xen_invlpg(addr);
+	__flush_tlb_single(addr);
 	return 0;
 }
 
@@ -182,7 +185,7 @@ blktap_umap_uaddr_fn(pte_t *ptep, struct page *pmd_page,
 
 	BTDBG("ptep %p\n", ptep);
 	pte_clear(mm, addr, ptep);
-	xen_invlpg(addr);
+	__flush_tlb_single(addr);
 	return 0;
 }
 
@@ -195,16 +198,18 @@ blktap_umap_uaddr(struct mm_struct *mm, unsigned long address)
 
 static void
 blktap_device_end_dequeued_request(struct blktap_device *dev,
-				   struct request *req, int uptodate)
+				   struct request *req, int error)
 {
+	unsigned long flags;
 	int ret;
 
-	ret = end_that_request_first(req, uptodate, req->hard_nr_sectors);
-	BUG_ON(ret);
+	//spin_lock_irq(&dev->lock);
+	spin_lock_irqsave(dev->gd->queue->queue_lock, flags);
+	ret = __blk_end_request(req, error, blk_rq_bytes(req));
+	spin_unlock_irqrestore(dev->gd->queue->queue_lock, flags);
+	//spin_unlock_irq(&dev->lock);
 
-	spin_lock_irq(&dev->lock);
-	end_that_request_last(req, uptodate);
-	spin_unlock_irq(&dev->lock);
+	BUG_ON(ret);
 }
 
 /*
@@ -361,7 +366,7 @@ blktap_device_fail_pending_requests(struct blktap *tap)
 
 		blktap_unmap(tap, request);
 		req = (struct request *)(unsigned long)request->id;
-		blktap_device_end_dequeued_request(dev, req, 0);
+		blktap_device_end_dequeued_request(dev, req, -EIO);
 		blktap_request_free(tap, request);
 	}
 
@@ -381,10 +386,10 @@ blktap_device_fail_pending_requests(struct blktap *tap)
  */
 void
 blktap_device_finish_request(struct blktap *tap,
-			     blkif_response_t *res,
+			     struct blkif_response *res,
 			     struct blktap_request *request)
 {
-	int uptodate;
+	int ret;
 	struct request *req;
 	struct blktap_device *dev;
 
@@ -393,7 +398,7 @@ blktap_device_finish_request(struct blktap *tap,
 	blktap_unmap(tap, request);
 
 	req = (struct request *)(unsigned long)request->id;
-	uptodate = (res->status == BLKIF_RSP_OKAY);
+	ret = res->status == BLKIF_RSP_OKAY ? 0 : -EIO;
 
 	BTDBG("req %p res status %d operation %d/%d id %lld\n", req,
 		res->status, res->operation, request->operation, res->id);
@@ -404,7 +409,7 @@ blktap_device_finish_request(struct blktap *tap,
 		if (unlikely(res->status != BLKIF_RSP_OKAY))
 			BTERR("Bad return from device data "
 				"request: %x\n", res->status);
-		blktap_device_end_dequeued_request(dev, req, uptodate);
+		blktap_device_end_dequeued_request(dev, req, ret);
 		break;
 	default:
 		BUG();
@@ -416,7 +421,7 @@ blktap_device_finish_request(struct blktap *tap,
 static int
 blktap_prep_foreign(struct blktap *tap,
 		    struct blktap_request *request,
-		    blkif_request_t *blkif_req,
+		    struct blkif_request *blkif_req,
 		    unsigned int seg, struct page *page,
 		    struct blktap_grant_table *table)
 {
@@ -464,7 +469,7 @@ blktap_prep_foreign(struct blktap *tap,
 static int
 blktap_map_foreign(struct blktap *tap,
 		   struct blktap_request *request,
-		   blkif_request_t *blkif_req,
+		   struct blkif_request *blkif_req,
 		   struct blktap_grant_table *table)
 {
 	struct page *page;
@@ -567,10 +572,10 @@ blktap_device_process_request(struct blktap *tap,
 			      struct blktap_request *request,
 			      struct request *req)
 {
-	struct bio *bio;
 	struct page *page;
 	struct bio_vec *bvec;
-	int idx, usr_idx, err;
+	int usr_idx, err;
+	struct req_iterator iter;
 	struct blktap_ring *ring;
 	struct blktap_grant_table table;
 	unsigned int fsect, lsect, nr_sects;
@@ -599,8 +604,7 @@ blktap_device_process_request(struct blktap *tap,
 	nr_sects = 0;
 	request->nr_pages = 0;
 	blkif_req.nr_segments = 0;
-	rq_for_each_bio(bio, req) {
-		bio_for_each_segment(bvec, bio, idx) {
+	rq_for_each_segment(bvec, req, iter) {
 			BUG_ON(blkif_req.nr_segments ==
 			       BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
@@ -649,7 +653,6 @@ blktap_device_process_request(struct blktap *tap,
 
 			blkif_req.nr_segments++;
 			request->nr_pages++;
-		}
 	}
 
 	if (blktap_map_foreign(tap, request, &blkif_req, &table))
@@ -777,7 +780,7 @@ static void
 blktap_device_run_queue(struct blktap *tap)
 {
 	int queued, err;
-	request_queue_t *rq;
+	struct request_queue *rq;
 	struct request *req;
 	struct blktap_ring *ring;
 	struct blktap_device *dev;
@@ -825,7 +828,8 @@ blktap_device_run_queue(struct blktap *tap)
 
 		BTDBG("req %p: dev %d cmd %p, sec 0x%llx, (0x%x/0x%lx) "
 		      "buffer:%p [%s], pending: %p\n", req, tap->minor,
-		      req->cmd, req->sector, req->current_nr_sectors,
+		      req->cmd, (unsigned long long)req->sector,
+		      req->current_nr_sectors,
 		      req->nr_sectors, req->buffer,
 		      rq_data_dir(req) ? "write" : "read", request);
 
@@ -838,7 +842,7 @@ blktap_device_run_queue(struct blktap *tap)
 		if (!err)
 			queued++;
 		else {
-			blktap_device_end_dequeued_request(dev, req, 0);
+			blktap_device_end_dequeued_request(dev, req, -EIO);
 			blktap_request_free(tap, request);
 		}
 
@@ -854,7 +858,7 @@ blktap_device_run_queue(struct blktap *tap)
  * dev->lock held on entry
  */
 static void
-blktap_device_do_request(request_queue_t *rq)
+blktap_device_do_request(struct request_queue *rq)
 {
 	struct request *req;
 	struct blktap *tap;
@@ -880,7 +884,8 @@ blktap_device_do_request(request_queue_t *rq)
 fail:
 	while ((req = elv_next_request(rq))) {
 		BTERR("device closed: failing secs %llu - %llu\n",
-		      req->sector, req->sector + req->nr_sectors);
+		      (unsigned long long)req->sector,
+		      (unsigned long long)req->sector + req->nr_sectors);
 		end_request(req, 0);
 	}
 }
@@ -1127,6 +1132,5 @@ void
 blktap_device_free(void)
 {
 	if (blktap_device_major)
-		if (unregister_blkdev(blktap_device_major, "tapdev"))
-			BTERR("blktap device unregister failed\n");
+		unregister_blkdev(blktap_device_major, "tapdev");
 }

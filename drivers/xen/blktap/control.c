@@ -1,5 +1,8 @@
 #include <linux/module.h>
+#include <linux/sched.h>
 #include <linux/miscdevice.h>
+
+#include <asm/uaccess.h>
 
 #include "blktap.h"
 
