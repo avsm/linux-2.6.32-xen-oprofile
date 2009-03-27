@@ -107,6 +107,9 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_PFN_AT_MMAP	0x40000000	/* PFNMAP vma that is fully mapped at mmap time */
 #ifdef CONFIG_XEN
 #define VM_FOREIGN	0x80000000      /* Has pages belonging to another VM */
+struct vm_foreign_map {
+        struct page **map;
+};
 #endif
 
 #ifndef VM_STACK_DEFAULT_FLAGS		/* arch can override this */

@@ -1286,7 +1286,9 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 
 #ifdef CONFIG_XEN
 		if (vma && (vma->vm_flags & VM_FOREIGN)) {
-			struct page **map = vma->vm_private_data;
+			struct vm_foreign_map *foreign_map =
+				vma->vm_private_data;
+			struct page **map = foreign_map->map;
 			int offset = (start - vma->vm_start) >> PAGE_SHIFT;
 			if (map[offset] != NULL) {
 			        if (pages) {
