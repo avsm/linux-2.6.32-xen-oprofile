@@ -1071,7 +1071,7 @@ blktap_device_create(struct blktap *tap)
 	gd->fops = &blktap_device_file_operations;
 	gd->private_data = dev;
 
-	dev->lock = SPIN_LOCK_UNLOCKED;
+	spin_lock_init(&dev->lock);
 	rq = blk_init_queue(blktap_device_do_request, &dev->lock);
 	if (!rq)
 		goto error;
