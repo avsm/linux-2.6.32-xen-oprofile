@@ -1503,10 +1503,17 @@ static void *xen_kmap_atomic_pte(struct page *page, enum km_type type)
 #ifdef CONFIG_X86_32
 static __init pte_t mask_rw_pte(pte_t *ptep, pte_t pte)
 {
-	/* If there's an existing pte, then don't allow _PAGE_RW to be set */
-	if (pte_val_ma(*ptep) & _PAGE_PRESENT)
+	pte_t oldpte = *ptep;
+
+	if (pte_flags(oldpte) & _PAGE_PRESENT) {
+		/* Don't allow existing IO mappings to be overridden */
+		if (pte_flags(oldpte) & _PAGE_IOMAP)
+			pte = oldpte;
+
+		/* Don't allow _PAGE_RW to be set on existing pte */
 		pte = __pte_ma(((pte_val_ma(*ptep) & _PAGE_RW) | ~_PAGE_RW) &
 			       pte_val_ma(pte));
+	}
 
 	return pte;
 }
