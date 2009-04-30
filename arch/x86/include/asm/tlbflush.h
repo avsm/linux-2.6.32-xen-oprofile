@@ -89,6 +89,10 @@ static inline void __flush_tlb_one(unsigned long addr)
 
 #ifndef CONFIG_SMP
 
+static inline void __init init_smp_flush(void)
+{
+}
+
 #define flush_tlb() __flush_tlb()
 #define flush_tlb_all() __flush_tlb_all()
 #define local_flush_tlb() __flush_tlb()
@@ -128,6 +132,8 @@ static inline void reset_lazy_tlbstate(void)
 #include <asm/smp.h>
 
 #define local_flush_tlb() __flush_tlb()
+
+extern void init_smp_flush(void);
 
 extern void flush_tlb_all(void);
 extern void flush_tlb_current_task(void);

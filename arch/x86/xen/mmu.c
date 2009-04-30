@@ -1285,6 +1285,13 @@ static void xen_flush_tlb_single(unsigned long addr)
 	preempt_enable();
 }
 
+/*
+ * Flush tlb on other cpus.  Xen can do this via a single hypercall
+ * rather than explicit IPIs, which has the nice property of avoiding
+ * any cpus which don't actually have dirty tlbs.  Unfortunately it
+ * doesn't give us an opportunity to kick out cpus which are in lazy
+ * tlb state, so we may end up reflushing some cpus unnecessarily.
+ */
 static void xen_flush_tlb_others(const struct cpumask *cpus,
 				 struct mm_struct *mm, unsigned long va)
 {
