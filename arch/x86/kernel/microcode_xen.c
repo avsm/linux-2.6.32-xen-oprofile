@@ -27,7 +27,7 @@ struct xen_microcode {
 	char data[0];
 };
 
-static void xen_microcode_update(int cpu)
+static int xen_microcode_update(int cpu)
 {
 	int err;
 	struct xen_platform_op op;
@@ -40,7 +40,7 @@ static void xen_microcode_update(int cpu)
 		 * other cpus explicitly (besides, these vcpu numbers
 		 * have no relationship to underlying physical cpus).
 		 */
-		return;
+		return 0;
 	}
 
 	op.cmd = XENPF_microcode_update;
@@ -51,17 +51,20 @@ static void xen_microcode_update(int cpu)
 
 	if (err != 0)
 		printk(KERN_WARNING "microcode_xen: microcode update failed: %d\n", err);
+
+	return err;
 }
 
-static int xen_request_microcode_fw(int cpu, struct device *device)
+static enum ucode_state xen_request_microcode_fw(int cpu, struct device *device)
 {
 	char name[FIRMWARE_NAME_MAX];
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	const struct firmware *firmware;
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
+	enum ucode_state ret;
 	struct xen_microcode *uc;
 	size_t size;
-	int ret;
+	int err;
 
 	if (c->x86_vendor == X86_VENDOR_INTEL) {
 		BUG_ON(cpu != raw_smp_processor_id());
@@ -70,12 +73,12 @@ static int xen_request_microcode_fw(int cpu, struct device *device)
 	} else if (c->x86_vendor == X86_VENDOR_AMD) {
 		snprintf(name, sizeof(name), "amd-ucode/microcode_amd.bin");
 	} else
-		return -ENODEV;
+		return UCODE_NFOUND;
 
-	ret = request_firmware(&firmware, name, device);
-	if (ret) {
+	err = request_firmware(&firmware, name, device);
+	if (err) {
 		pr_debug("microcode: data file %s load failed\n", name);
-		return ret;
+		return UCODE_NFOUND;
 	}
 
 	/*
@@ -92,12 +95,12 @@ static int xen_request_microcode_fw(int cpu, struct device *device)
 		uci->mc = NULL;
 	}
 
-	ret = -ENOMEM;
+	ret = UCODE_ERROR;
 	uc = vmalloc(sizeof(*uc) + size);
 	if (uc == NULL)
 		goto out;
 
-	ret = 0;
+	ret = UCODE_OK;
 	uc->len = size;
 	memcpy(uc->data, firmware->data, uc->len);
 
@@ -109,11 +112,12 @@ out:
 	return ret;
 }
 
-static int xen_request_microcode_user(int cpu, const void __user *buf, size_t size)
+static enum ucode_state xen_request_microcode_user(int cpu,
+						   const void __user *buf, size_t size)
 {
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 	struct xen_microcode *uc;
-	int ret;
+	enum ucode_state ret;
 	size_t unread;
 
 	if (cpu != 0) {
@@ -127,14 +131,14 @@ static int xen_request_microcode_user(int cpu, const void __user *buf, size_t si
 		uci->mc = NULL;
 	}
 
-	ret = -ENOMEM;
+	ret = UCODE_ERROR;
 	uc = vmalloc(sizeof(*uc) + size);
 	if (uc == NULL)
 		goto out;
 
 	uc->len = size;
 
-	ret = -EFAULT;
+	ret = UCODE_NFOUND;
 
 	/* XXX This sporadically returns uncopied bytes, so we return
 	   EFAULT.  As far as I can see, the usermode code
@@ -147,7 +151,7 @@ static int xen_request_microcode_user(int cpu, const void __user *buf, size_t si
 		goto out;
 	}
 
-	ret = 0;
+	ret = UCODE_OK;
 
 out:
 	if (ret == 0)
