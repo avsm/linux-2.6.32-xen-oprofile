@@ -76,6 +76,13 @@ void mtrr_wrmsr(unsigned, unsigned, unsigned);
 int amd_init_mtrr(void);
 int cyrix_init_mtrr(void);
 int centaur_init_mtrr(void);
+#ifdef CONFIG_XEN
+void xen_init_mtrr(void);
+#else
+static inline void xen_init_mtrr(void)
+{
+}
+#endif
 
 extern int changed_by_mtrr_cleanup;
 extern int mtrr_cleanup(unsigned address_bits);

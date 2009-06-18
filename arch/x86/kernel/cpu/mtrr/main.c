@@ -670,6 +670,9 @@ void __init mtrr_bp_init(void)
 		}
 	}
 
+	/* Let Xen code override the above if it wants */
+	xen_init_mtrr();
+
 	if (mtrr_if) {
 		num_var_ranges = mtrr_if->num_var_ranges();
 		init_table();
