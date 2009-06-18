@@ -207,6 +207,7 @@ static __init void xen_init_cpuid_mask(void)
 	cpuid_leaf1_edx_mask =
 		~((1 << X86_FEATURE_MCE)  |  /* disable MCE */
 		  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
+		  (1 << X86_FEATURE_PAT)  |  /* disable PAT */
 		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
 
 	if (!xen_initial_domain())
