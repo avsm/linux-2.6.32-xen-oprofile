@@ -54,7 +54,7 @@
 #include "xenbus_probe.h"
 
 /* backend/<type>/<fe-uuid>/<id> => <type>-<fe-domid>-<id> */
-static int backend_bus_id(char bus_id[BUS_ID_SIZE], const char *nodename)
+static int backend_bus_id(char bus_id[XEN_BUS_ID_SIZE], const char *nodename)
 {
 	int domid, err;
 	const char *devid, *type, *frontend;
@@ -84,8 +84,8 @@ static int backend_bus_id(char bus_id[BUS_ID_SIZE], const char *nodename)
 	if (err)
 		return err;
 
-	if (snprintf(bus_id, BUS_ID_SIZE,
-		     "%.*s-%i-%s", typelen, type, domid, devid) >= BUS_ID_SIZE)
+	if (snprintf(bus_id, XEN_BUS_ID_SIZE,
+		     "%.*s-%i-%s", typelen, type, domid, devid) >= XEN_BUS_ID_SIZE)
 		return -ENOSPC;
 	return 0;
 }
