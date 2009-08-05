@@ -43,6 +43,7 @@
 #include <linux/mutex.h>
 #include <linux/list.h>
 #include <linux/sysdev.h>
+#include <linux/swap.h>
 
 #include <asm/page.h>
 #include <asm/pgalloc.h>
@@ -93,9 +94,6 @@ static struct balloon_stats balloon_stats;
 
 /* We increase/decrease in batches which fit in a page */
 static unsigned long frame_list[PAGE_SIZE / sizeof(unsigned long)];
-
-/* VM /proc information for memory */
-extern unsigned long totalram_pages;
 
 #ifdef CONFIG_HIGHMEM
 extern unsigned long totalhigh_pages;
