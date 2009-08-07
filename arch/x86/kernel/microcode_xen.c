@@ -57,7 +57,7 @@ static int xen_microcode_update(int cpu)
 
 static enum ucode_state xen_request_microcode_fw(int cpu, struct device *device)
 {
-	char name[FIRMWARE_NAME_MAX];
+	char name[30];
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	const struct firmware *firmware;
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
