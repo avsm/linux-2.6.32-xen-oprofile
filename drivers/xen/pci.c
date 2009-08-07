@@ -39,8 +39,10 @@ static int xen_add_device(struct device *dev)
 			.bus		= pci_dev->bus->number,
 			.devfn		= pci_dev->devfn,
 			.is_virtfn 	= 1,
+#ifdef CONFIG_PCI_IOV
 			.physfn.bus	= pci_dev->physfn->bus->number,
 			.physfn.devfn	= pci_dev->physfn->devfn,
+#endif
 		};
 
 		r = HYPERVISOR_physdev_op(PHYSDEVOP_manage_pci_add_ext,
