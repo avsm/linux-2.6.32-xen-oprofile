@@ -106,9 +106,9 @@ struct notifier_block device_nb = {
 	.notifier_call = xen_pci_notifier,
 };
 
-void __init register_xen_pci_notifier(void)
+static int __init register_xen_pci_notifier(void)
 {
-	bus_register_notifier(&pci_bus_type, &device_nb);
+	return bus_register_notifier(&pci_bus_type, &device_nb);
 }
 
 fs_initcall(register_xen_pci_notifier);
