@@ -224,6 +224,7 @@ static __init void xen_init_cpuid_mask(void)
 			  (1 << X86_FEATURE_ACPI));  /* disable ACPI */
 
 	ax = 1;
+	cx = 0;
 	xen_cpuid(&ax, &bx, &cx, &dx);
 
 	/* cpuid claims we support xsave; try enabling it to see what happens */
