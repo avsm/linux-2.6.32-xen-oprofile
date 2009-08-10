@@ -67,7 +67,6 @@ static enum ucode_state xen_request_microcode_fw(int cpu, struct device *device)
 	int err;
 
 	if (c->x86_vendor == X86_VENDOR_INTEL) {
-		BUG_ON(cpu != raw_smp_processor_id());
 		snprintf(name, sizeof(name), "intel-ucode/%02x-%02x-%02x",
 			 c->x86, c->x86_model, c->x86_mask);
 	} else if (c->x86_vendor == X86_VENDOR_AMD) {
