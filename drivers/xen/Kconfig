@@ -61,3 +61,7 @@ config XEN_SYS_HYPERVISOR
 	 hypervisor environment.  When running native or in another
 	 virtual environment, /sys/hypervisor will still be present,
 	 but will have no xen contents.
+
+config XEN_MCE
+       def_bool y
+       depends on XEN_DOM0 && X86_64 && X86_MCE_INTEL
