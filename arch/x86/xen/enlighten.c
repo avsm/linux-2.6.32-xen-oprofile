@@ -644,7 +644,7 @@ static u32 xen_safe_apic_wait_icr_idle(void)
         return 0;
 }
 
-static void set_xen_basic_apic_ops(void)
+static __init void set_xen_basic_apic_ops(void)
 {
 	apic->read = xen_apic_read;
 	apic->write = xen_apic_write;
