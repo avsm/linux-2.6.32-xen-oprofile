@@ -77,19 +77,22 @@ static int nilfs_mdt_create_block(struct inode *inode, unsigned long block,
 						     void *))
 {
 	struct the_nilfs *nilfs = NILFS_MDT(inode)->mi_nilfs;
-	struct nilfs_sb_info *writer = NULL;
 	struct super_block *sb = inode->i_sb;
 	struct nilfs_transaction_info ti;
 	struct buffer_head *bh;
 	int err;
 
 	if (!sb) {
-		writer = nilfs_get_writer(nilfs);
-		if (!writer) {
+		/*
+		 * Make sure this function is not called from any
+		 * read-only context.
+		 */
+		if (!nilfs->ns_writer) {
+			WARN_ON(1);
 			err = -EROFS;
 			goto out;
 		}
-		sb = writer->s_super;
+		sb = nilfs->ns_writer->s_super;
 	}
 
 	nilfs_transaction_begin(sb, &ti, 0);
@@ -127,8 +130,6 @@ static int nilfs_mdt_create_block(struct inode *inode, unsigned long block,
 		err = nilfs_transaction_commit(sb);
 	else
 		nilfs_transaction_abort(sb);
-	if (writer)
-		nilfs_put_writer(nilfs);
  out:
 	return err;
 }
@@ -299,7 +300,7 @@ int nilfs_mdt_delete_block(struct inode *inode, unsigned long block)
 	int err;
 
 	err = nilfs_bmap_delete(ii->i_bmap, block);
-	if (likely(!err)) {
+	if (!err || err == -ENOENT) {
 		nilfs_mdt_mark_dirty(inode);
 		nilfs_mdt_forget_block(inode, block);
 	}
@@ -429,6 +430,7 @@ nilfs_mdt_write_page(struct page *page, struct writeback_control *wbc)
 
 static struct address_space_operations def_mdt_aops = {
 	.writepage		= nilfs_mdt_write_page,
+	.sync_page		= block_sync_page,
 };
 
 static struct inode_operations def_mdt_iops;
@@ -448,7 +450,7 @@ struct inode *
 nilfs_mdt_new_common(struct the_nilfs *nilfs, struct super_block *sb,
 		     ino_t ino, gfp_t gfp_mask)
 {
-	struct inode *inode = nilfs_alloc_inode(sb);
+	struct inode *inode = nilfs_alloc_inode_common(nilfs);
 
 	if (!inode)
 		return NULL;

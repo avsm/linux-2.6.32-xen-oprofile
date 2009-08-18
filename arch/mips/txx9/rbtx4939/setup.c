@@ -498,6 +498,11 @@ static void __init rbtx4939_device_init(void)
 	tx4939_wdt_init();
 	tx4939_ata_init();
 	tx4939_rtc_init();
+	tx4939_dmac_init(0, 2);
+	tx4939_aclc_init();
+	platform_device_register_simple("txx9aclc-generic", -1, NULL, 0);
+	tx4939_sramc_init();
+	tx4939_rng_init();
 }
 
 static void __init rbtx4939_setup(void)
@@ -536,7 +541,7 @@ static void __init rbtx4939_setup(void)
 }
 
 struct txx9_board_vec rbtx4939_vec __initdata = {
-	.system = "Tothiba RBTX4939",
+	.system = "Toshiba RBTX4939",
 	.prom_init = rbtx4939_prom_init,
 	.mem_setup = rbtx4939_setup,
 	.irq_setup = rbtx4939_irq_setup,

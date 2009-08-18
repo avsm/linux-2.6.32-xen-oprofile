@@ -14,8 +14,6 @@
 
 KBUILD_DEFCONFIG := ip22_defconfig
 
-cflags-y := -ffunction-sections
-
 #
 # Select the object file format to substitute into the linker script.
 #
@@ -49,6 +47,9 @@ ifneq ($(SUBARCH),$(ARCH))
     CROSS_COMPILE := $(call cc-cross-prefix, $(tool-archpref)-linux-  $(tool-archpref)-linux-gnu-  $(tool-archpref)-unknown-linux-gnu-)
   endif
 endif
+
+cflags-y := -ffunction-sections
+cflags-y += $(call cc-option, -mno-check-zero-division)
 
 ifdef CONFIG_32BIT
 ld-emul			= $(32bit-emul)
@@ -166,7 +167,6 @@ libs-$(CONFIG_ARC)		+= arch/mips/fw/arc/
 libs-$(CONFIG_CFE)		+= arch/mips/fw/cfe/
 libs-$(CONFIG_SNIPROM)		+= arch/mips/fw/sni/
 libs-y				+= arch/mips/fw/lib/
-libs-$(CONFIG_SIBYTE_CFE)	+= arch/mips/sibyte/cfe/
 
 #
 # Board-dependent options and extra files
@@ -183,7 +183,6 @@ load-$(CONFIG_MACH_JAZZ)	+= 0xffffffff80080000
 # Common Alchemy Au1x00 stuff
 #
 core-$(CONFIG_SOC_AU1X00)	+= arch/mips/alchemy/common/
-cflags-$(CONFIG_SOC_AU1X00)	+= -I$(srctree)/arch/mips/include/asm/mach-au1x00
 
 #
 # AMD Alchemy Pb1000 eval board
@@ -280,6 +279,10 @@ load-$(CONFIG_MIPS_MTX1)	+= 0xffffffff80100000
 #
 libs-$(CONFIG_MIPS_XXS1500)	+= arch/mips/alchemy/xxs1500/
 load-$(CONFIG_MIPS_XXS1500)	+= 0xffffffff80100000
+
+# must be last for Alchemy systems for GPIO to work properly
+cflags-$(CONFIG_SOC_AU1X00)	+= -I$(srctree)/arch/mips/include/asm/mach-au1x00
+
 
 #
 # Cobalt Server
@@ -472,12 +475,12 @@ endif
 # Simplified: what IP22 does at 128MB+ in ksegN, IP28 does at 512MB+ in xkphys
 #
 ifdef CONFIG_SGI_IP28
-  ifeq ($(call cc-option-yn,-mr10k-cache-barrier=1), n)
-      $(error gcc doesn't support needed option -mr10k-cache-barrier=1)
+  ifeq ($(call cc-option-yn,-mr10k-cache-barrier=store), n)
+      $(error gcc doesn't support needed option -mr10k-cache-barrier=store)
   endif
 endif
 core-$(CONFIG_SGI_IP28)		+= arch/mips/sgi-ip22/
-cflags-$(CONFIG_SGI_IP28)	+= -mr10k-cache-barrier=1 -I$(srctree)/arch/mips/include/asm/mach-ip28
+cflags-$(CONFIG_SGI_IP28)	+= -mr10k-cache-barrier=store -I$(srctree)/arch/mips/include/asm/mach-ip28
 load-$(CONFIG_SGI_IP28)		+= 0xa800000020004000
 
 #
@@ -673,6 +676,9 @@ libs-y			+= arch/mips/lib/
 core-y			+= arch/mips/kernel/ arch/mips/mm/ arch/mips/math-emu/
 
 drivers-$(CONFIG_OPROFILE)	+= arch/mips/oprofile/
+
+# suspend and hibernation support
+drivers-$(CONFIG_PM)	+= arch/mips/power/
 
 ifdef CONFIG_LASAT
 rom.bin rom.sw: vmlinux

@@ -49,6 +49,7 @@
 #include <linux/device.h>
 #include <linux/idr.h>
 #include <linux/major.h>
+#include <linux/file.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_driver.h>
@@ -173,65 +174,58 @@ static const struct file_operations osd_fops = {
 	.unlocked_ioctl = osd_uld_ioctl,
 };
 
-struct osd_dev *osduld_path_lookup(const char *path)
+struct osd_dev *osduld_path_lookup(const char *name)
 {
-	struct nameidata nd;
-	struct inode *inode;
-	struct cdev *cdev;
-	struct osd_uld_device *uninitialized_var(oud);
+	struct osd_uld_device *oud;
+	struct osd_dev *od;
+	struct file *file;
 	int error;
 
-	if (!path || !*path) {
+	if (!name || !*name) {
 		OSD_ERR("Mount with !path || !*path\n");
 		return ERR_PTR(-EINVAL);
 	}
 
-	error = path_lookup(path, LOOKUP_FOLLOW, &nd);
-	if (error) {
-		OSD_ERR("path_lookup of %s faild=>%d\n", path, error);
-		return ERR_PTR(error);
+	od = kzalloc(sizeof(*od), GFP_KERNEL);
+	if (!od)
+		return ERR_PTR(-ENOMEM);
+
+	file = filp_open(name, O_RDWR, 0);
+	if (IS_ERR(file)) {
+		error = PTR_ERR(file);
+		goto free_od;
 	}
 
-	inode = nd.path.dentry->d_inode;
-	error = -EINVAL; /* Not the right device e.g osd_uld_device */
-	if (!S_ISCHR(inode->i_mode)) {
-		OSD_DEBUG("!S_ISCHR()\n");
-		goto out;
+	if (file->f_op != &osd_fops){
+		error = -EINVAL;
+		goto close_file;
 	}
 
-	cdev = inode->i_cdev;
-	if (!cdev) {
-		OSD_ERR("Before mounting an OSD Based filesystem\n");
-		OSD_ERR("  user-mode must open+close the %s device\n", path);
-		OSD_ERR("  Example: bash: echo < %s\n", path);
-		goto out;
-	}
+	oud = file->private_data;
 
-	/* The Magic wand. Is it our char-dev */
-	/* TODO: Support sg devices */
-	if (cdev->owner != THIS_MODULE) {
-		OSD_ERR("Error mounting %s - is not an OSD device\n", path);
-		goto out;
-	}
+	*od = oud->od;
+	od->file = file;
 
-	oud = container_of(cdev, struct osd_uld_device, cdev);
+	return od;
 
-	__uld_get(oud);
-	error = 0;
-
-out:
-	path_put(&nd.path);
-	return error ? ERR_PTR(error) : &oud->od;
+close_file:
+	fput(file);
+free_od:
+	kfree(od);
+	return ERR_PTR(error);
 }
 EXPORT_SYMBOL(osduld_path_lookup);
 
 void osduld_put_device(struct osd_dev *od)
 {
-	if (od) {
-		struct osd_uld_device *oud = container_of(od,
-						struct osd_uld_device, od);
 
-		__uld_put(oud);
+	if (od && !IS_ERR(od)) {
+		struct osd_uld_device *oud = od->file->private_data;
+
+		BUG_ON(od->scsi_device != oud->od.scsi_device);
+
+		fput(od->file);
+		kfree(od);
 	}
 }
 EXPORT_SYMBOL(osduld_put_device);

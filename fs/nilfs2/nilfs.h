@@ -236,7 +236,8 @@ extern int nilfs_sync_file(struct file *, struct dentry *, int);
 
 /* ioctl.c */
 long nilfs_ioctl(struct file *, unsigned int, unsigned long);
-int nilfs_ioctl_prepare_clean_segments(struct the_nilfs *, void __user *);
+int nilfs_ioctl_prepare_clean_segments(struct the_nilfs *, struct nilfs_argv *,
+				       void **);
 
 /* inode.c */
 extern struct inode *nilfs_new_inode(struct inode *, int);
@@ -262,6 +263,7 @@ extern void nilfs_dirty_inode(struct inode *);
 extern struct dentry *nilfs_get_parent(struct dentry *);
 
 /* super.c */
+extern struct inode *nilfs_alloc_inode_common(struct the_nilfs *);
 extern struct inode *nilfs_alloc_inode(struct super_block *);
 extern void nilfs_destroy_inode(struct inode *);
 extern void nilfs_error(struct super_block *, const char *, const char *, ...)

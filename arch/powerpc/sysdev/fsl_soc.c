@@ -208,52 +208,6 @@ static int __init of_add_fixed_phys(void)
 arch_initcall(of_add_fixed_phys);
 #endif /* CONFIG_FIXED_PHY */
 
-#ifdef CONFIG_PPC_83xx
-static int __init mpc83xx_wdt_init(void)
-{
-	struct resource r;
-	struct device_node *np;
-	struct platform_device *dev;
-	u32 freq = fsl_get_sys_freq();
-	int ret;
-
-	np = of_find_compatible_node(NULL, "watchdog", "mpc83xx_wdt");
-
-	if (!np) {
-		ret = -ENODEV;
-		goto nodev;
-	}
-
-	memset(&r, 0, sizeof(r));
-
-	ret = of_address_to_resource(np, 0, &r);
-	if (ret)
-		goto err;
-
-	dev = platform_device_register_simple("mpc83xx_wdt", 0, &r, 1);
-	if (IS_ERR(dev)) {
-		ret = PTR_ERR(dev);
-		goto err;
-	}
-
-	ret = platform_device_add_data(dev, &freq, sizeof(freq));
-	if (ret)
-		goto unreg;
-
-	of_node_put(np);
-	return 0;
-
-unreg:
-	platform_device_unregister(dev);
-err:
-	of_node_put(np);
-nodev:
-	return ret;
-}
-
-arch_initcall(mpc83xx_wdt_init);
-#endif
-
 static enum fsl_usb2_phy_modes determine_usb_phy(const char *phy_type)
 {
 	if (!phy_type)
@@ -425,16 +379,10 @@ static int __init setup_rstcr(void)
 	struct device_node *np;
 	np = of_find_node_by_name(NULL, "global-utilities");
 	if ((np && of_get_property(np, "fsl,has-rstcr", NULL))) {
-		const u32 *prop = of_get_property(np, "reg", NULL);
-		if (prop) {
-			/* map reset control register
-			 * 0xE00B0 is offset of reset control register
-			 */
-			rstcr = ioremap(get_immrbase() + *prop + 0xB0, 0xff);
-			if (!rstcr)
-				printk (KERN_EMERG "Error: reset control "
-						"register not mapped!\n");
-		}
+		rstcr = of_iomap(np, 0) + 0xb0;
+		if (!rstcr)
+			printk (KERN_EMERG "Error: reset control register "
+					"not mapped!\n");
 	} else
 		printk (KERN_INFO "rstcr compatible register does not exist!\n");
 	if (np)

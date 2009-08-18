@@ -295,6 +295,16 @@ int i915_save_state(struct drm_device *dev)
 	i915_save_palette(dev, PIPE_B);
 	dev_priv->savePIPEBSTAT = I915_READ(PIPEBSTAT);
 
+	/* Cursor state */
+	dev_priv->saveCURACNTR = I915_READ(CURACNTR);
+	dev_priv->saveCURAPOS = I915_READ(CURAPOS);
+	dev_priv->saveCURABASE = I915_READ(CURABASE);
+	dev_priv->saveCURBCNTR = I915_READ(CURBCNTR);
+	dev_priv->saveCURBPOS = I915_READ(CURBPOS);
+	dev_priv->saveCURBBASE = I915_READ(CURBBASE);
+	if (!IS_I9XX(dev))
+		dev_priv->saveCURSIZE = I915_READ(CURSIZE);
+
 	/* CRT state */
 	dev_priv->saveADPA = I915_READ(ADPA);
 
@@ -349,6 +359,18 @@ int i915_save_state(struct drm_device *dev)
 	for (i = 0; i < 3; i++)
 		dev_priv->saveSWF2[i] = I915_READ(SWF30 + (i << 2));
 
+	/* Fences */
+	if (IS_I965G(dev)) {
+		for (i = 0; i < 16; i++)
+			dev_priv->saveFENCE[i] = I915_READ64(FENCE_REG_965_0 + (i * 8));
+	} else {
+		for (i = 0; i < 8; i++)
+			dev_priv->saveFENCE[i] = I915_READ(FENCE_REG_830_0 + (i * 4));
+
+		if (IS_I945G(dev) || IS_I945GM(dev) || IS_G33(dev))
+			for (i = 0; i < 8; i++)
+				dev_priv->saveFENCE[i+8] = I915_READ(FENCE_REG_945_8 + (i * 4));
+	}
 	i915_save_vga(dev);
 
 	return 0;
@@ -370,6 +392,18 @@ int i915_restore_state(struct drm_device *dev)
 
 	/* Display arbitration */
 	I915_WRITE(DSPARB, dev_priv->saveDSPARB);
+
+	/* Fences */
+	if (IS_I965G(dev)) {
+		for (i = 0; i < 16; i++)
+			I915_WRITE64(FENCE_REG_965_0 + (i * 8), dev_priv->saveFENCE[i]);
+	} else {
+		for (i = 0; i < 8; i++)
+			I915_WRITE(FENCE_REG_830_0 + (i * 4), dev_priv->saveFENCE[i]);
+		if (IS_I945G(dev) || IS_I945GM(dev) || IS_G33(dev))
+			for (i = 0; i < 8; i++)
+				I915_WRITE(FENCE_REG_945_8 + (i * 4), dev_priv->saveFENCE[i+8]);
+	}
 
 	/* Pipe & plane A info */
 	/* Prime the clock */
@@ -455,6 +489,16 @@ int i915_restore_state(struct drm_device *dev)
 	/* Enable the plane */
 	I915_WRITE(DSPBCNTR, dev_priv->saveDSPBCNTR);
 	I915_WRITE(DSPBADDR, I915_READ(DSPBADDR));
+
+	/* Cursor state */
+	I915_WRITE(CURAPOS, dev_priv->saveCURAPOS);
+	I915_WRITE(CURACNTR, dev_priv->saveCURACNTR);
+	I915_WRITE(CURABASE, dev_priv->saveCURABASE);
+	I915_WRITE(CURBPOS, dev_priv->saveCURBPOS);
+	I915_WRITE(CURBCNTR, dev_priv->saveCURBCNTR);
+	I915_WRITE(CURBBASE, dev_priv->saveCURBBASE);
+	if (!IS_I9XX(dev))
+		I915_WRITE(CURSIZE, dev_priv->saveCURSIZE);
 
 	/* CRT state */
 	I915_WRITE(ADPA, dev_priv->saveADPA);

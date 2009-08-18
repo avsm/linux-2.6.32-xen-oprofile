@@ -42,27 +42,12 @@
  * this governor will not work.
  * All times here are in uS.
  */
-static unsigned int def_sampling_rate;
 #define MIN_SAMPLING_RATE_RATIO			(2)
-/* for correct statistics, we need at least 10 ticks between each measure */
-#define MIN_STAT_SAMPLING_RATE 			\
-			(MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(10))
-#define MIN_SAMPLING_RATE			\
-			(def_sampling_rate / MIN_SAMPLING_RATE_RATIO)
-/* Above MIN_SAMPLING_RATE will vanish with its sysfs file soon
- * Define the minimal settable sampling rate to the greater of:
- *   - "HW transition latency" * 100 (same as default sampling / 10)
- *   - MIN_STAT_SAMPLING_RATE
- * To avoid that userspace shoots itself.
-*/
-static unsigned int minimum_sampling_rate(void)
-{
-	return max(def_sampling_rate / 10, MIN_STAT_SAMPLING_RATE);
-}
 
-/* This will also vanish soon with removing sampling_rate_max */
-#define MAX_SAMPLING_RATE			(500 * def_sampling_rate)
+static unsigned int min_sampling_rate;
+
 #define LATENCY_MULTIPLIER			(1000)
+#define MIN_LATENCY_MULTIPLIER			(100)
 #define DEF_SAMPLING_DOWN_FACTOR		(1)
 #define MAX_SAMPLING_DOWN_FACTOR		(10)
 #define TRANSITION_LATENCY_LIMIT		(10 * 1000 * 1000)
@@ -91,6 +76,9 @@ static unsigned int dbs_enable;	/* number of CPUs using this policy */
  * (like __cpufreq_driver_target()) is being called with dbs_mutex taken, then
  * cpu_hotplug lock should be taken before that. Note that cpu_hotplug lock
  * is recursive for the same process. -Venki
+ * DEADLOCK ALERT! (2) : do_dbs_timer() must not take the dbs_mutex, because it
+ * would deadlock with cancel_delayed_work_sync(), which is needed for proper
+ * raceless workqueue teardown.
  */
 static DEFINE_MUTEX(dbs_mutex);
 
@@ -179,27 +167,14 @@ static struct notifier_block dbs_cpufreq_notifier_block = {
 /************************** sysfs interface ************************/
 static ssize_t show_sampling_rate_max(struct cpufreq_policy *policy, char *buf)
 {
-	static int print_once;
-
-	if (!print_once) {
-		printk(KERN_INFO "CPUFREQ: conservative sampling_rate_max "
-		       "sysfs file is deprecated - used by: %s\n",
-		       current->comm);
-		print_once = 1;
-	}
-	return sprintf(buf, "%u\n", MAX_SAMPLING_RATE);
+	printk_once(KERN_INFO "CPUFREQ: conservative sampling_rate_max "
+		    "sysfs file is deprecated - used by: %s\n", current->comm);
+	return sprintf(buf, "%u\n", -1U);
 }
 
 static ssize_t show_sampling_rate_min(struct cpufreq_policy *policy, char *buf)
 {
-	static int print_once;
-
-	if (!print_once) {
-		printk(KERN_INFO "CPUFREQ: conservative sampling_rate_max "
-		       "sysfs file is deprecated - used by: %s\n", current->comm);
-		print_once = 1;
-	}
-	return sprintf(buf, "%u\n", MIN_SAMPLING_RATE);
+	return sprintf(buf, "%u\n", min_sampling_rate);
 }
 
 #define define_one_ro(_name)		\
@@ -251,7 +226,7 @@ static ssize_t store_sampling_rate(struct cpufreq_policy *unused,
 		return -EINVAL;
 
 	mutex_lock(&dbs_mutex);
-	dbs_tuners_ins.sampling_rate = max(input, minimum_sampling_rate());
+	dbs_tuners_ins.sampling_rate = max(input, min_sampling_rate);
 	mutex_unlock(&dbs_mutex);
 
 	return count;
@@ -542,7 +517,7 @@ static inline void dbs_timer_init(struct cpu_dbs_info_s *dbs_info)
 static inline void dbs_timer_exit(struct cpu_dbs_info_s *dbs_info)
 {
 	dbs_info->enable = 0;
-	cancel_delayed_work(&dbs_info->work);
+	cancel_delayed_work_sync(&dbs_info->work);
 }
 
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
@@ -598,11 +573,18 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			if (latency == 0)
 				latency = 1;
 
-			def_sampling_rate =
-				max(latency * LATENCY_MULTIPLIER,
-				    MIN_STAT_SAMPLING_RATE);
-
-			dbs_tuners_ins.sampling_rate = def_sampling_rate;
+			/*
+			 * conservative does not implement micro like ondemand
+			 * governor, thus we are bound to jiffes/HZ
+			 */
+			min_sampling_rate =
+				MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(10);
+			/* Bring kernel and HW constraints together */
+			min_sampling_rate = max(min_sampling_rate,
+					MIN_LATENCY_MULTIPLIER * latency);
+			dbs_tuners_ins.sampling_rate =
+				max(min_sampling_rate,
+				    latency * LATENCY_MULTIPLIER);
 
 			cpufreq_register_notifier(
 					&dbs_cpufreq_notifier_block,

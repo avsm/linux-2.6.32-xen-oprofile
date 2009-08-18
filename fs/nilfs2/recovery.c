@@ -28,7 +28,6 @@
 #include "segment.h"
 #include "sufile.h"
 #include "page.h"
-#include "seglist.h"
 #include "segbuf.h"
 
 /*
@@ -395,6 +394,24 @@ static void dispose_recovery_list(struct list_head *head)
 	}
 }
 
+struct nilfs_segment_entry {
+	struct list_head	list;
+	__u64			segnum;
+};
+
+static int nilfs_segment_list_add(struct list_head *head, __u64 segnum)
+{
+	struct nilfs_segment_entry *ent = kmalloc(sizeof(*ent), GFP_NOFS);
+
+	if (unlikely(!ent))
+		return -ENOMEM;
+
+	ent->segnum = segnum;
+	INIT_LIST_HEAD(&ent->list);
+	list_add_tail(&ent->list, head);
+	return 0;
+}
+
 void nilfs_dispose_segment_list(struct list_head *head)
 {
 	while (!list_empty(head)) {
@@ -402,11 +419,12 @@ void nilfs_dispose_segment_list(struct list_head *head)
 			= list_entry(head->next,
 				     struct nilfs_segment_entry, list);
 		list_del(&ent->list);
-		nilfs_free_segment_entry(ent);
+		kfree(ent);
 	}
 }
 
 static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
+					      struct nilfs_sb_info *sbi,
 					      struct nilfs_recovery_info *ri)
 {
 	struct list_head *head = &ri->ri_used_segments;
@@ -421,6 +439,7 @@ static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
 	segnum[2] = ri->ri_segnum;
 	segnum[3] = ri->ri_nextnum;
 
+	nilfs_attach_writer(nilfs, sbi);
 	/*
 	 * Releasing the next segment of the latest super root.
 	 * The next segment is invalidated by this recovery.
@@ -429,12 +448,10 @@ static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
 	if (unlikely(err))
 		goto failed;
 
-	err = -ENOMEM;
 	for (i = 1; i < 4; i++) {
-		ent = nilfs_alloc_segment_entry(segnum[i]);
-		if (unlikely(!ent))
+		err = nilfs_segment_list_add(head, segnum[i]);
+		if (unlikely(err))
 			goto failed;
-		list_add_tail(&ent->list, head);
 	}
 
 	/*
@@ -448,7 +465,7 @@ static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
 				goto failed;
 		}
 		list_del(&ent->list);
-		nilfs_free_segment_entry(ent);
+		kfree(ent);
 	}
 
 	/* Allocate new segments for recovery */
@@ -459,10 +476,10 @@ static int nilfs_prepare_segment_for_recovery(struct the_nilfs *nilfs,
 	nilfs->ns_pseg_offset = 0;
 	nilfs->ns_seg_seq = ri->ri_seq + 2;
 	nilfs->ns_nextnum = nilfs->ns_segnum = segnum[0];
-	return 0;
 
  failed:
 	/* No need to recover sufile because it will be destroyed on error */
+	nilfs_detach_writer(nilfs, sbi);
 	return err;
 }
 
@@ -728,7 +745,7 @@ int nilfs_recover_logical_segments(struct the_nilfs *nilfs,
 		goto failed;
 
 	if (ri->ri_need_recovery == NILFS_RECOVERY_ROLLFORWARD_DONE) {
-		err = nilfs_prepare_segment_for_recovery(nilfs, ri);
+		err = nilfs_prepare_segment_for_recovery(nilfs, sbi, ri);
 		if (unlikely(err)) {
 			printk(KERN_ERR "NILFS: Error preparing segments for "
 			       "recovery.\n");
@@ -789,7 +806,6 @@ int nilfs_search_super_root(struct the_nilfs *nilfs, struct nilfs_sb_info *sbi,
 	u64 seg_seq;
 	__u64 segnum, nextnum = 0;
 	__u64 cno;
-	struct nilfs_segment_entry *ent;
 	LIST_HEAD(segments);
 	int empty_seg = 0, scan_newer = 0;
 	int ret;
@@ -890,12 +906,9 @@ int nilfs_search_super_root(struct the_nilfs *nilfs, struct nilfs_sb_info *sbi,
 		if (empty_seg++)
 			goto super_root_found; /* found a valid super root */
 
-		ent = nilfs_alloc_segment_entry(segnum);
-		if (unlikely(!ent)) {
-			ret = -ENOMEM;
+		ret = nilfs_segment_list_add(&segments, segnum);
+		if (unlikely(ret))
 			goto failed;
-		}
-		list_add_tail(&ent->list, &segments);
 
 		seg_seq++;
 		segnum = nextnum;

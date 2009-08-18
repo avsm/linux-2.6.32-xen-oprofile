@@ -24,7 +24,9 @@
 #include <linux/ftrace.h>
 #include <linux/smp.h>
 #include <linux/tick.h>
-#include <trace/irq.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/irq.h>
 
 #include <asm/irq.h>
 /*
@@ -185,9 +187,6 @@ EXPORT_SYMBOL(local_bh_enable_ip);
  * should not be able to lock up the box.
  */
 #define MAX_SOFTIRQ_RESTART 10
-
-DEFINE_TRACE(softirq_entry);
-DEFINE_TRACE(softirq_exit);
 
 asmlinkage void __do_softirq(void)
 {
@@ -382,6 +381,17 @@ void __tasklet_hi_schedule(struct tasklet_struct *t)
 }
 
 EXPORT_SYMBOL(__tasklet_hi_schedule);
+
+void __tasklet_hi_schedule_first(struct tasklet_struct *t)
+{
+	BUG_ON(!irqs_disabled());
+
+	t->next = __get_cpu_var(tasklet_hi_vec).head;
+	__get_cpu_var(tasklet_hi_vec).head = t;
+	__raise_softirq_irqoff(HI_SOFTIRQ);
+}
+
+EXPORT_SYMBOL(__tasklet_hi_schedule_first);
 
 static void tasklet_action(struct softirq_action *a)
 {
@@ -828,7 +838,7 @@ int __init __weak arch_early_irq_init(void)
 	return 0;
 }
 
-int __weak arch_init_chip_data(struct irq_desc *desc, int cpu)
+int __weak arch_init_chip_data(struct irq_desc *desc, int node)
 {
 	return 0;
 }
