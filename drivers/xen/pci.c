@@ -113,4 +113,4 @@ static int __init register_xen_pci_notifier(void)
 	return bus_register_notifier(&pci_bus_type, &device_nb);
 }
 
-fs_initcall(register_xen_pci_notifier);
+arch_initcall(register_xen_pci_notifier);
