@@ -66,6 +66,7 @@
 #include <asm/xen/hypervisor.h>
 #include <asm/apic.h>
 
+#include <asm/xen/pci.h>
 
 #define __apicdebuginit(type) static type __init
 
@@ -3507,6 +3508,9 @@ int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
 
+	if (xen_domain())
+		return xen_setup_msi_irqs(dev, nvec, type);
+
 	node = dev_to_node(&dev->dev);
 	irq_want = nr_irqs_gsi;
 	sub_handle = 0;
@@ -3556,7 +3560,10 @@ error:
 
 void arch_teardown_msi_irq(unsigned int irq)
 {
-	destroy_irq(irq);
+	if (xen_domain())
+		xen_destroy_irq(irq);
+	else
+		destroy_irq(irq);
 }
 
 #if defined (CONFIG_DMAR) || defined (CONFIG_INTR_REMAP)

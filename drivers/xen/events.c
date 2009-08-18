@@ -28,6 +28,9 @@
 #include <linux/string.h>
 #include <linux/bootmem.h>
 #include <linux/irqnr.h>
+#include <linux/pci_regs.h>
+#include <linux/pci.h>
+#include <linux/msi.h>
 
 #include <asm/ptrace.h>
 #include <asm/irq.h>
@@ -41,6 +44,8 @@
 #include <xen/events.h>
 #include <xen/interface/xen.h>
 #include <xen/interface/event_channel.h>
+
+#include "../pci/msi.h"
 
 /*
  * This lock protects updates to the following mapping and reference-count
@@ -560,14 +565,98 @@ int xen_allocate_pirq(unsigned gsi, char *name)
 	if (HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op)) {
 		dynamic_irq_cleanup(irq);
 		irq = -ENOSPC;
+ 		goto out;
+ 	}
+
+	irq_info[irq] = mk_pirq_info(0, gsi, irq_op.vector);
+out:
+	spin_unlock(&irq_mapping_update_lock);
+	return irq;
+}
+
+int xen_destroy_irq(int irq)
+{
+	struct irq_desc *desc;
+	struct physdev_unmap_pirq unmap_irq;
+	int rc = -ENOENT;
+
+	spin_lock(&irq_mapping_update_lock);
+
+	desc = irq_to_desc(irq);
+	if (!desc)
+		goto out;
+
+	unmap_irq.pirq = irq;
+	unmap_irq.domid = DOMID_SELF;
+	rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
+	if (rc) {
+		printk(KERN_WARNING "unmap irq failed %x\n", rc);
 		goto out;
 	}
 
-	irq_info[irq] = mk_pirq_info(0, gsi, irq_op.vector);
+	irq_info[irq] = mk_unbound_info();
+
+	dynamic_irq_cleanup(irq);
 
 out:
 	spin_unlock(&irq_mapping_update_lock);
+	return rc;
+}
 
+int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
+{
+	int irq = 0;
+	struct physdev_map_pirq map_irq;
+	int rc;
+	domid_t domid = DOMID_SELF;
+	int pos;
+	u32 table_offset, bir;
+
+	memset(&map_irq, 0, sizeof(map_irq));
+	map_irq.domid = domid;
+	map_irq.type = MAP_PIRQ_TYPE_MSI;
+	map_irq.index = -1;
+	map_irq.bus = dev->bus->number;
+	map_irq.devfn = dev->devfn;
+
+	if (type == PCI_CAP_ID_MSIX) {
+		pos = pci_find_capability(dev, PCI_CAP_ID_MSIX);
+
+		pci_read_config_dword(dev, msix_table_offset_reg(pos),
+					&table_offset);
+		bir = (u8)(table_offset & PCI_MSIX_FLAGS_BIRMASK);
+
+		map_irq.table_base = pci_resource_start(dev, bir);
+		map_irq.entry_nr = msidesc->msi_attrib.entry_nr;
+	}
+
+	spin_lock(&irq_mapping_update_lock);
+
+	irq = find_unbound_irq();
+
+	if (irq == -1)
+		goto out;
+
+	map_irq.pirq = irq;
+
+	rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
+	if (rc) {
+
+		printk(KERN_WARNING "xen map irq failed %x\n", rc);
+
+		dynamic_irq_cleanup(irq);
+
+		irq = -1;
+		goto out;
+	}
+
+	irq_info[irq] = mk_pirq_info(0, -1, map_irq.index);
+	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
+			handle_level_irq,
+			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
+
+out:
+	spin_unlock(&irq_mapping_update_lock);
 	return irq;
 }
 
