@@ -148,14 +148,6 @@ static int bind_virq_for_mce(void)
 	int ret;
 	xen_mc_t mc_op;
 
-	ret  = bind_virq_to_irqhandler(VIRQ_MCA, 0,
-		mce_dom_interrupt, 0, "mce", NULL);
-
-	if (ret < 0) {
-		printk(KERN_ERR "MCE_DOM0_LOG: bind_virq for DOM0 failed\n");
-		return ret;
-	}
-
 	g_mi = kmalloc(sizeof(struct mc_info), GFP_KERNEL);
 
 	if (!g_mi)
@@ -186,6 +178,14 @@ static int bind_virq_for_mce(void)
 		printk(KERN_ERR "MCE_DOM0_LOG: Fail to get physical CPUs info\n");
 		kfree(g_mi);
 		kfree(g_physinfo);
+		return ret;
+	}
+
+	ret  = bind_virq_to_irqhandler(VIRQ_MCA, 0,
+		mce_dom_interrupt, 0, "mce", NULL);
+
+	if (ret < 0) {
+		printk(KERN_ERR "MCE_DOM0_LOG: bind_virq for DOM0 failed\n");
 		return ret;
 	}
 
