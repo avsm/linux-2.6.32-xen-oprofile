@@ -19,6 +19,8 @@
 
 #include <linux/pci.h>
 #include <xen/interface/physdev.h>
+
+#include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
 #include "../pci/pci.h"
 
@@ -110,6 +112,9 @@ struct notifier_block device_nb = {
 
 static int __init register_xen_pci_notifier(void)
 {
+	if (!xen_pv_domain())
+		return 0;
+
 	return bus_register_notifier(&pci_bus_type, &device_nb);
 }
 
