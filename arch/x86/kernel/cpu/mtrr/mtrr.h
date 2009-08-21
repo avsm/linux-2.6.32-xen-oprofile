@@ -78,7 +78,7 @@ void mtrr_wrmsr(unsigned, unsigned, unsigned);
 int amd_init_mtrr(void);
 int cyrix_init_mtrr(void);
 int centaur_init_mtrr(void);
-#ifdef CONFIG_XEN
+#ifdef CONFIG_XEN_DOM0
 void xen_init_mtrr(void);
 #else
 static inline void xen_init_mtrr(void)
