@@ -87,6 +87,7 @@ void __init xen_setup_pirqs(void)
 	}
 }
 
+#ifdef CONFIG_PCI_MSI
 int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 {
 	unsigned int irq;
@@ -108,3 +109,4 @@ error:
 	xen_destroy_irq(irq);
 	return ret;
 }
+#endif

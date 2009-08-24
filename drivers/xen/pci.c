@@ -18,8 +18,11 @@
  */
 
 #include <linux/pci.h>
+
+#include <xen/interface/xen.h>
 #include <xen/interface/physdev.h>
 #include <asm/xen/hypercall.h>
+
 #include "../pci/pci.h"
 
 

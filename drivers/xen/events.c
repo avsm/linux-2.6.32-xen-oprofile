@@ -574,6 +574,7 @@ out:
 	return irq;
 }
 
+#ifdef CONFIG_PCI_MSI
 int xen_destroy_irq(int irq)
 {
 	struct irq_desc *desc;
@@ -659,6 +660,7 @@ out:
 	spin_unlock(&irq_mapping_update_lock);
 	return irq;
 }
+#endif
 
 int xen_vector_from_irq(unsigned irq)
 {
