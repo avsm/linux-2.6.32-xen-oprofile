@@ -89,7 +89,7 @@ struct irq_info
 		unsigned short virq;
 		enum ipi_vector ipi;
 		struct {
-			unsigned short gsi;
+			unsigned short nr;
 			unsigned char vector;
 			unsigned char flags;
 		} pirq;
@@ -140,10 +140,10 @@ static struct irq_info mk_virq_info(unsigned short evtchn, unsigned short virq)
 }
 
 static struct irq_info mk_pirq_info(unsigned short evtchn,
-				    unsigned short gsi, unsigned short vector)
+				    unsigned short pirq, unsigned short vector)
 {
 	return (struct irq_info) { .type = IRQT_PIRQ, .evtchn = evtchn,
-			.cpu = 0, .u.pirq = { .gsi = gsi, .vector = vector } };
+			.cpu = 0, .u.pirq = { .nr = pirq, .vector = vector } };
 }
 
 /*
@@ -192,7 +192,7 @@ static unsigned gsi_from_irq(unsigned irq)
 	BUG_ON(info == NULL);
 	BUG_ON(info->type != IRQT_PIRQ);
 
-	return info->u.pirq.gsi;
+	return info->u.pirq.nr;
 }
 
 static unsigned vector_from_irq(unsigned irq)
@@ -387,7 +387,8 @@ static bool identity_mapped_irq(unsigned irq)
 
 static void pirq_unmask_notify(int irq)
 {
-	struct physdev_eoi eoi = { .irq = irq };
+	struct irq_info *info = info_for_irq(irq);
+	struct physdev_eoi eoi = { .irq = info->u.pirq.nr };
 
 	if (unlikely(pirq_needs_eoi(irq))) {
 		int rc = HYPERVISOR_physdev_op(PHYSDEVOP_eoi, &eoi);
@@ -402,7 +403,7 @@ static void pirq_query_unmask(int irq)
 
 	BUG_ON(info->type != IRQT_PIRQ);
 
-	irq_status.irq = irq;
+	irq_status.irq = info->u.pirq.nr;
 	if (HYPERVISOR_physdev_op(PHYSDEVOP_irq_status_query, &irq_status))
 		irq_status.flags = 0;
 
@@ -430,7 +431,7 @@ static unsigned int startup_pirq(unsigned int irq)
 	if (VALID_EVTCHN(evtchn))
 		goto out;
 
-	bind_pirq.pirq = irq;
+	bind_pirq.pirq = info->u.pirq.nr;
 	/* NB. We are happy to share unless we are probing. */
 	bind_pirq.flags = probing_irq(irq) ? 0 : BIND_PIRQ__WILL_SHARE;
 	rc = HYPERVISOR_event_channel_op(EVTCHNOP_bind_pirq, &bind_pirq);
@@ -561,7 +562,7 @@ int xen_allocate_pirq(unsigned gsi, char *name)
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 				      handle_level_irq, name);
 
-	irq_op.irq = irq;
+	irq_op.irq = gsi;
 	if (HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op)) {
 		dynamic_irq_cleanup(irq);
 		irq = -ENOSPC;
@@ -579,6 +580,7 @@ int xen_destroy_irq(int irq)
 {
 	struct irq_desc *desc;
 	struct physdev_unmap_pirq unmap_irq;
+	struct irq_info *info = info_for_irq(irq);
 	int rc = -ENOENT;
 
 	spin_lock(&irq_mapping_update_lock);
@@ -587,7 +589,7 @@ int xen_destroy_irq(int irq)
 	if (!desc)
 		goto out;
 
-	unmap_irq.pirq = irq;
+	unmap_irq.pirq = info->u.pirq.nr;
 	unmap_irq.domid = DOMID_SELF;
 	rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
 	if (rc) {
@@ -617,6 +619,7 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 	map_irq.domid = domid;
 	map_irq.type = MAP_PIRQ_TYPE_MSI;
 	map_irq.index = -1;
+	map_irq.pirq = -1;
 	map_irq.bus = dev->bus->number;
 	map_irq.devfn = dev->devfn;
 
@@ -638,8 +641,6 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 	if (irq == -1)
 		goto out;
 
-	map_irq.pirq = irq;
-
 	rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
 	if (rc) {
 
@@ -651,7 +652,7 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		goto out;
 	}
 
-	irq_info[irq] = mk_pirq_info(0, -1, map_irq.index);
+	irq_info[irq] = mk_pirq_info(0, map_irq.pirq, map_irq.index);
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 			handle_level_irq,
 			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
