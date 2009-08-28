@@ -591,7 +591,7 @@ int xen_destroy_irq(int irq)
 	unmap_irq.domid = DOMID_SELF;
 	rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
 	if (rc) {
-		printk(KERN_WARNING "unmap irq failed %x\n", rc);
+		printk(KERN_WARNING "unmap irq failed %d\n", rc);
 		goto out;
 	}
 
@@ -643,7 +643,7 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 	rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
 	if (rc) {
 
-		printk(KERN_WARNING "xen map irq failed %x\n", rc);
+		printk(KERN_WARNING "xen map irq failed %d\n", rc);
 
 		dynamic_irq_cleanup(irq);
 

@@ -90,13 +90,12 @@ void __init xen_setup_pirqs(void)
 #ifdef CONFIG_PCI_MSI
 int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 {
-	unsigned int irq;
-	int ret;
+	int irq, ret;
 	struct msi_desc *msidesc;
 
 	list_for_each_entry(msidesc, &dev->msi_list, list) {
 		irq = xen_create_msi_irq(dev, msidesc, type);
-		if (irq == 0)
+		if (irq < 0)
 			return -1;
 
 		ret = set_irq_msi(irq, msidesc);
