@@ -185,6 +185,82 @@ static inline void maybe_schedule_tx_action(void)
 		tasklet_schedule(&net_tx_tasklet);
 }
 
+static struct sk_buff *netbk_copy_skb(struct sk_buff *skb)
+{
+	struct skb_shared_info *ninfo;
+	struct sk_buff *nskb;
+	unsigned long offset;
+	int ret;
+	int len;
+	int headlen;
+
+	BUG_ON(skb_shinfo(skb)->frag_list != NULL);
+
+	nskb = alloc_skb(SKB_MAX_HEAD(0), GFP_ATOMIC | __GFP_NOWARN);
+	if (unlikely(!nskb))
+		goto err;
+
+	skb_reserve(nskb, NET_SKB_PAD + NET_IP_ALIGN);
+	headlen = skb_end_pointer(nskb) - nskb->data;
+	if (headlen > skb_headlen(skb))
+		headlen = skb_headlen(skb);
+	ret = skb_copy_bits(skb, 0, __skb_put(nskb, headlen), headlen);
+	BUG_ON(ret);
+
+	ninfo = skb_shinfo(nskb);
+	ninfo->gso_size = skb_shinfo(skb)->gso_size;
+	ninfo->gso_type = skb_shinfo(skb)->gso_type;
+
+	offset = headlen;
+	len = skb->len - headlen;
+
+	nskb->len = skb->len;
+	nskb->data_len = len;
+	nskb->truesize += len;
+
+	while (len) {
+		struct page *page;
+		int copy;
+		int zero;
+
+		if (unlikely(ninfo->nr_frags >= MAX_SKB_FRAGS)) {
+			dump_stack();
+			goto err_free;
+		}
+
+		copy = len >= PAGE_SIZE ? PAGE_SIZE : len;
+		zero = len >= PAGE_SIZE ? 0 : __GFP_ZERO;
+
+		page = alloc_page(GFP_ATOMIC | __GFP_NOWARN | zero);
+		if (unlikely(!page))
+			goto err_free;
+
+		ret = skb_copy_bits(skb, offset, page_address(page), copy);
+		BUG_ON(ret);
+
+		ninfo->frags[ninfo->nr_frags].page = page;
+		ninfo->frags[ninfo->nr_frags].page_offset = 0;
+		ninfo->frags[ninfo->nr_frags].size = copy;
+		ninfo->nr_frags++;
+
+		offset += copy;
+		len -= copy;
+	}
+
+	offset = nskb->data - skb->data;
+
+	nskb->transport_header = skb->transport_header + offset;
+	nskb->network_header = skb->network_header + offset;
+	nskb->mac_header = skb->mac_header + offset;
+
+	return nskb;
+
+ err_free:
+	kfree_skb(nskb);
+ err:
+	return NULL;
+}
+
 static inline int netbk_max_required_rx_slots(struct xen_netif *netif)
 {
 	if (netif->features & (NETIF_F_SG|NETIF_F_TSO))
@@ -217,6 +293,21 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	/* Drop the packet if the target domain has no receive buffers. */
 	if (unlikely(!netif_schedulable(netif) || netbk_queue_full(netif)))
 		goto drop;
+
+	/*
+	 * XXX For now we also copy skbuffs whose head crosses a page
+	 * boundary, because netbk_gop_skb can't handle them.
+	 */
+	if ((skb_headlen(skb) + offset_in_page(skb->data)) >= PAGE_SIZE) {
+		struct sk_buff *nskb = netbk_copy_skb(skb);
+		if ( unlikely(nskb == NULL) )
+			goto drop;
+		/* Copy only the header fields we use in this driver. */
+		nskb->dev = skb->dev;
+		nskb->ip_summed = skb->ip_summed;
+		dev_kfree_skb(skb);
+		skb = nskb;
+	}
 
 	netif->rx_req_cons_peek += skb_shinfo(skb)->nr_frags + 1 +
 				   !!skb_shinfo(skb)->gso_size;
