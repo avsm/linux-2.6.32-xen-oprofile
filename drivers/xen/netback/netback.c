@@ -1537,8 +1537,6 @@ static int __init netback_init(void)
 	int i;
 	struct page *page;
 
-	printk(KERN_CRIT "*** netif_init\n");
-
 	if (!xen_domain())
 		return -ENODEV;
 
