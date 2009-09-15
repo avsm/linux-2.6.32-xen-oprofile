@@ -406,7 +406,7 @@ static __init void xen_load_gdt_boot(const struct desc_ptr *dtr)
 
 		pte = pfn_pte(pfn, PAGE_KERNEL_RO);
 
-		if (HYPERVISOR_update_va_mapping((unsigned long)va, pte, 0))
+		if (HYPERVISOR_update_va_mapping(va, pte, 0))
 			BUG();
 
 		frames[f] = mfn;
