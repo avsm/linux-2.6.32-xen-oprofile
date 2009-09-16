@@ -519,11 +519,10 @@ static int cvt_gate_to_trap(int vector, const gate_desc *val,
 	} else if (addr == (unsigned long)machine_check) {
 		return 0;
 #endif
-	} else {
-		/* Some other trap using IST? */
-		if (WARN_ON(val->ist != 0))
-			return 0;
-	}
+	} else if (WARN(val->ist != 0,
+			"Unknown IST-using trap: vector %d, %pF, val->ist=%d\n",
+			vector, (void *)addr, val->ist))
+		return 0;
 #endif	/* CONFIG_X86_64 */
 	info->address = addr;
 
