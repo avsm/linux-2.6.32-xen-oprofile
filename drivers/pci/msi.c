@@ -20,6 +20,8 @@
 #include <asm/errno.h>
 #include <asm/io.h>
 
+#include <asm/xen/hypervisor.h>
+
 #include "pci.h"
 #include "msi.h"
 
@@ -267,7 +269,8 @@ void write_msi_msg(unsigned int irq, struct msi_msg *msg)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 
-	write_msi_msg_desc(desc, msg);
+	if (!xen_initial_domain())
+		write_msi_msg_desc(desc, msg);
 }
 
 static int msi_free_irqs(struct pci_dev* dev);
