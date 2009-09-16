@@ -39,18 +39,13 @@ extern void xen_syscall32_target(void);
  **/
 char * __init xen_memory_setup(void)
 {
+	static __initdata struct e820entry map[E820MAX];
+
 	unsigned long max_pfn = xen_start_info->nr_pages;
-	unsigned long long mem_end;
-	int rc;
 	struct xen_memory_map memmap;
-	/*
-	 * This is rather large for a stack variable but this early in
-	 * the boot process we know we have plenty slack space.
-	 */
-	struct e820entry map[E820MAX];
-	int op = xen_initial_domain() ?
-		XENMEM_machine_memory_map :
-		XENMEM_memory_map;
+	unsigned long long mem_end;
+	int op;
+	int rc;
 	int i;
 
 	max_pfn = min(MAX_DOMAIN_PAGES, max_pfn);
@@ -59,6 +54,9 @@ char * __init xen_memory_setup(void)
 	memmap.nr_entries = E820MAX;
 	set_xen_guest_handle(memmap.buffer, map);
 
+	op = xen_initial_domain() ?
+		XENMEM_machine_memory_map :
+		XENMEM_memory_map;
 	rc = HYPERVISOR_memory_op(op, &memmap);
 	if (rc == -ENOSYS) {
 		memmap.nr_entries = 1;
