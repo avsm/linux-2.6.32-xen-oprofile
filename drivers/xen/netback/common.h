@@ -76,6 +76,8 @@ struct xen_netif {
 	/* Set of features that can be turned on in dev->features. */
 	int features;
 
+	int smart_poll;
+
 	/* Internal feature information. */
 	u8 can_queue:1;	/* can queue packets for receiver? */
 

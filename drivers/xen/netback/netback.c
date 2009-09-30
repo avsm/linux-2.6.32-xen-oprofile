@@ -640,7 +640,8 @@ static void net_rx_action(unsigned long unused)
 
 		RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(&netif->rx, ret);
 		irq = netif->irq;
-		if (ret && !rx_notify[irq]) {
+		if (ret && !rx_notify[irq] &&
+				(netif->smart_poll != 1)) {
 			rx_notify[irq] = 1;
 			notify_list[notify_nr++] = irq;
 		}
@@ -649,6 +650,17 @@ static void net_rx_action(unsigned long unused)
 		    netif_schedulable(netif) &&
 		    !netbk_queue_full(netif))
 			netif_wake_queue(netif->dev);
+
+		/*
+		 * netfront_smartpoll_active indicates whether
+		 * netfront timer is active.
+		 */
+		if ((netif->smart_poll == 1)) {
+			if (!(netif->rx.sring->netfront_smartpoll_active)) {
+				notify_remote_via_irq(irq);
+				netif->rx.sring->netfront_smartpoll_active = 1;
+			}
+		}
 
 		netif_put(netif);
 		dev_kfree_skb(skb);
@@ -1471,7 +1483,17 @@ static void make_tx_response(struct xen_netif *netif,
 
 	netif->tx.rsp_prod_pvt = ++i;
 	RING_PUSH_RESPONSES_AND_CHECK_NOTIFY(&netif->tx, notify);
-	if (notify)
+
+	/*
+	 * netfront_smartpoll_active indicates whether netfront timer
+	 * is active.
+	 */
+	if ((netif->smart_poll == 1)) {
+		if (!(netif->rx.sring->netfront_smartpoll_active)) {
+			notify_remote_via_irq(netif->irq);
+			netif->rx.sring->netfront_smartpoll_active = 1;
+		}
+	} else if (notify)
 		notify_remote_via_irq(netif->irq);
 }
 

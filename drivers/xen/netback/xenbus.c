@@ -115,6 +115,14 @@ static int netback_probe(struct xenbus_device *dev,
 			goto abort_transaction;
 		}
 
+		/* We support data smart poll mechanism */
+		err = xenbus_printf(xbt, dev->nodename,
+				    "feature-smart-poll", "%d", 1);
+		if (err) {
+			message = "writing feature-smart-poll";
+			goto abort_transaction;
+		}
+
 		err = xenbus_transaction_end(xbt, 0);
 	} while (err == -EAGAIN);
 
@@ -414,6 +422,14 @@ static int connect_rings(struct backend_info *be)
 		be->netif->features &= ~NETIF_F_IP_CSUM;
 		be->netif->dev->features &= ~NETIF_F_IP_CSUM;
 	}
+
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-smart-poll",
+			 "%d", &val) < 0)
+		val = 0;
+	if (val)
+		be->netif->smart_poll = 1;
+	else
+		be->netif->smart_poll = 0;
 
 	/* Map the shared frame, irq etc. */
 	err = netif_map(be->netif, tx_ring_ref, rx_ring_ref, evtchn);
