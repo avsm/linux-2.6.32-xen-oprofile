@@ -58,6 +58,19 @@ struct netfront_cb {
 	unsigned offset;
 };
 
+#define MICRO_SECOND 1000000UL
+#define NANO_SECOND 1000000000UL
+#define DEFAULT_SMART_POLL_FREQ   1000UL
+
+struct netfront_smart_poll {
+	struct hrtimer timer;
+	struct net_device *netdev;
+	unsigned int smart_poll_freq;
+	unsigned int feature_smart_poll;
+	unsigned int active;
+	unsigned long counter;
+};
+
 #define NETFRONT_SKB_CB(skb)	((struct netfront_cb *)((skb)->cb))
 
 #define RX_COPY_THRESHOLD 256
@@ -104,7 +117,7 @@ struct netfront_info {
 
 	/* Receive-ring batched refills. */
 #define RX_MIN_TARGET 8
-#define RX_DFL_MIN_TARGET 64
+#define RX_DFL_MIN_TARGET 80
 #define RX_MAX_TARGET min_t(int, NET_RX_RING_SIZE, 256)
 	unsigned rx_min_target, rx_max_target, rx_target;
 	struct sk_buff_head rx_batch;
@@ -118,6 +131,8 @@ struct netfront_info {
 	unsigned long rx_pfn_array[NET_RX_RING_SIZE];
 	struct multicall_entry rx_mcl[NET_RX_RING_SIZE+1];
 	struct mmu_update rx_mmu[NET_RX_RING_SIZE];
+
+	struct netfront_smart_poll smart_poll;
 };
 
 struct netfront_rx_info {
@@ -337,15 +352,17 @@ static int xennet_open(struct net_device *dev)
 	return 0;
 }
 
-static void xennet_tx_buf_gc(struct net_device *dev)
+static int xennet_tx_buf_gc(struct net_device *dev)
 {
 	RING_IDX cons, prod;
+	RING_IDX cons_begin, cons_end;
 	unsigned short id;
 	struct netfront_info *np = netdev_priv(dev);
 	struct sk_buff *skb;
 
 	BUG_ON(!netif_carrier_ok(dev));
 
+	cons_begin = np->tx.rsp_cons;
 	do {
 		prod = np->tx.sring->rsp_prod;
 		rmb(); /* Ensure we see responses up to 'rp'. */
@@ -390,7 +407,11 @@ static void xennet_tx_buf_gc(struct net_device *dev)
 		mb();		/* update shared area */
 	} while ((cons == prod) && (prod != np->tx.sring->rsp_prod));
 
+	cons_end = np->tx.rsp_cons;
+
 	xennet_maybe_wake_tx(dev);
+
+	return (cons_begin == cons_end);
 }
 
 static void xennet_make_frags(struct sk_buff *skb, struct net_device *dev,
@@ -1305,6 +1326,50 @@ static int xen_net_read_mac(struct xenbus_device *dev, u8 mac[])
 	return 0;
 }
 
+static enum hrtimer_restart smart_poll_function(struct hrtimer *timer)
+{
+	struct netfront_smart_poll *psmart_poll;
+	struct net_device *dev;
+	struct netfront_info *np;
+	unsigned long flags;
+	unsigned int tx_active = 0, rx_active = 0;
+
+	psmart_poll = container_of(timer, struct netfront_smart_poll, timer);
+	dev = psmart_poll->netdev;
+	np = netdev_priv(dev);
+
+	spin_lock_irqsave(&np->tx_lock, flags);
+	np->smart_poll.counter++;
+
+	if (likely(netif_carrier_ok(dev))) {
+		tx_active = !(xennet_tx_buf_gc(dev));
+		/* Under tx_lock: protects access to rx shared-ring indexes. */
+		if (RING_HAS_UNCONSUMED_RESPONSES(&np->rx)) {
+			rx_active = 1;
+			napi_schedule(&np->napi);
+		}
+	}
+
+	np->smart_poll.active |= (tx_active || rx_active);
+	if (np->smart_poll.counter %
+			(np->smart_poll.smart_poll_freq / 10) == 0) {
+		if (!np->smart_poll.active) {
+			np->rx.sring->netfront_smartpoll_active = 0;
+			goto end;
+		}
+		np->smart_poll.active = 0;
+	}
+
+	if (np->rx.sring->netfront_smartpoll_active)
+		hrtimer_start(timer,
+			ktime_set(0, NANO_SECOND/psmart_poll->smart_poll_freq),
+			HRTIMER_MODE_REL);
+
+end:
+	spin_unlock_irqrestore(&np->tx_lock, flags);
+	return HRTIMER_NORESTART;
+}
+
 static irqreturn_t xennet_interrupt(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
@@ -1319,6 +1384,11 @@ static irqreturn_t xennet_interrupt(int irq, void *dev_id)
 		if (RING_HAS_UNCONSUMED_RESPONSES(&np->rx))
 			napi_schedule(&np->napi);
 	}
+
+	if (np->smart_poll.feature_smart_poll)
+		hrtimer_start(&np->smart_poll.timer,
+			ktime_set(0, NANO_SECOND/np->smart_poll.smart_poll_freq),
+			HRTIMER_MODE_REL);
 
 	spin_unlock_irqrestore(&np->tx_lock, flags);
 
@@ -1456,6 +1526,12 @@ again:
 		goto abort_transaction;
 	}
 
+	err = xenbus_printf(xbt, dev->nodename, "feature-smart-poll", "%d", 1);
+	if (err) {
+		message = "writing feature-smart-poll";
+		goto abort_transaction;
+	}
+
 	err = xenbus_transaction_end(xbt, 0);
 	if (err) {
 		if (err == -EAGAIN)
@@ -1543,6 +1619,22 @@ static int xennet_connect(struct net_device *dev)
 		return -ENODEV;
 	}
 
+	err = xenbus_scanf(XBT_NIL, np->xbdev->otherend,
+			   "feature-smart-poll", "%u",
+			   &np->smart_poll.feature_smart_poll);
+	if (err != 1)
+		np->smart_poll.feature_smart_poll = 0;
+
+	if (np->smart_poll.feature_smart_poll) {
+		hrtimer_init(&np->smart_poll.timer, CLOCK_MONOTONIC,
+			     HRTIMER_MODE_REL);
+		np->smart_poll.timer.function = smart_poll_function;
+		np->smart_poll.netdev = dev;
+		np->smart_poll.smart_poll_freq = DEFAULT_SMART_POLL_FREQ;
+		np->smart_poll.active = 0;
+		np->smart_poll.counter = 0;
+	}
+
 	err = talk_to_backend(np->xbdev, np);
 	if (err)
 		return err;
@@ -1627,12 +1719,30 @@ static void backend_changed(struct xenbus_device *dev,
 	}
 }
 
+static int xennet_get_coalesce(struct net_device *netdev,
+			       struct ethtool_coalesce *ec)
+{
+	struct netfront_info *np = netdev_priv(netdev);
+	ec->rx_coalesce_usecs = MICRO_SECOND / np->smart_poll.smart_poll_freq;
+	return 0;
+}
+
+static int xennet_set_coalesce(struct net_device *netdev,
+		struct ethtool_coalesce *ec)
+{
+	struct netfront_info *np = netdev_priv(netdev);
+	np->smart_poll.smart_poll_freq = MICRO_SECOND / ec->rx_coalesce_usecs;
+	return 0;
+}
+
 static struct ethtool_ops xennet_ethtool_ops =
 {
 	.set_tx_csum = ethtool_op_set_tx_csum,
 	.set_sg = xennet_set_sg,
 	.set_tso = xennet_set_tso,
 	.get_link = ethtool_op_get_link,
+	.get_coalesce = xennet_get_coalesce,
+	.set_coalesce = xennet_set_coalesce,
 };
 
 #ifdef CONFIG_SYSFS
