@@ -32,16 +32,52 @@
  */
 
 #include <linux/vmalloc.h>
+#include <linux/mm.h>
 #include "drmP.h"
 
 #define DEBUG_SCATTER 0
 
-static inline void *drm_vmalloc_dma(unsigned long size)
+static void *drm_vmalloc_dma(struct drm_device *drmdev, unsigned long size)
 {
 #if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
 	return __vmalloc(size, GFP_KERNEL, PAGE_KERNEL | _PAGE_NO_CACHE);
 #else
-	return vmalloc_32(size);
+	struct device *dev = &drmdev->pdev->dev;
+	struct page **pages;
+	void *addr;
+	const int npages = PFN_UP(size);
+	int i;
+
+	pages = kmalloc(npages * sizeof(*pages), GFP_KERNEL);
+	if (!pages)
+		goto fail;
+
+	for (i = 0; i < npages; i++) {
+		dma_addr_t phys;
+		void *addr;
+		addr = dma_alloc_coherent(dev, PAGE_SIZE, &phys, GFP_KERNEL);
+		if (addr == NULL)
+			goto out_free_pages;
+
+		pages[i] = virt_to_page(addr);
+	}
+
+	addr = vmap(pages, npages, VM_MAP | VM_IOREMAP, PAGE_KERNEL);
+
+	kfree(pages);
+
+	return addr;
+
+out_free_pages:
+	while (i > 0) {
+		void *addr = page_address(pages[--i]);
+		dma_free_coherent(dev, PAGE_SIZE, addr, virt_to_bus(addr));
+	}
+
+	kfree(pages);
+
+fail:
+	return NULL;
 #endif
 }
 
@@ -107,7 +143,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	}
 	memset((void *)entry->busaddr, 0, pages * sizeof(*entry->busaddr));
 
-	entry->virtual = drm_vmalloc_dma(pages << PAGE_SHIFT);
+	entry->virtual = drm_vmalloc_dma(dev, pages << PAGE_SHIFT);
 	if (!entry->virtual) {
 		kfree(entry->busaddr);
 		kfree(entry->pagelist);
