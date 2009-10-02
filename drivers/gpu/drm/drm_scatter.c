@@ -81,7 +81,24 @@ fail:
 #endif
 }
 
-void drm_sg_cleanup(struct drm_sg_mem * entry)
+static void drm_vfree_dma(struct drm_device *drmdev, void *addr, int npages,
+			  struct page **pages)
+{
+#if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
+	vfree(addr);
+#else
+	struct device *dev = &drmdev->pdev->dev;
+	int i;
+
+	for (i = 0; i < npages; i++) {
+		void *addr = page_address(pages[i]);
+		dma_free_coherent(dev, PAGE_SIZE, addr, virt_to_bus(addr));
+	}
+	vunmap(addr);
+#endif
+}
+
+void drm_sg_cleanup(struct drm_device *drmdev, struct drm_sg_mem * entry)
 {
 	struct page *page;
 	int i;
@@ -92,7 +109,7 @@ void drm_sg_cleanup(struct drm_sg_mem * entry)
 			ClearPageReserved(page);
 	}
 
-	vfree(entry->virtual);
+	drm_vfree_dma(drmdev, entry->virtual, entry->pages, entry->pagelist);
 
 	kfree(entry->busaddr);
 	kfree(entry->pagelist);
@@ -216,7 +233,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	return 0;
 
       failed:
-	drm_sg_cleanup(entry);
+	drm_sg_cleanup(dev, entry);
 	return -ENOMEM;
 }
 EXPORT_SYMBOL(drm_sg_alloc);
@@ -248,7 +265,7 @@ int drm_sg_free(struct drm_device *dev, void *data,
 
 	DRM_DEBUG("virtual  = %p\n", entry->virtual);
 
-	drm_sg_cleanup(entry);
+	drm_sg_cleanup(dev, entry);
 
 	return 0;
 }
