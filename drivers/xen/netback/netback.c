@@ -1558,6 +1558,7 @@ static int __init netback_init(void)
 {
 	int i;
 	struct page *page;
+	int rc = 0;
 
 	if (!xen_domain())
 		return -ENODEV;
@@ -1605,7 +1606,9 @@ static int __init netback_init(void)
 
 	//netif_accel_init();
 
-	netif_xenbus_init();
+	rc = netif_xenbus_init();
+	if (rc)
+		goto failed_init;
 
 #ifdef NETBE_DEBUG_INTERRUPT
 	(void)bind_virq_to_irqhandler(VIRQ_DEBUG,
@@ -1617,6 +1620,13 @@ static int __init netback_init(void)
 #endif
 
 	return 0;
+
+failed_init:
+	free_empty_pages_and_pagevec(mmap_pages, MAX_PENDING_REQS);
+	del_timer(&netbk_tx_pending_timer);
+	del_timer(&net_timer);
+	return rc;
+
 }
 
 module_init(netback_init);

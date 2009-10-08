@@ -463,8 +463,8 @@ static struct xenbus_driver netback = {
 };
 
 
-void netif_xenbus_init(void)
+int netif_xenbus_init(void)
 {
 	printk(KERN_CRIT "registering netback\n");
-	(void)xenbus_register_backend(&netback);
+	return xenbus_register_backend(&netback);
 }

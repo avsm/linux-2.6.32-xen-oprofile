@@ -196,7 +196,7 @@ static inline void  netif_put(struct xen_netif *netif)
 		wake_up(&netif->waiting_to_free);
 }
 
-void netif_xenbus_init(void);
+int netif_xenbus_init(void);
 
 #define netif_schedulable(netif)				\
 	(netif_running((netif)->dev) && netback_carrier_ok(netif))
