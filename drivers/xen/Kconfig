@@ -65,7 +65,6 @@ config XEN_SYS_HYPERVISOR
 config XEN_GNTDEV
 	bool "userspace grant access device driver"
 	depends on XEN
-	default XEN_DOM0
 	select MMU_NOTIFIER
 	help
 	  Allows userspace processes use grants.
