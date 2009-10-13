@@ -66,9 +66,10 @@ void test_and_schedule_op(struct pciback_device *pdev)
  * context because some of the pci_* functions can sleep (mostly due to ACPI
  * use of semaphores). This function is intended to be called from a work
  * queue in process context taking a struct pciback_device as a parameter */
-void pciback_do_op(void *data)
+
+void pciback_do_op(struct work_struct *data)
 {
-	struct pciback_device *pdev = data;
+	struct pciback_device *pdev = container_of(data, struct pciback_device, op_work);
 	struct pci_dev *dev;
 	struct xen_pci_op *op = &pdev->sh_info->op;
 
@@ -123,7 +124,7 @@ void pciback_do_op(void *data)
 	test_and_schedule_op(pdev);
 }
 
-irqreturn_t pciback_handle_event(int irq, void *dev_id, struct pt_regs *regs)
+irqreturn_t pciback_handle_event(int irq, void *dev_id)
 {
 	struct pciback_device *pdev = dev_id;
 
