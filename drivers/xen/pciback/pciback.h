@@ -36,7 +36,6 @@ struct pciback_device {
 
 	int evtchn_irq;
 
-	struct vm_struct *sh_area;
 	struct xen_pci_sharedinfo *sh_info;
 
 	unsigned long flags;

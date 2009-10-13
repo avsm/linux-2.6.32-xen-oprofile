@@ -7,6 +7,7 @@
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/vmalloc.h>
+#include <linux/workqueue.h>
 #include <xen/xenbus.h>
 #include <xen/events.h>
 #include <linux/workqueue.h>
@@ -29,7 +30,6 @@ static struct pciback_device *alloc_pdev(struct xenbus_device *xdev)
 
 	spin_lock_init(&pdev->dev_lock);
 
-	pdev->sh_area = NULL;
 	pdev->sh_info = NULL;
 	pdev->evtchn_irq = INVALID_EVTCHN_IRQ;
 	pdev->be_watching = 0;
@@ -59,7 +59,7 @@ static void pciback_disconnect(struct pciback_device *pdev)
 	flush_workqueue(pciback_wq);
 
 	if (pdev->sh_info != NULL) {
-		xenbus_unmap_ring_vfree(pdev->xdev, pdev->sh_area);
+		xenbus_unmap_ring_vfree(pdev->xdev, pdev->sh_info);
 		pdev->sh_info = NULL;
 	}
 
@@ -85,23 +85,23 @@ static int pciback_do_attach(struct pciback_device *pdev, int gnt_ref,
 			     int remote_evtchn)
 {
 	int err = 0;
-	struct vm_struct *area;
+	void *vaddr;
 
 	dev_dbg(&pdev->xdev->dev,
 		"Attaching to frontend resources - gnt_ref=%d evtchn=%d\n",
 		gnt_ref, remote_evtchn);
 
-	area = xenbus_map_ring_valloc(pdev->xdev, gnt_ref);
-	if (IS_ERR(area)) {
-		err = PTR_ERR(area);
+	err = xenbus_map_ring_valloc(pdev->xdev, gnt_ref, &vaddr);
+	if (err < 0) {
+		xenbus_dev_fatal(pdev->xdev, err,
+				"Error mapping other domain page in ours.");
 		goto out;
 	}
-	pdev->sh_area = area;
-	pdev->sh_info = area->addr;
+	pdev->sh_info = vaddr;
 
 	err = bind_interdomain_evtchn_to_irqhandler(
 		pdev->xdev->otherend_id, remote_evtchn, pciback_handle_event,
-		SA_SAMPLE_RANDOM, "pciback", pdev);
+		0, "pciback", pdev);
 	if (err < 0) {
 		xenbus_dev_fatal(pdev->xdev, err,
 				 "Error binding event channel to IRQ");
