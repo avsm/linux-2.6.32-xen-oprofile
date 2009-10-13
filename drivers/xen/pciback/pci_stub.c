@@ -13,7 +13,7 @@
 #include <linux/pci.h>
 #include <linux/wait.h>
 #include <asm/atomic.h>
-#include <xen/evtchn.h>
+#include <xen/events.h>
 #include "pciback.h"
 #include "conf_space.h"
 #include "conf_space_quirks.h"

@@ -8,7 +8,7 @@
 #include <linux/list.h>
 #include <linux/vmalloc.h>
 #include <xen/xenbus.h>
-#include <xen/evtchn.h>
+#include <xen/events.h>
 #include "pciback.h"
 
 #define INVALID_EVTCHN_IRQ  (-1)
