@@ -22,14 +22,14 @@ static int command_write(struct pci_dev *dev, int offset, u16 value, void *data)
 {
 	int err;
 
-	if (!dev->is_enabled && is_enable_cmd(value)) {
+	if (!pci_is_enabled(dev) && is_enable_cmd(value)) {
 		if (unlikely(verbose_request))
 			printk(KERN_DEBUG "pciback: %s: enable\n",
 			       pci_name(dev));
 		err = pci_enable_device(dev);
 		if (err)
 			return err;
-	} else if (dev->is_enabled && !is_enable_cmd(value)) {
+	} else if (pci_is_enabled(dev) && !is_enable_cmd(value)) {
 		if (unlikely(verbose_request))
 			printk(KERN_DEBUG "pciback: %s: disable\n",
 			       pci_name(dev));
