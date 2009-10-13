@@ -693,8 +693,6 @@ static struct xenbus_driver xenbus_pciback_driver = {
 
 int __init pciback_xenbus_register(void)
 {
-	if (!is_running_on_xen())
-		return -ENODEV;
 	pciback_wq = create_workqueue("pciback_workqueue");
 	if (!pciback_wq) {
 		printk(KERN_ERR "pciback_xenbus_register: create"

@@ -14,6 +14,8 @@
 #include <linux/wait.h>
 #include <asm/atomic.h>
 #include <xen/events.h>
+#include <asm/xen/pci.h>
+#include <asm/xen/hypervisor.h>
 #include "pciback.h"
 #include "conf_space.h"
 #include "conf_space_quirks.h"
@@ -1285,6 +1287,9 @@ fs_initcall(pcistub_init);
 static int __init pciback_init(void)
 {
 	int err;
+
+	if (!xen_initial_domain())
+		return -ENODEV;
 
 	err = pciback_config_init();
 	if (err)
