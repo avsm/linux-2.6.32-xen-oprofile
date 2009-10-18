@@ -67,6 +67,7 @@ extern unsigned long hpet_address;
 extern unsigned long force_hpet_address;
 extern int hpet_force_user;
 extern int is_hpet_enabled(void);
+extern int disable_hpet(char *);
 extern int hpet_enable(void);
 extern void hpet_disable(void);
 extern unsigned long hpet_readl(unsigned long a);
@@ -107,6 +108,7 @@ extern void hpet_unregister_irq_handler(rtc_irq_handler handler);
 #else /* CONFIG_HPET_TIMER */
 
 static inline int hpet_enable(void) { return 0; }
+static inline int disable_hpet(char *) { return 0; }
 static inline int is_hpet_enabled(void) { return 0; }
 #define hpet_readl(a) 0
 
