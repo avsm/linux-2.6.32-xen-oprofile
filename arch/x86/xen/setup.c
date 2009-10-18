@@ -10,6 +10,7 @@
 #include <linux/pm.h>
 
 #include <asm/elf.h>
+#include <asm/hpet.h>
 #include <asm/vdso.h>
 #include <asm/e820.h>
 #include <asm/setup.h>
@@ -221,6 +222,12 @@ void __init xen_arch_setup(void)
 		disable_acpi();
 	}
 #endif
+
+	/* 
+	 * Xen hypervisor uses HPET to wakeup cpu from deep c-states,
+	 * so the HPET usage in dom0 must be forbidden.
+	 */
+	disable_hpet(NULL);
 
 	memcpy(boot_command_line, xen_start_info->cmd_line,
 	       MAX_GUEST_CMDLINE > COMMAND_LINE_SIZE ?
