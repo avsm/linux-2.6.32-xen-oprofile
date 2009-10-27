@@ -1305,11 +1305,6 @@ static unsigned net_tx_build_mops(void)
 			skb_shinfo(skb)->frags[0].page = (void *)~0UL;
 		}
 
-		if (skb->data_len < skb_shinfo(skb)->gso_size) {
-			skb_shinfo(skb)->gso_size = 0;
-			skb_shinfo(skb)->gso_type = 0;
-		}
-
 		__skb_queue_tail(&tx_queue, skb);
 
 		pending_cons++;
