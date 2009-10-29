@@ -235,7 +235,7 @@ int xenbus_dev_probe(struct device *_dev)
 fail:
 	xenbus_dev_error(dev, err, "xenbus_dev_probe on %s", dev->nodename);
 	xenbus_switch_state(dev, XenbusStateClosed);
-	return -ENODEV;
+	return err;
 }
 EXPORT_SYMBOL_GPL(xenbus_dev_probe);
 
@@ -687,7 +687,7 @@ static int __init xenbus_probe_init(void)
 
 	err = -ENODEV;
 	if (!xen_domain())
-		goto out_error;
+		return err;
 
 	/*
 	 * Domain0 doesn't have a store_evtchn or store_mfn yet.
@@ -698,7 +698,7 @@ static int __init xenbus_probe_init(void)
 		/* Allocate Xenstore page */
 		page = get_zeroed_page(GFP_KERNEL);
 		if (!page)
-			return -ENOMEM;
+			goto out_error;
 
 		xen_store_mfn = xen_start_info->store_mfn =
 			pfn_to_mfn(virt_to_phys((void *)page) >>
