@@ -97,12 +97,12 @@ static inline unsigned long idx_to_kaddr(unsigned int idx)
 /* extra field used in struct page */
 static inline void netif_set_page_index(struct page *pg, unsigned int index)
 {
-	*(unsigned long *)&pg->mapping = index;
+	*(unsigned long *)&pg->mapping = index + 1;
 }
 
 static inline int netif_page_index(struct page *pg)
 {
-	unsigned long idx = (unsigned long)pg->mapping;
+	unsigned long idx = (unsigned long)pg->mapping - 1;
 
 	if (!PageForeign(pg))
 		return -1;
