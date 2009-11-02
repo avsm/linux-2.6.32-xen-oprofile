@@ -42,6 +42,8 @@ static void xen_set_io_apic_routing(int irq, int trigger, int polarity)
 int xen_register_gsi(u32 gsi, int triggering, int polarity)
 {
 	int irq;
+	int shareable = 0;
+	char *name;
 
 	if (!xen_domain())
 		return -1;
@@ -49,8 +51,15 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 	printk(KERN_DEBUG "xen: registering gsi %u triggering %d polarity %d\n",
 	       gsi, triggering, polarity);
 
-	irq = xen_allocate_pirq(gsi, (triggering == ACPI_EDGE_SENSITIVE)
-				     ? "ioapic-edge" : "ioapic-level");
+	if (triggering == ACPI_EDGE_SENSITIVE) {
+		shareable = 0;
+		name = "ioapic-edge";
+	} else {
+		shareable = 1;
+		name = "ioapic-level";
+	}
+
+	irq = xen_allocate_pirq(gsi, shareable, name);
 
 	printk(KERN_DEBUG "xen: --> irq=%d\n", irq);
 
@@ -68,7 +77,7 @@ void __init xen_setup_pirqs(void)
 
 	if (0 == nr_ioapics) {
 		for (irq = 0; irq < NR_IRQS_LEGACY; irq++)
-			xen_allocate_pirq(irq, "xt-pic");
+			xen_allocate_pirq(irq, 0, "xt-pic");
 		return;
 	}
 
