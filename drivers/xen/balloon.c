@@ -59,7 +59,7 @@
 #include <xen/features.h>
 #include <xen/page.h>
 
-#define PAGES2KB(_p) ((_p)<<(PAGE_SHIFT-10))
+#define PAGES2KB(_p) ((_p)<<(PAGE_SHIFT+balloon_order-10))
 
 #define BALLOON_CLASS_NAME "xen_memory"
 
@@ -92,6 +92,14 @@ static DEFINE_SPINLOCK(balloon_lock);
 
 static struct balloon_stats balloon_stats;
 
+/*
+ * Work in pages of this order.  Can be either 0 for normal pages
+ * or 9 for hugepages.
+ */
+static int balloon_order;
+static unsigned long balloon_npages;
+static unsigned long discontig_frame_list[PAGE_SIZE / sizeof(unsigned long)];
+
 /* We increase/decrease in batches which fit in a page */
 static unsigned long frame_list[PAGE_SIZE / sizeof(unsigned long)];
 
@@ -120,8 +128,39 @@ static struct timer_list balloon_timer;
 static void scrub_page(struct page *page)
 {
 #ifdef CONFIG_XEN_SCRUB_PAGES
-	clear_highpage(page);
+	int i;
+
+	for (i = 0; i < balloon_npages; i++)
+		clear_highpage(page++);
 #endif
+}
+
+static void free_discontig_frame(void)
+{
+	int rc;
+	struct xen_memory_reservation reservation = {
+		.address_bits = 0,
+		.domid        = DOMID_SELF,
+		.nr_extents   = balloon_npages,
+		.extent_order = 0
+	};
+
+	set_xen_guest_handle(reservation.extent_start, discontig_frame_list);
+	rc = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
+	BUG_ON(rc != balloon_npages);
+}
+
+static unsigned long shrink_frame(unsigned long nr_pages)
+{
+	unsigned long i, j;
+
+	for (i = 0, j = 0; i < nr_pages; i++, j++) {
+		if (frame_list[i] == 0)
+			j++;
+		if (i != j)
+			frame_list[i] = frame_list[j];
+	}
+	return i;
 }
 
 /* balloon_append: add the given page to the balloon. */
@@ -197,12 +236,11 @@ static unsigned long current_target(void)
 
 static int increase_reservation(unsigned long nr_pages)
 {
-	unsigned long  pfn, i, flags;
+	unsigned long  pfn, mfn, i, j, flags;
 	struct page   *page;
 	long           rc;
 	struct xen_memory_reservation reservation = {
 		.address_bits = 0,
-		.extent_order = 0,
 		.domid        = DOMID_SELF
 	};
 
@@ -214,12 +252,14 @@ static int increase_reservation(unsigned long nr_pages)
 	page = balloon_first_page();
 	for (i = 0; i < nr_pages; i++) {
 		BUG_ON(page == NULL);
-		frame_list[i] = page_to_pfn(page);;
+		frame_list[i] = page_to_pfn(page);
 		page = balloon_next_page(page);
 	}
 
 	set_xen_guest_handle(reservation.extent_start, frame_list);
 	reservation.nr_extents = nr_pages;
+	reservation.extent_order = balloon_order;
+
 	rc = HYPERVISOR_memory_op(XENMEM_populate_physmap, &reservation);
 	if (rc < 0)
 		goto out;
@@ -229,19 +269,22 @@ static int increase_reservation(unsigned long nr_pages)
 		BUG_ON(page == NULL);
 
 		pfn = page_to_pfn(page);
+		mfn = frame_list[i];
 		BUG_ON(!xen_feature(XENFEAT_auto_translated_physmap) &&
 		       phys_to_machine_mapping_valid(pfn));
 
-		set_phys_to_machine(pfn, frame_list[i]);
+		for (j = 0; j < balloon_npages; j++, pfn++, mfn++) {
+			set_phys_to_machine(pfn, mfn);
 
-		/* Link back into the page tables if not highmem. */
-		if (pfn < max_low_pfn) {
-			int ret;
-			ret = HYPERVISOR_update_va_mapping(
-				(unsigned long)__va(pfn << PAGE_SHIFT),
-				mfn_pte(frame_list[i], PAGE_KERNEL),
-				0);
-			BUG_ON(ret);
+			/* Link back into the page tables if not highmem. */
+			if (pfn < max_low_pfn) {
+				int ret;
+				ret = HYPERVISOR_update_va_mapping(
+					(unsigned long)__va(pfn << PAGE_SHIFT),
+					mfn_pte(mfn, PAGE_KERNEL),
+					0);
+				BUG_ON(ret);
+			}
 		}
 
 		/* Relinquish the page back to the allocator. */
@@ -260,13 +303,13 @@ static int increase_reservation(unsigned long nr_pages)
 
 static int decrease_reservation(unsigned long nr_pages)
 {
-	unsigned long  pfn, i, flags;
+	unsigned long  pfn, lpfn, mfn, i, j, flags;
 	struct page   *page;
 	int            need_sleep = 0;
-	int ret;
+	int		discontig, discontig_free;
+	int		ret;
 	struct xen_memory_reservation reservation = {
 		.address_bits = 0,
-		.extent_order = 0,
 		.domid        = DOMID_SELF
 	};
 
@@ -274,7 +317,7 @@ static int decrease_reservation(unsigned long nr_pages)
 		nr_pages = ARRAY_SIZE(frame_list);
 
 	for (i = 0; i < nr_pages; i++) {
-		if ((page = alloc_page(GFP_BALLOON)) == NULL) {
+		if ((page = alloc_pages(GFP_BALLOON, balloon_order)) == NULL) {
 			nr_pages = i;
 			need_sleep = 1;
 			break;
@@ -284,14 +327,6 @@ static int decrease_reservation(unsigned long nr_pages)
 		frame_list[i] = pfn_to_mfn(pfn);
 
 		scrub_page(page);
-
-		if (!PageHighMem(page)) {
-			ret = HYPERVISOR_update_va_mapping(
-				(unsigned long)__va(pfn << PAGE_SHIFT),
-				__pte_ma(0), 0);
-			BUG_ON(ret);
-                }
-
 	}
 
 	/* Ensure that ballooned highmem pages don't have kmaps. */
@@ -302,17 +337,38 @@ static int decrease_reservation(unsigned long nr_pages)
 
 	/* No more mappings: invalidate P2M and add to balloon. */
 	for (i = 0; i < nr_pages; i++) {
-		pfn = mfn_to_pfn(frame_list[i]);
-		set_phys_to_machine(pfn, INVALID_P2M_ENTRY);
+		mfn = frame_list[i];
+		lpfn = pfn = mfn_to_pfn(mfn);
 		balloon_append(pfn_to_page(pfn));
+		discontig_free = 0;
+		for (j = 0; j < balloon_npages; j++, lpfn++, mfn++) {
+			if ((discontig_frame_list[j] = pfn_to_mfn(lpfn)) != mfn)
+				discontig_free = 1;
+
+			set_phys_to_machine(lpfn, INVALID_P2M_ENTRY);
+			if (!PageHighMem(page)) {
+				ret = HYPERVISOR_update_va_mapping(
+					(unsigned long)__va(lpfn << PAGE_SHIFT),
+					__pte_ma(0), 0);
+				BUG_ON(ret);
+			}
+		}
+		if (discontig_free) {
+			free_discontig_frame();
+			frame_list[i] = 0;
+			discontig = 1;
+		}
 	}
+	balloon_stats.current_pages -= nr_pages;
+
+	if (discontig)
+		nr_pages = shrink_frame(nr_pages);
 
 	set_xen_guest_handle(reservation.extent_start, frame_list);
 	reservation.nr_extents   = nr_pages;
+	reservation.extent_order = balloon_order;
 	ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
 	BUG_ON(ret != nr_pages);
-
-	balloon_stats.current_pages -= nr_pages;
 
 	spin_unlock_irqrestore(&balloon_lock, flags);
 
@@ -381,7 +437,7 @@ static void watch_target(struct xenbus_watch *watch,
 	/* The given memory/target value is in KiB, so it needs converting to
 	 * pages. PAGE_SHIFT converts bytes to pages, hence PAGE_SHIFT - 10.
 	 */
-	balloon_set_new_target(new_target >> (PAGE_SHIFT - 10));
+	balloon_set_new_target(new_target >> ((PAGE_SHIFT - 10) + balloon_order));
 }
 
 static int balloon_init_watcher(struct notifier_block *notifier,
@@ -407,9 +463,12 @@ static int __init balloon_init(void)
 	if (!xen_pv_domain())
 		return -ENODEV;
 
-	pr_info("xen_balloon: Initialising balloon driver.\n");
+	pr_info("xen_balloon: Initialising balloon driver with page order %d.\n",
+		balloon_order);
 
-	balloon_stats.current_pages = min(xen_start_info->nr_pages, max_pfn);
+	balloon_npages = 1 << balloon_order;
+
+	balloon_stats.current_pages = (min(xen_start_info->nr_pages, max_pfn)) >> balloon_order;
 	balloon_stats.target_pages  = balloon_stats.current_pages;
 	balloon_stats.balloon_low   = 0;
 	balloon_stats.balloon_high  = 0;
@@ -422,7 +481,7 @@ static int __init balloon_init(void)
 	register_balloon(&balloon_sysdev);
 
 	/* Initialise the balloon with excess memory space. */
-	for (pfn = xen_start_info->nr_pages; pfn < max_pfn; pfn++) {
+	for (pfn = xen_start_info->nr_pages; pfn < max_pfn; pfn += balloon_npages) {
 		page = pfn_to_page(pfn);
 		if (!PageReserved(page))
 			balloon_append(page);
@@ -445,6 +504,14 @@ static void balloon_exit(void)
 }
 
 module_exit(balloon_exit);
+
+static int __init balloon_parse_huge(char *s)
+{
+	balloon_order = 9;
+	return 1;
+}
+
+__setup("balloon_hugepages", balloon_parse_huge);
 
 #define BALLOON_SHOW(name, format, args...)				\
 	static ssize_t show_##name(struct sys_device *dev,		\
@@ -479,7 +546,7 @@ static ssize_t store_target_kb(struct sys_device *dev,
 
 	target_bytes = simple_strtoull(buf, &endchar, 0) * 1024;
 
-	balloon_set_new_target(target_bytes >> PAGE_SHIFT);
+	balloon_set_new_target(target_bytes >> (PAGE_SHIFT + balloon_order));
 
 	return count;
 }
@@ -493,7 +560,7 @@ static ssize_t show_target(struct sys_device *dev, struct sysdev_attribute *attr
 {
 	return sprintf(buf, "%llu\n",
 		       (unsigned long long)balloon_stats.target_pages
-		       << PAGE_SHIFT);
+		       << (PAGE_SHIFT + balloon_order));
 }
 
 static ssize_t store_target(struct sys_device *dev,
@@ -509,7 +576,7 @@ static ssize_t store_target(struct sys_device *dev,
 
 	target_bytes = memparse(buf, &endchar);
 
-	balloon_set_new_target(target_bytes >> PAGE_SHIFT);
+	balloon_set_new_target(target_bytes >> (PAGE_SHIFT + balloon_order));
 
 	return count;
 }
