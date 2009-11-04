@@ -537,16 +537,20 @@ static int dealloc_pte_fn(pte_t *pte, struct page *pmd_page,
 struct page **alloc_empty_pages_and_pagevec(int nr_pages)
 {
 	struct page *page, **pagevec;
-	int i, ret;
+	int npages;
+	int i, j, ret;
 
-	pagevec = kmalloc(sizeof(page) * nr_pages, GFP_KERNEL);
+	/* Round up to next number of balloon_order pages */
+	npages = (nr_pages + (balloon_npages-1)) >> balloon_order;
+
+	pagevec = kmalloc(sizeof(page) * nr_pages << balloon_order, GFP_KERNEL);
 	if (pagevec == NULL)
 		return NULL;
 
 	for (i = 0; i < nr_pages; i++) {
 		void *v;
 
-		page = pagevec[i] = alloc_page(GFP_KERNEL|__GFP_COLD);
+		page = alloc_pages(GFP_KERNEL|__GFP_COLD, balloon_order);
 		if (page == NULL)
 			goto err;
 
@@ -557,8 +561,8 @@ struct page **alloc_empty_pages_and_pagevec(int nr_pages)
 		v = page_address(page);
 
 		ret = apply_to_page_range(&init_mm, (unsigned long)v,
-					  PAGE_SIZE, dealloc_pte_fn,
-					  NULL);
+					  PAGE_SIZE << balloon_order,
+					  dealloc_pte_fn, NULL);
 
 		if (ret != 0) {
 			mutex_unlock(&balloon_mutex);
@@ -566,8 +570,10 @@ struct page **alloc_empty_pages_and_pagevec(int nr_pages)
 			__free_page(page);
 			goto err;
 		}
+		for (j = 0; j < balloon_npages; j++)
+			pagevec[(i<<balloon_order)+j] = page++;
 
-		totalram_pages = --balloon_stats.current_pages;
+		totalram_pages = balloon_stats.current_pages -= balloon_npages;
 
 		mutex_unlock(&balloon_mutex);
 	}
@@ -580,7 +586,7 @@ struct page **alloc_empty_pages_and_pagevec(int nr_pages)
  err:
 	mutex_lock(&balloon_mutex);
 	while (--i >= 0)
-		balloon_append(pagevec[i]);
+		balloon_append(pagevec[i << balloon_order]);
 	mutex_unlock(&balloon_mutex);
 	kfree(pagevec);
 	pagevec = NULL;
@@ -590,15 +596,21 @@ EXPORT_SYMBOL_GPL(alloc_empty_pages_and_pagevec);
 
 void free_empty_pages_and_pagevec(struct page **pagevec, int nr_pages)
 {
+	struct page *page;
 	int i;
+	int npages;
 
 	if (pagevec == NULL)
 		return;
 
+	/* Round up to next number of balloon_order pages */
+	npages = (nr_pages + (balloon_npages-1)) >> balloon_order;
+
 	mutex_lock(&balloon_mutex);
 	for (i = 0; i < nr_pages; i++) {
-		BUG_ON(page_count(pagevec[i]) != 1);
-		balloon_append(pagevec[i]);
+		page = pagevec[i << balloon_order];
+		BUG_ON(page_count(page) != 1);
+		balloon_append(page);
 	}
 	mutex_unlock(&balloon_mutex);
 
