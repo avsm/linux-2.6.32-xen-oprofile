@@ -459,7 +459,7 @@ static struct xenbus_driver xenbus_pcifront_driver = {
 
 static int __init pcifront_init(void)
 {
-	if (!is_running_on_xen())
+	if (!xen_domain())
 		return -ENODEV;
 
 	return xenbus_register_frontend(&xenbus_pcifront_driver);
