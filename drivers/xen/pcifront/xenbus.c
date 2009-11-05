@@ -8,7 +8,7 @@
 #include <linux/mm.h>
 #include <xen/xenbus.h>
 #include <xen/events.h>
-#include <xen/gnttab.h>
+#include <xen/grant_table.h>
 #include <xen/page.h>
 #include "pcifront.h"
 
