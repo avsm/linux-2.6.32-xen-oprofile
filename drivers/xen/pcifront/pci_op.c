@@ -416,7 +416,7 @@ void pci_frontend_disable_msi(struct pci_dev* dev)
 #endif /* CONFIG_PCI_MSI */
 
 /* Claim resources for the PCI frontend as-is, backend won't allow changes */
-static void pcifront_claim_resource(struct pci_dev *dev, void *data)
+static int pcifront_claim_resource(struct pci_dev *dev, void *data)
 {
 	struct pcifront_device *pdev = data;
 	int i;
@@ -431,6 +431,8 @@ static void pcifront_claim_resource(struct pci_dev *dev, void *data)
 			pci_claim_resource(dev, i);
 		}
 	}
+
+	return 0;
 }
 
 int __devinit pcifront_scan_root(struct pcifront_device *pdev,
