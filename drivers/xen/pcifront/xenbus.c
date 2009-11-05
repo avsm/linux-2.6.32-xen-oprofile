@@ -9,6 +9,7 @@
 #include <xen/xenbus.h>
 #include <xen/events.h>
 #include <xen/gnttab.h>
+#include <xen/page.h>
 #include "pcifront.h"
 
 #ifndef __init_refok
