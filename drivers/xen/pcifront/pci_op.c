@@ -10,7 +10,7 @@
 #include <linux/spinlock.h>
 #include <asm/bitops.h>
 #include <linux/time.h>
-#include <xen/evtchn.h>
+#include <xen/events.h>
 #include "pcifront.h"
 
 static int verbose_request = 0;
