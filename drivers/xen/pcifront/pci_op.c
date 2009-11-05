@@ -195,8 +195,7 @@ static int do_pci_op(struct pcifront_device *pdev, struct xen_pci_op *op)
 
 	while (test_bit(_XEN_PCIF_active,
 			(unsigned long *)&pdev->sh_info->flags)) {
-		if (HYPERVISOR_poll(&port, 1, jiffies + 3*HZ))
-			BUG();
+		xen_poll_irq_timeout(irq, jiffies + 3*HZ);
 		xen_clear_irq_pending(irq);
 		do_gettimeofday(&tv);
 		ns = timeval_to_ns(&tv);
