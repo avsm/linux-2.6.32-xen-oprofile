@@ -63,7 +63,6 @@ static inline void pcifront_setup_root_resources(struct pci_bus *bus,
 						 struct pcifront_sd *sd)
 {
 }
-extern struct rw_semaphore pci_bus_sem;
 
 int pcifront_scan_root(struct pcifront_device *pdev,
 		       unsigned int domain, unsigned int bus);
