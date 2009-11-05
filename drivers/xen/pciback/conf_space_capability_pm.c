@@ -20,7 +20,7 @@ static int pm_caps_read(struct pci_dev *dev, int offset, u16 *value,
 
 	*value = real_value & ~PCI_PM_CAP_PME_MASK;
 
-      out:
+out:
 	return err;
 }
 
@@ -77,7 +77,7 @@ static void *pm_ctrl_init(struct pci_dev *dev, int offset)
 		err = pci_write_config_word(dev, offset, value);
 	}
 
-      out:
+out:
 	return ERR_PTR(err);
 }
 

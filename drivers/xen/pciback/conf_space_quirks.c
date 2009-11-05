@@ -18,8 +18,10 @@ match_one_device(const struct pci_device_id *id, const struct pci_dev *dev)
 {
 	if ((id->vendor == PCI_ANY_ID || id->vendor == dev->vendor) &&
 	    (id->device == PCI_ANY_ID || id->device == dev->device) &&
-	    (id->subvendor == PCI_ANY_ID || id->subvendor == dev->subsystem_vendor) &&
-	    (id->subdevice == PCI_ANY_ID || id->subdevice == dev->subsystem_device) &&
+	    (id->subvendor == PCI_ANY_ID ||
+				id->subvendor == dev->subsystem_vendor) &&
+	    (id->subdevice == PCI_ANY_ID ||
+				id->subdevice == dev->subsystem_device) &&
 	    !((id->class ^ dev->class) & id->class_mask))
 		return id;
 	return NULL;
@@ -35,7 +37,7 @@ struct pciback_config_quirk *pciback_find_quirk(struct pci_dev *dev)
 	tmp_quirk = NULL;
 	printk(KERN_DEBUG
 	       "quirk didn't match any device pciback knows about\n");
-      out:
+out:
 	return tmp_quirk;
 }
 
@@ -51,7 +53,7 @@ int pciback_field_is_dup(struct pci_dev *dev, unsigned int reg)
 	struct config_field_entry *cfg_entry;
 
 	list_for_each_entry(cfg_entry, &dev_data->config_fields, list) {
-		if ( OFFSET(cfg_entry) == reg) {
+		if (OFFSET(cfg_entry) == reg) {
 			ret = 1;
 			break;
 		}
@@ -84,7 +86,7 @@ int pciback_config_quirks_add_field(struct pci_dev *dev, struct config_field
 
 	pciback_config_add_field(dev, field);
 
-      out:
+out:
 	return err;
 }
 
@@ -110,7 +112,7 @@ int pciback_config_quirks_init(struct pci_dev *dev)
 	quirk->pdev = dev;
 
 	register_quirk(quirk);
-      out:
+out:
 	return ret;
 }
 
@@ -133,6 +135,6 @@ int pciback_config_quirk_release(struct pci_dev *dev)
 	list_del(&quirk->quirks_list);
 	kfree(quirk);
 
-      out:
+out:
 	return ret;
 }

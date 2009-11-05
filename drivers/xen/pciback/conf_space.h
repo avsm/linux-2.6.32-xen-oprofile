@@ -11,21 +11,21 @@
 #include <linux/err.h>
 
 /* conf_field_init can return an errno in a ptr with ERR_PTR() */
-typedef void *(*conf_field_init) (struct pci_dev * dev, int offset);
-typedef void (*conf_field_reset) (struct pci_dev * dev, int offset, void *data);
-typedef void (*conf_field_free) (struct pci_dev * dev, int offset, void *data);
+typedef void *(*conf_field_init) (struct pci_dev *dev, int offset);
+typedef void (*conf_field_reset) (struct pci_dev *dev, int offset, void *data);
+typedef void (*conf_field_free) (struct pci_dev *dev, int offset, void *data);
 
-typedef int (*conf_dword_write) (struct pci_dev * dev, int offset, u32 value,
+typedef int (*conf_dword_write) (struct pci_dev *dev, int offset, u32 value,
 				 void *data);
-typedef int (*conf_word_write) (struct pci_dev * dev, int offset, u16 value,
+typedef int (*conf_word_write) (struct pci_dev *dev, int offset, u16 value,
 				void *data);
-typedef int (*conf_byte_write) (struct pci_dev * dev, int offset, u8 value,
+typedef int (*conf_byte_write) (struct pci_dev *dev, int offset, u8 value,
 				void *data);
-typedef int (*conf_dword_read) (struct pci_dev * dev, int offset, u32 * value,
+typedef int (*conf_dword_read) (struct pci_dev *dev, int offset, u32 *value,
 				void *data);
-typedef int (*conf_word_read) (struct pci_dev * dev, int offset, u16 * value,
+typedef int (*conf_word_read) (struct pci_dev *dev, int offset, u16 *value,
 			       void *data);
-typedef int (*conf_byte_read) (struct pci_dev * dev, int offset, u8 * value,
+typedef int (*conf_byte_read) (struct pci_dev *dev, int offset, u8 *value,
 			       void *data);
 
 /* These are the fields within the configuration space which we
@@ -39,7 +39,7 @@ struct config_field {
 	conf_field_init init;
 	conf_field_reset reset;
 	conf_field_free release;
-	void (*clean) (struct config_field * field);
+	void (*clean) (struct config_field *field);
 	union {
 		struct {
 			conf_dword_write write;
@@ -92,8 +92,8 @@ static inline int pciback_config_add_fields(struct pci_dev *dev,
 }
 
 static inline int pciback_config_add_fields_offset(struct pci_dev *dev,
-						   const struct config_field *field,
-						   unsigned int offset)
+					const struct config_field *field,
+					unsigned int offset)
 {
 	int i, err = 0;
 	for (i = 0; field[i].size != 0; i++) {
@@ -105,11 +105,11 @@ static inline int pciback_config_add_fields_offset(struct pci_dev *dev,
 }
 
 /* Read/Write the real configuration space */
-int pciback_read_config_byte(struct pci_dev *dev, int offset, u8 * value,
+int pciback_read_config_byte(struct pci_dev *dev, int offset, u8 *value,
 			     void *data);
-int pciback_read_config_word(struct pci_dev *dev, int offset, u16 * value,
+int pciback_read_config_word(struct pci_dev *dev, int offset, u16 *value,
 			     void *data);
-int pciback_read_config_dword(struct pci_dev *dev, int offset, u32 * value,
+int pciback_read_config_dword(struct pci_dev *dev, int offset, u32 *value,
 			      void *data);
 int pciback_write_config_byte(struct pci_dev *dev, int offset, u8 value,
 			      void *data);

@@ -18,11 +18,11 @@
 static int permissive;
 module_param(permissive, bool, 0644);
 
-#define DEFINE_PCI_CONFIG(op,size,type) 			\
+#define DEFINE_PCI_CONFIG(op, size, type) 			\
 int pciback_##op##_config_##size 				\
 (struct pci_dev *dev, int offset, type value, void *data)	\
 {								\
-	return pci_##op##_config_##size (dev, offset, value);	\
+	return pci_##op##_config_##size(dev, offset, value);	\
 }
 
 DEFINE_PCI_CONFIG(read, byte, u8 *)
@@ -139,14 +139,15 @@ static int pcibios_err_to_errno(int err)
 }
 
 int pciback_config_read(struct pci_dev *dev, int offset, int size,
-			u32 * ret_val)
+			u32 *ret_val)
 {
 	int err = 0;
 	struct pciback_dev_data *dev_data = pci_get_drvdata(dev);
 	const struct config_field_entry *cfg_entry;
 	const struct config_field *field;
 	int req_start, req_end, field_start, field_end;
-	/* if read fails for any reason, return 0 (as if device didn't respond) */
+	/* if read fails for any reason, return 0
+	 * (as if device didn't respond) */
 	u32 value = 0, tmp_val;
 
 	if (unlikely(verbose_request))
@@ -161,10 +162,10 @@ int pciback_config_read(struct pci_dev *dev, int offset, int size,
 	/* Get the real value first, then modify as appropriate */
 	switch (size) {
 	case 1:
-		err = pci_read_config_byte(dev, offset, (u8 *) & value);
+		err = pci_read_config_byte(dev, offset, (u8 *) &value);
 		break;
 	case 2:
-		err = pci_read_config_word(dev, offset, (u16 *) & value);
+		err = pci_read_config_word(dev, offset, (u16 *) &value);
 		break;
 	case 4:
 		err = pci_read_config_dword(dev, offset, &value);
@@ -192,7 +193,7 @@ int pciback_config_read(struct pci_dev *dev, int offset, int size,
 		}
 	}
 
-      out:
+out:
 	if (unlikely(verbose_request))
 		printk(KERN_DEBUG "pciback: %s: read %d bytes at 0x%x = %x\n",
 		       pci_name(dev), size, offset, value);
@@ -276,8 +277,8 @@ int pciback_config_write(struct pci_dev *dev, int offset, int size, u32 value)
 		} else if (!dev_data->warned_on_write) {
 			dev_data->warned_on_write = 1;
 			dev_warn(&dev->dev, "Driver tried to write to a "
-				 "read-only configuration space field at offset "
-				 "0x%x, size %d. This may be harmless, but if "
+				 "read-only configuration space field at offset"
+				 " 0x%x, size %d. This may be harmless, but if "
 				 "you have problems with your device:\n"
 				 "1) see permissive attribute in sysfs\n"
 				 "2) report problems to the xen-devel "
@@ -295,8 +296,8 @@ void pciback_config_free_dyn_fields(struct pci_dev *dev)
 	struct config_field_entry *cfg_entry, *t;
 	const struct config_field *field;
 
-	dev_dbg(&dev->dev,
-		"free-ing dynamically allocated virtual configuration space fields\n");
+	dev_dbg(&dev->dev, "free-ing dynamically allocated virtual "
+			   "configuration space fields\n");
 	if (!dev_data)
 		return;
 
@@ -306,8 +307,7 @@ void pciback_config_free_dyn_fields(struct pci_dev *dev)
 		if (field->clean) {
 			field->clean((struct config_field *)field);
 
-			if (cfg_entry->data)
-				kfree(cfg_entry->data);
+			kfree(cfg_entry->data);
 
 			list_del(&cfg_entry->list);
 			kfree(cfg_entry);
@@ -376,7 +376,7 @@ int pciback_config_add_field_offset(struct pci_dev *dev,
 	cfg_entry->base_offset = base_offset;
 
 	/* silently ignore duplicate fields */
-	err = pciback_field_is_dup(dev,OFFSET(cfg_entry));
+	err = pciback_field_is_dup(dev, OFFSET(cfg_entry));
 	if (err)
 		goto out;
 
@@ -395,14 +395,14 @@ int pciback_config_add_field_offset(struct pci_dev *dev,
 		OFFSET(cfg_entry));
 	list_add_tail(&cfg_entry->list, &dev_data->config_fields);
 
-      out:
+out:
 	if (err)
 		kfree(cfg_entry);
 
 	return err;
 }
 
-/* This sets up the device's virtual configuration space to keep track of 
+/* This sets up the device's virtual configuration space to keep track of
  * certain registers (like the base address registers (BARs) so that we can
  * keep the client from manipulating them directly.
  */
@@ -425,7 +425,7 @@ int pciback_config_init_dev(struct pci_dev *dev)
 
 	err = pciback_config_quirks_init(dev);
 
-      out:
+out:
 	return err;
 }
 

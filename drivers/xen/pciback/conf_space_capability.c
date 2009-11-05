@@ -53,12 +53,9 @@ int pciback_config_capability_add_fields(struct pci_dev *dev)
 		}
 	}
 
-      out:
+out:
 	return err;
 }
-
-extern struct pciback_config_capability pciback_config_capability_vpd;
-extern struct pciback_config_capability pciback_config_capability_pm;
 
 int pciback_config_capability_init(void)
 {

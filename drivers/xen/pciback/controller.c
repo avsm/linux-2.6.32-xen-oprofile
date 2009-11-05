@@ -259,7 +259,7 @@ static acpi_status write_xenbus_resource(struct acpi_resource *res, void *data)
 	    !(addr.resource_type == ACPI_IO_RANGE &&
 	      addr.info.io.translation))
 		return AE_OK;
-	   
+
 	/* Store the resource in xenbus for the guest */
 	len = snprintf(str, sizeof(str), "root-%d-resource-%d",
 		       info->root_num, info->resource_count);
@@ -314,7 +314,7 @@ int pciback_publish_pci_roots(struct pciback_device *pdev,
 			goto out;
 
 		/*
- 		 * Now figure out which root-%d this belongs to
+		 * Now figure out which root-%d this belongs to
 		 * so we can associate resources with it.
 		 */
 		err = xenbus_scanf(XBT_NIL, pdev->xdev->nodename,
@@ -407,8 +407,8 @@ void pciback_release_devices(struct pciback_device *pdev)
 	pdev->pci_dev_data = NULL;
 }
 
-int pciback_get_pcifront_dev(struct pci_dev *pcidev, 
-		struct pciback_device *pdev, 
+int pciback_get_pcifront_dev(struct pci_dev *pcidev,
+		struct pciback_device *pdev,
 		unsigned int *domain, unsigned int *bus, unsigned int *devfn)
 {
 	struct controller_dev_data *dev_data = pdev->pci_dev_data;
@@ -420,13 +420,12 @@ int pciback_get_pcifront_dev(struct pci_dev *pcidev,
 
 	list_for_each_entry(cntrl_entry, &dev_data->list, list) {
 		list_for_each_entry(dev_entry, &cntrl_entry->dev_list, list) {
-			if ( (dev_entry->dev->bus->number == 
+			if ((dev_entry->dev->bus->number ==
 					pcidev->bus->number) &&
-			  	(dev_entry->dev->devfn ==
+				(dev_entry->dev->devfn ==
 					pcidev->devfn) &&
 				(pci_domain_nr(dev_entry->dev->bus) ==
-					pci_domain_nr(pcidev->bus)))
-			{
+					pci_domain_nr(pcidev->bus))) {
 				found = 1;
 				*domain = cntrl_entry->domain;
 				*bus = cntrl_entry->bus;

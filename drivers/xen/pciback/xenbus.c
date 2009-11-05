@@ -40,7 +40,7 @@ static struct pciback_device *alloc_pdev(struct xenbus_device *xdev)
 		kfree(pdev);
 		pdev = NULL;
 	}
-      out:
+out:
 	return pdev;
 }
 
@@ -111,7 +111,7 @@ static int pciback_do_attach(struct pciback_device *pdev, int gnt_ref,
 	err = 0;
 
 	dev_dbg(&pdev->xdev->dev, "Attached!\n");
-      out:
+out:
 	return err;
 }
 
@@ -166,11 +166,10 @@ static int pciback_attach(struct pciback_device *pdev)
 				 "Error switching to connected state!");
 
 	dev_dbg(&pdev->xdev->dev, "Connected? %d\n", err);
-      out:
+out:
 	spin_unlock(&pdev->dev_lock);
 
-	if (magic)
-		kfree(magic);
+	kfree(magic);
 
 	return err;
 }
@@ -193,7 +192,7 @@ static int pciback_publish_pci_dev(struct pciback_device *pdev,
 			    "%04x:%02x:%02x.%02x", domain, bus,
 			    PCI_SLOT(devfn), PCI_FUNC(devfn));
 
-      out:
+out:
 	return err;
 }
 
@@ -230,7 +229,7 @@ static int pciback_export_device(struct pciback_device *pdev,
 	 * to other driver domains (as he who controls the bridge can disable
 	 * it and stop the other devices from working).
 	 */
-      out:
+out:
 	return err;
 }
 
@@ -253,8 +252,8 @@ static int pciback_remove_device(struct pciback_device *pdev,
 	}
 
 	pciback_release_pci_dev(pdev, dev);
-	
-      out:
+
+out:
 	return err;
 }
 
@@ -314,7 +313,7 @@ static int pciback_publish_pci_root(struct pciback_device *pdev,
 	err = xenbus_printf(XBT_NIL, pdev->xdev->nodename,
 			    "root_num", "%d", (root_num + 1));
 
-      out:
+out:
 	return err;
 }
 
@@ -358,7 +357,7 @@ static int pciback_reconfigure(struct pciback_device *pdev)
 		}
 		err = xenbus_scanf(XBT_NIL, pdev->xdev->nodename, state_str,
 				   "%d", &substate);
-		if (err != 1) 
+		if (err != 1)
 			substate = XenbusStateUnknown;
 
 		switch (substate) {
@@ -389,14 +388,15 @@ static int pciback_reconfigure(struct pciback_device *pdev)
 						 "configuration");
 				goto out;
 			}
-	
+
 			err = pciback_export_device(pdev, domain, bus, slot,
 						    func, i);
 			if (err)
 				goto out;
 
 			/* Publish pci roots. */
-			err = pciback_publish_pci_roots(pdev, pciback_publish_pci_root);
+			err = pciback_publish_pci_roots(pdev,
+						pciback_publish_pci_root);
 			if (err) {
 				xenbus_dev_fatal(pdev->xdev, err,
 						 "Error while publish PCI root"
@@ -412,7 +412,7 @@ static int pciback_reconfigure(struct pciback_device *pdev)
 						 "Error switching substate of "
 						 "dev-%d\n", i);
 				goto out;
-			}	
+			}
 			break;
 
 		case XenbusStateClosing:
@@ -445,7 +445,7 @@ static int pciback_reconfigure(struct pciback_device *pdev)
 
 			err = pciback_remove_device(pdev, domain, bus, slot,
 						    func);
-			if(err)
+			if (err)
 				goto out;
 
 			/* TODO: If at some point we implement support for pci
@@ -466,8 +466,8 @@ static int pciback_reconfigure(struct pciback_device *pdev)
 				 "Error switching to reconfigured state!");
 		goto out;
 	}
-	
-      out:
+
+out:
 	spin_unlock(&pdev->dev_lock);
 
 	return 0;
@@ -591,7 +591,7 @@ static int pciback_setup_backend(struct pciback_device *pdev)
 			xenbus_dev_fatal(pdev->xdev, err, "Error switching "
 					 "substate of dev-%d\n", i);
 			goto out;
-		}	
+		}
 	}
 
 	err = pciback_publish_pci_roots(pdev, pciback_publish_pci_root);
@@ -607,7 +607,7 @@ static int pciback_setup_backend(struct pciback_device *pdev)
 		xenbus_dev_fatal(pdev->xdev, err,
 				 "Error switching to initialised state!");
 
-      out:
+out:
 	spin_unlock(&pdev->dev_lock);
 
 	if (!err)
@@ -663,7 +663,7 @@ static int pciback_xenbus_probe(struct xenbus_device *dev,
 	 */
 	pciback_be_watch(&pdev->be_watch, NULL, 0);
 
-      out:
+out:
 	return err;
 }
 
@@ -679,7 +679,7 @@ static int pciback_xenbus_remove(struct xenbus_device *dev)
 
 static const struct xenbus_device_id xenpci_ids[] = {
 	{"pci"},
-	{{0}},
+	{""},
 };
 
 static struct xenbus_driver xenbus_pciback_driver = {

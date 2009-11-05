@@ -20,4 +20,7 @@ struct pciback_config_capability {
 	const struct config_field *fields;
 };
 
+extern struct pciback_config_capability pciback_config_capability_vpd;
+extern struct pciback_config_capability pciback_config_capability_pm;
+
 #endif

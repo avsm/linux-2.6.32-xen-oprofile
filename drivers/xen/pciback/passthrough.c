@@ -165,8 +165,10 @@ void pciback_release_devices(struct pciback_device *pdev)
 	pdev->pci_dev_data = NULL;
 }
 
-int pciback_get_pcifront_dev(struct pci_dev *pcidev, struct pciback_device *pdev, 
-		unsigned int *domain, unsigned int *bus, unsigned int *devfn)
+int pciback_get_pcifront_dev(struct pci_dev *pcidev,
+			     struct pciback_device *pdev,
+			     unsigned int *domain, unsigned int *bus,
+			     unsigned int *devfn)
 
 {
 	*domain = pci_domain_nr(pcidev->bus);

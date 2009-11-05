@@ -51,7 +51,8 @@ static int command_write(struct pci_dev *dev, int offset, u16 value, void *data)
 		err = pci_set_mwi(dev);
 		if (err) {
 			printk(KERN_WARNING
-			       "pciback: %s: cannot enable memory-write-invalidate (%d)\n",
+			       "pciback: %s: cannot enable "
+			       "memory-write-invalidate (%d)\n",
 			       pci_name(dev), err);
 			value &= ~PCI_COMMAND_INVALIDATE;
 		}
@@ -206,7 +207,7 @@ static int bist_write(struct pci_dev *dev, int offset, u8 value, void *data)
 	    || value == PCI_BIST_START)
 		err = pci_write_config_byte(dev, offset, value);
 
-      out:
+out:
 	return err;
 }
 
@@ -312,6 +313,6 @@ int pciback_config_header_add_fields(struct pci_dev *dev)
 		break;
 	}
 
-      out:
+out:
 	return err;
 }

@@ -33,7 +33,7 @@ static const struct config_field caplist_vpd[] = {
 	 },
 	{}
 };
- 
+
 struct pciback_config_capability pciback_config_capability_vpd = {
 	.capability = PCI_CAP_ID_VPD,
 	.fields = caplist_vpd,

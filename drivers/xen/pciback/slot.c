@@ -65,7 +65,8 @@ int pciback_add_pci_dev(struct pciback_device *pdev, struct pci_dev *dev,
 		for (slot = 0; slot < PCI_SLOT_MAX; slot++) {
 			if (slot_dev->slots[bus][slot] == NULL) {
 				printk(KERN_INFO
-				       "pciback: slot: %s: assign to virtual slot %d, bus %d\n",
+				       "pciback: slot: %s: assign to virtual "
+				       "slot %d, bus %d\n",
 				       pci_name(dev), slot, bus);
 				slot_dev->slots[bus][slot] = dev;
 				goto unlock;
@@ -76,14 +77,14 @@ int pciback_add_pci_dev(struct pciback_device *pdev, struct pci_dev *dev,
 	xenbus_dev_fatal(pdev->xdev, err,
 			 "No more space on root virtual PCI bus");
 
-      unlock:
+unlock:
 	spin_unlock_irqrestore(&slot_dev->lock, flags);
 
 	/* Publish this device. */
-	if(!err)
+	if (!err)
 		err = publish_cb(pdev, 0, 0, PCI_DEVFN(slot, 0), devid);
 
-      out:
+out:
 	return err;
 }
 
@@ -105,7 +106,7 @@ void pciback_release_pci_dev(struct pciback_device *pdev, struct pci_dev *dev)
 			}
 		}
 
-      out:
+out:
 	spin_unlock_irqrestore(&slot_dev->lock, flags);
 
 	if (found_dev)
@@ -156,8 +157,10 @@ void pciback_release_devices(struct pciback_device *pdev)
 	pdev->pci_dev_data = NULL;
 }
 
-int pciback_get_pcifront_dev(struct pci_dev *pcidev, struct pciback_device *pdev, 
-		unsigned int *domain, unsigned int *bus, unsigned int *devfn)
+int pciback_get_pcifront_dev(struct pci_dev *pcidev,
+			     struct pciback_device *pdev,
+			     unsigned int *domain, unsigned int *bus,
+			     unsigned int *devfn)
 {
 	int slot, busnr;
 	struct slot_dev_data *slot_dev = pdev->pci_dev_data;
@@ -172,11 +175,12 @@ int pciback_get_pcifront_dev(struct pci_dev *pcidev, struct pciback_device *pdev
 			dev = slot_dev->slots[busnr][slot];
 			if (dev && dev->bus->number == pcidev->bus->number
 				&& dev->devfn == pcidev->devfn
-				&& pci_domain_nr(dev->bus) == pci_domain_nr(pcidev->bus)) {
+				&& pci_domain_nr(dev->bus) ==
+					pci_domain_nr(pcidev->bus)) {
 				found = 1;
 				*domain = 0;
 				*bus = busnr;
-				*devfn = PCI_DEVFN(slot,0);
+				*devfn = PCI_DEVFN(slot, 0);
 				goto out;
 			}
 		}

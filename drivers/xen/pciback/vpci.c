@@ -125,14 +125,14 @@ int pciback_add_pci_dev(struct pciback_device *pdev, struct pci_dev *dev,
 	xenbus_dev_fatal(pdev->xdev, err,
 			 "No more space on root virtual PCI bus");
 
-      unlock:
+unlock:
 	spin_unlock_irqrestore(&vpci_dev->lock, flags);
 
 	/* Publish this device. */
-	if(!err)
+	if (!err)
 		err = publish_cb(pdev, 0, 0, PCI_DEVFN(slot, func), devid);
 
-      out:
+out:
 	return err;
 }
 
@@ -158,7 +158,7 @@ void pciback_release_pci_dev(struct pciback_device *pdev, struct pci_dev *dev)
 		}
 	}
 
-      out:
+out:
 	spin_unlock_irqrestore(&vpci_dev->lock, flags);
 
 	if (found_dev)
@@ -176,9 +176,8 @@ int pciback_init_devices(struct pciback_device *pdev)
 
 	spin_lock_init(&vpci_dev->lock);
 
-	for (slot = 0; slot < PCI_SLOT_MAX; slot++) {
+	for (slot = 0; slot < PCI_SLOT_MAX; slot++)
 		INIT_LIST_HEAD(&vpci_dev->dev_list[slot]);
-	}
 
 	pdev->pci_dev_data = vpci_dev;
 
@@ -211,8 +210,10 @@ void pciback_release_devices(struct pciback_device *pdev)
 	pdev->pci_dev_data = NULL;
 }
 
-int pciback_get_pcifront_dev(struct pci_dev *pcidev, struct pciback_device *pdev, 
-		unsigned int *domain, unsigned int *bus, unsigned int *devfn)
+int pciback_get_pcifront_dev(struct pci_dev *pcidev,
+			     struct pciback_device *pdev,
+			     unsigned int *domain, unsigned int *bus,
+			     unsigned int *devfn)
 {
 	struct pci_dev_entry *entry;
 	struct pci_dev *dev = NULL;
@@ -227,15 +228,16 @@ int pciback_get_pcifront_dev(struct pci_dev *pcidev, struct pciback_device *pdev
 			    list) {
 			dev = entry->dev;
 			if (dev && dev->bus->number == pcidev->bus->number
-				&& pci_domain_nr(dev->bus) == pci_domain_nr(pcidev->bus)
-				&& dev->devfn == pcidev->devfn)
-			{
+				&& pci_domain_nr(dev->bus) ==
+					pci_domain_nr(pcidev->bus)
+				&& dev->devfn == pcidev->devfn) {
 				found = 1;
 				*domain = 0;
 				*bus = 0;
-				*devfn = PCI_DEVFN(slot, PCI_FUNC(pcidev->devfn));
+				*devfn = PCI_DEVFN(slot,
+					 PCI_FUNC(pcidev->devfn));
 			}
-		}		
+		}
 	}
 	spin_unlock_irqrestore(&vpci_dev->lock, flags);
 	return found;
