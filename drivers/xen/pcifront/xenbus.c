@@ -49,6 +49,7 @@ static struct pcifront_device *alloc_pdev(struct xenbus_device *xdev)
 
 	pdev->evtchn = INVALID_EVTCHN;
 	pdev->gnt_ref = INVALID_GRANT_REF;
+	pdev->irq = -1;
 
 	INIT_WORK(&pdev->op_work, pcifront_do_aer);
 
@@ -66,7 +67,7 @@ static void free_pdev(struct pcifront_device *pdev)
 
 	/*For PCIE_AER error handling job*/
 	flush_scheduled_work();
-	unbind_from_irqhandler(pdev->evtchn, pdev);
+	unbind_from_irqhandler(pdev->irq, pdev);
 
 	if (pdev->evtchn != INVALID_EVTCHN)
 		xenbus_free_evtchn(pdev->xdev, pdev->evtchn);
@@ -95,8 +96,15 @@ static int pcifront_publish_info(struct pcifront_device *pdev)
 	if (err)
 		goto out;
 
-	bind_evtchn_to_irqhandler(pdev->evtchn, pcifront_handler_aer, 
+	err = bind_evtchn_to_irqhandler(pdev->evtchn, pcifront_handler_aer, 
 		0, "pcifront", pdev); 
+	if (err < 0) {
+		xenbus_free_evtchn(pdev->xdev, pdev->evtchn);
+		xenbus_dev_fatal(pdev->xdev, err, "Failed to bind evtchn to "
+				 "irqhandler.\n");
+		return err;
+	}
+	pdev->irq = err;
 
       do_publish:
 	err = xenbus_transaction_start(&trans);
