@@ -21,7 +21,6 @@
 #include <linux/time.h>
 
 
-
 #ifndef __init_refok
 #define __init_refok
 #endif
@@ -80,22 +79,12 @@ static inline void pcifront_setup_root_resources(struct pci_bus *bus,
 {
 }
 
-int pcifront_scan_root(struct pcifront_device *pdev,
-		       unsigned int domain, unsigned int bus);
-int pcifront_rescan_root(struct pcifront_device *pdev,
-			 unsigned int domain, unsigned int bus);
-void pcifront_free_roots(struct pcifront_device *pdev);
-
-void pcifront_do_aer(struct work_struct *data);
-
-irqreturn_t pcifront_handler_aer(int irq, void *dev);
 
 DEFINE_SPINLOCK(pcifront_dev_lock);
 static struct pcifront_device *pcifront_dev = NULL;
 
 static int verbose_request = 0;
 module_param(verbose_request, int, 0644);
-
 
 static int errno_to_pcibios_err(int errno)
 {
