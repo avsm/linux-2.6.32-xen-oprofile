@@ -497,6 +497,7 @@ int __devinit pcifront_rescan_root(struct pcifront_device *pdev,
 	struct pci_bus *b;
 	struct pci_dev *d;
 	unsigned int devfn;
+	int err;
 
 #ifndef CONFIG_PCI_DOMAINS
 	if (domain != 0) {
@@ -533,7 +534,13 @@ int __devinit pcifront_rescan_root(struct pcifront_device *pdev,
 			dev_info(&pdev->xdev->dev, "New device on "
 				 "%04x:%02x:%02x.%02x found.\n", domain, bus,
 				 PCI_SLOT(devfn), PCI_FUNC(devfn));
-			pci_bus_add_device(d);
+			err = pci_bus_add_device(d);
+			if (err) {
+				dev_err(&pdev->xdev->dev, "Failed to add "
+				" device to bus.\n");
+				return err;
+			}
+			
 		}
 	}
 
