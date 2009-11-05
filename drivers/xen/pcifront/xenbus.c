@@ -94,8 +94,8 @@ static int pcifront_publish_info(struct pcifront_device *pdev)
 	if (err)
 		goto out;
 
-	bind_caller_port_to_irqhandler(pdev->evtchn, pcifront_handler_aer, 
-		SA_SAMPLE_RANDOM, "pcifront", pdev); 
+	bind_evtchn_to_irqhandler(pdev->evtchn, pcifront_handler_aer, 
+		0, "pcifront", pdev); 
 
       do_publish:
 	err = xenbus_transaction_start(&trans);

@@ -50,6 +50,6 @@ void pcifront_free_roots(struct pcifront_device *pdev);
 
 void pcifront_do_aer( void *data);
 
-irqreturn_t pcifront_handler_aer(int irq, void *dev, struct pt_regs *regs);
+irqreturn_t pcifront_handler_aer(int irq, void *dev);
 
 #endif	/* __XEN_PCIFRONT_H__ */
