@@ -1094,7 +1094,6 @@ static const struct xenbus_device_id xenpci_ids[] = {
 	{"pci"},
 	{{0}},
 };
-MODULE_ALIAS("xen:pci");
 
 static struct xenbus_driver xenbus_pcifront_driver = {
 	.name 			= "pcifront",
@@ -1113,5 +1112,13 @@ static int __init pcifront_init(void)
 	return xenbus_register_frontend(&xenbus_pcifront_driver);
 }
 
-/* Initialize after the Xen PCI Frontend Stub is initialized */
-subsys_initcall(pcifront_init);
+static void __exit pcifront_cleanup(void)
+{
+	xenbus_unregister_driver(&xenbus_pcifront_driver);
+}
+module_init(pcifront_init);
+module_exit(pcifront_cleanup);
+
+MODULE_DESCRIPTION("Xen PCI passthrough frontend.");
+MODULE_LICENSE("GPL");
+MODULE_ALIAS("xen:pci");

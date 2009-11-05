@@ -52,10 +52,11 @@ config PCI_STUB
 	  When in doubt, say N.
 
 config XEN_PCIDEV_FRONTEND
-        bool "Xen PCI Frontend"
-        depends on PCI && X86_64
+        tristate "Xen PCI Frontend"
+        depends on XEN && PCI && X86_64
         select HOTPLUG
-        default y
+	select XEN_XENBUS_FRONTEND
+	default y
         help
           The PCI device frontend driver allows the kernel to import arbitrary
           PCI devices from a PCI backend to support PCI driver domains.
