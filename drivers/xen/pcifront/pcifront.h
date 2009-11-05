@@ -41,8 +41,6 @@ struct pcifront_device {
 
 };
 
-int pcifront_connect(struct pcifront_device *pdev);
-void pcifront_disconnect(struct pcifront_device *pdev);
 
 int pcifront_scan_root(struct pcifront_device *pdev,
 		       unsigned int domain, unsigned int bus);
