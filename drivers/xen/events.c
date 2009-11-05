@@ -363,11 +363,12 @@ static int find_unbound_irq(void)
 	struct irq_desc *desc;
 	int start = get_nr_hw_irqs();
 
-	for (irq = start; irq < nr_irqs; irq++)
+	/* nr_irqs is a magic value. Must not use it.*/
+	for (irq = nr_irqs-1; irq > start; irq--)
 		if (irq_info[irq].type == IRQT_UNBOUND)
 			break;
 
-	if (irq == nr_irqs)
+	if (irq == start || irq == nr_irqs)
 		panic("No available IRQ to bind to: increase nr_irqs!\n");
 
 	desc = irq_to_desc_alloc_node(irq, 0);
