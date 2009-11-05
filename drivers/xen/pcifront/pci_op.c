@@ -169,6 +169,7 @@ static int do_pci_op(struct pcifront_device *pdev, struct xen_pci_op *op)
 	struct xen_pci_op *active_op = &pdev->sh_info->op;
 	unsigned long irq_flags;
 	evtchn_port_t port = pdev->evtchn;
+	unsigned irq = pdev->irq;
 	s64 ns, ns_timeout;
 	struct timeval tv;
 
@@ -190,13 +191,13 @@ static int do_pci_op(struct pcifront_device *pdev, struct xen_pci_op *op)
 	do_gettimeofday(&tv);
 	ns_timeout = timeval_to_ns(&tv) + 2 * (s64)NSEC_PER_SEC;
 
-	clear_evtchn(port);
+	xen_clear_irq_pending(irq);
 
 	while (test_bit(_XEN_PCIF_active,
 			(unsigned long *)&pdev->sh_info->flags)) {
 		if (HYPERVISOR_poll(&port, 1, jiffies + 3*HZ))
 			BUG();
-		clear_evtchn(port);
+		xen_clear_irq_pending(irq);
 		do_gettimeofday(&tv);
 		ns = timeval_to_ns(&tv);
 		if (ns > ns_timeout) {
