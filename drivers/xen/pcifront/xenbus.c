@@ -50,7 +50,7 @@ static struct pcifront_device *alloc_pdev(struct xenbus_device *xdev)
 	pdev->evtchn = INVALID_EVTCHN;
 	pdev->gnt_ref = INVALID_GRANT_REF;
 
-	INIT_WORK(&pdev->op_work, pcifront_do_aer, pdev);
+	INIT_WORK(&pdev->op_work, pcifront_do_aer);
 
 	dev_dbg(&xdev->dev, "Allocated pdev @ 0x%p pdev->sh_info @ 0x%p\n",
 		pdev, pdev->sh_info);

@@ -48,7 +48,7 @@ int pcifront_rescan_root(struct pcifront_device *pdev,
 			 unsigned int domain, unsigned int bus);
 void pcifront_free_roots(struct pcifront_device *pdev);
 
-void pcifront_do_aer( void *data);
+void pcifront_do_aer(struct work_struct *data);
 
 irqreturn_t pcifront_handler_aer(int irq, void *dev);
 

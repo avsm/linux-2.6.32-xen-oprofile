@@ -640,9 +640,9 @@ static pci_ers_result_t pcifront_common_process( int cmd, struct pcifront_device
 }
 
 
-void pcifront_do_aer(void *data)
+void pcifront_do_aer(struct work_struct *data)
 {
-	struct pcifront_device *pdev = data;
+	struct pcifront_device *pdev = container_of(data, struct pcifront_device, op_work);
 	int cmd = pdev->sh_info->aer_op.cmd;
 	pci_channel_state_t state = 
 		(pci_channel_state_t)pdev->sh_info->aer_op.err;
