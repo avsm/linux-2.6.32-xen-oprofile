@@ -6,6 +6,7 @@
 #include "conf_space.h"
 #include "conf_space_capability.h"
 #include <xen/interface/io/pciif.h>
+#include <xen/events.h>
 #include "pciback.h"
 
 int pciback_enable_msi(struct pciback_device *pdev,
@@ -22,7 +23,9 @@ int pciback_enable_msi(struct pciback_device *pdev,
 		return XEN_PCI_ERR_op_failed;
 	}
 
-	op->value = dev->irq;
+	/* The value the guest needs is actually the IDT vector, not the
+	 * the local domain's IRQ number. */
+	op->value = xen_gsi_from_irq(dev->irq);
 	return 0;
 }
 
@@ -31,7 +34,7 @@ int pciback_disable_msi(struct pciback_device *pdev,
 {
 	pci_disable_msi(dev);
 
-	op->value = dev->irq;
+	op->value = xen_gsi_from_irq(dev->irq);
 	return 0;
 }
 
@@ -57,7 +60,8 @@ int pciback_enable_msix(struct pciback_device *pdev,
 
 	for (i = 0; i < op->value; i++) {
 		op->msix_entries[i].entry = entries[i].entry;
-		op->msix_entries[i].vector = entries[i].vector;
+		op->msix_entries[i].vector =
+					xen_gsi_from_irq(entries[i].vector);
 	}
 
 	kfree(entries);
@@ -73,7 +77,7 @@ int pciback_disable_msix(struct pciback_device *pdev,
 
 	pci_disable_msix(dev);
 
-	op->value = dev->irq;
+	op->value = xen_gsi_from_irq(dev->irq);
 	return 0;
 }
 
