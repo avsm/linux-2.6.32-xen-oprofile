@@ -364,9 +364,7 @@ void pci_frontend_disable_msi(struct pci_dev *dev)
 		printk(KERN_DEBUG "get no response from backend for disable MSI\n");
 		return;
 	}
-	if (likely(!err))
-		dev->irq = op.value;
-	else
+	if (err)
 		/* how can pciback notify us fail? */
 		printk(KERN_DEBUG "get fake response frombackend \n");
 }
