@@ -93,6 +93,7 @@ extern void pci_iommu_alloc(void);
 
 /* MSI arch hook */
 #define arch_setup_msi_irqs arch_setup_msi_irqs
+#define arch_teardown_msi_irqs arch_teardown_msi_irqs
 
 #define PCI_DMA_BUS_IS_PHYS (dma_ops->is_phys)
 
