@@ -271,7 +271,8 @@ int pci_frontend_enable_msix(struct pci_dev *dev,
 	struct pcifront_device *pdev = pcifront_get_pdev(sd);
 
 	if (nvec > SH_INFO_MAX_VEC) {
-		printk(KERN_ERR "too much vector for pci frontend%x\n", nvec);
+		dev_err(&dev->dev, "too much vector for pci frontend: %x."
+				   " Increase SH_INFO_MAX_VEC.\n", nvec);
 		return -EINVAL;
 	}
 
@@ -294,7 +295,7 @@ int pci_frontend_enable_msix(struct pci_dev *dev,
 			return op.value;
 		}
 	} else {
-		printk(KERN_ERR "enable msix get err %x\n", err);
+		dev_err(&dev->dev, "enable msix get err %x\n", err);
 		return err;
 	}
 }
@@ -315,7 +316,7 @@ void pci_frontend_disable_msix(struct pci_dev *dev)
 
 	/* What should do for error ? */
 	if (err)
-		printk(KERN_ERR "pci_disable_msix get err %x\n", err);
+		dev_err(&dev->dev, "pci_disable_msix get err %x\n", err);
 }
 
 int pci_frontend_enable_msi(struct pci_dev *dev)
@@ -334,8 +335,8 @@ int pci_frontend_enable_msi(struct pci_dev *dev)
 	if (likely(!err)) {
 		dev->irq = op.value;
 	} else {
-		printk(KERN_ERR "pci frontend enable msi failed for dev %x:%x \n",
-				op.bus, op.devfn);
+		dev_err(&dev->dev, "pci frontend enable msi failed for dev "
+				   "%x:%x \n", op.bus, op.devfn);
 		err = -EINVAL;
 	}
 	return err;
