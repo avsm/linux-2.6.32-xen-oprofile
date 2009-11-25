@@ -96,7 +96,7 @@ ENTRY(xen_sysret32)
 	pushq $__USER32_CS
 	pushq %rcx
 
-	pushq $VGCF_in_syscall
+	pushq $0
 1:	jmp hypercall_iret
 ENDPATCH(xen_sysret32)
 RELOC(xen_sysret32, 1b+1)
