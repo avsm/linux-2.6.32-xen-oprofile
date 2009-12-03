@@ -583,6 +583,7 @@ int xen_gsi_from_irq(unsigned irq)
 {
 	return gsi_from_irq(irq);
 }
+EXPORT_SYMBOL_GPL(xen_gsi_from_irq);
 
 int bind_evtchn_to_irq(unsigned int evtchn)
 {
