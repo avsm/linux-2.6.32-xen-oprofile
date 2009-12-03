@@ -1,3 +1,3 @@
-obj-$(CONFIG_XEN_NETDEV_BACKEND) := netbk.o
+obj-$(CONFIG_XEN_NETDEV_BACKEND) := xen-netback.o
 
-netbk-y := netback.o xenbus.o interface.o
+xen-netback-y := netback.o xenbus.o interface.o
