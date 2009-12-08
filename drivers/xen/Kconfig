@@ -63,7 +63,7 @@ config XEN_SYS_HYPERVISOR
 	 but will have no xen contents.
 
 config XEN_GNTDEV
-	bool "userspace grant access device driver"
+	tristate "userspace grant access device driver"
 	depends on XEN
 	select MMU_NOTIFIER
 	help
