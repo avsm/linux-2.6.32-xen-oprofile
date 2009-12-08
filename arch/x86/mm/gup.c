@@ -252,8 +252,10 @@ int get_user_pages_fast(unsigned long start, int nr_pages, int write,
 					(void __user *)start, len)))
 		goto slow_irqon;
 
+#ifdef CONFIG_XEN
 	if (unlikely(mm->context.has_foreign_mappings))
 		goto slow_irqon;
+#endif
 
 	/*
 	 * XXX: batch / limit 'nr', to avoid large irq off latency

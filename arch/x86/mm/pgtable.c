@@ -267,9 +267,12 @@ out:
 
 void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
+#ifdef CONFIG_XEN
 	/* EEW */
 	extern void xen_late_unpin_pgd(struct mm_struct *mm, pgd_t *pgd);
-	xen_late_unpin_pgd(mm, pgd);
+	if (xen_pv_domain())
+		xen_late_unpin_pgd(mm, pgd);
+#endif
 	pgd_mop_up_pmds(mm, pgd);
 	pgd_dtor(pgd);
 	paravirt_pgd_free(mm, pgd);
