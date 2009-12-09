@@ -346,6 +346,8 @@ static int decrease_reservation(unsigned long nr_pages)
 				discontig_free = 1;
 
 			set_phys_to_machine(lpfn, INVALID_P2M_ENTRY);
+                        page = pfn_to_page(lpfn);
+
 			if (!PageHighMem(page)) {
 				ret = HYPERVISOR_update_va_mapping(
 					(unsigned long)__va(lpfn << PAGE_SHIFT),
