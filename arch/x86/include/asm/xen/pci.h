@@ -7,6 +7,11 @@ int xen_create_msi_irq(struct pci_dev *dev,
 			struct msi_desc *msidesc,
 			int type);
 int xen_destroy_irq(int irq);
+
+int xen_find_device_domain_owner(struct pci_dev *dev);
+int xen_register_device_domain_owner(struct pci_dev *dev, uint16_t domain);
+int xen_unregister_device_domain_owner(struct pci_dev *dev);
+
 #else
 static inline int xen_register_gsi(u32 gsi, int triggering, int polarity)
 {
@@ -22,6 +27,19 @@ static inline int xen_create_msi_irq(struct pci_dev *dev,
 static inline int xen_destroy_irq(int irq)
 {
 	return -1;
+}
+static inline int xen_find_device_domain_owner(struct pci_dev *dev)
+{
+	return -1;
+}
+static inline int xen_register_device_domain_owner(struct pci_dev *dev,
+						   uint16_t domain)
+{
+ 	return -1;
+}
+static inline int xen_unregister_device_domain_owner(struct pci_dev *dev)
+{
+ 	return -1;
 }
 #endif
 
