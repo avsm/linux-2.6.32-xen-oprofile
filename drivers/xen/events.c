@@ -39,6 +39,7 @@
 #include <asm/sync_bitops.h>
 #include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
+#include <asm/xen/pci.h>
 
 #include <xen/xen-ops.h>
 #include <xen/events.h>
@@ -91,6 +92,7 @@ struct irq_info
 		struct {
 			unsigned short nr;
 			unsigned char flags;
+			uint16_t domid;
 		} pirq;
 	} u;
 };
@@ -143,7 +145,8 @@ static struct irq_info mk_pirq_info(unsigned short evtchn,
 				    unsigned short pirq)
 {
 	return (struct irq_info) { .type = IRQT_PIRQ, .evtchn = evtchn,
-			.cpu = 0, .u.pirq = { .nr = pirq } };
+			.cpu = 0, .u.pirq =
+			{ .nr = pirq, .domid = DOMID_SELF } };
 }
 
 /*
@@ -573,7 +576,7 @@ int xen_destroy_irq(int irq)
 		goto out;
 
 	unmap_irq.pirq = info->u.pirq.nr;
-	unmap_irq.domid = DOMID_SELF;
+	unmap_irq.domid = info->u.pirq.domid;
 	rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
 	if (rc) {
 		printk(KERN_WARNING "unmap irq failed %x\n", rc);
@@ -594,10 +597,14 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 	int irq = 0;
 	struct physdev_map_pirq map_irq;
 	int rc;
-	domid_t domid = DOMID_SELF;
+	domid_t domid;
 	int pos;
 	u32 table_offset, bir;
 
+	domid = rc = xen_find_device_domain_owner(dev);
+	if (rc < 0)
+		domid = DOMID_SELF;
+	
 	memset(&map_irq, 0, sizeof(map_irq));
 	map_irq.domid = domid;
 	map_irq.type = MAP_PIRQ_TYPE_MSI;
@@ -635,6 +642,8 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		goto out;
 	}
 	irq_info[irq] = mk_pirq_info(0, map_irq.pirq);
+	if (domid)
+		irq_info[irq].u.pirq.domid = domid;
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 			handle_level_irq,
