@@ -4,6 +4,8 @@
 #include <asm/tlb.h>
 #include <asm/fixmap.h>
 
+#include <asm/xen/hypervisor.h>
+
 #define PGALLOC_GFP GFP_KERNEL | __GFP_NOTRACK | __GFP_REPEAT | __GFP_ZERO
 
 pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
