@@ -430,16 +430,6 @@ static int __devinit pcistub_probe(struct pci_dev *dev,
 
 		dev_info(&dev->dev, "seizing device\n");
 		err = pcistub_seize(dev);
-#ifdef CONFIG_PCI_GUESTDEV
-	} else if (dev->hdr_type == PCI_HEADER_TYPE_NORMAL) {
-		if (!pci_is_guestdev(dev)) {
-			err = -ENODEV;
-			goto out;
-		}
-
-		dev_info(&dev->dev, "seizing device\n");
-		err = pcistub_seize(dev);
-#endif /* CONFIG_PCI_GUESTDEV */
 	} else
 		/* Didn't find the device */
 		err = -ENODEV;
