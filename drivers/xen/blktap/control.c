@@ -248,6 +248,9 @@ blktap_init(void)
 {
 	int err;
 
+	if (!xen_domain())
+		return -ENODEV;
+
 	err = blktap_request_pool_init();
 	if (err)
 		return err;
