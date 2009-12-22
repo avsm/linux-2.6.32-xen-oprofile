@@ -383,7 +383,12 @@ static int pcifront_claim_resource(struct pci_dev *dev, void *data)
 		if (!r->parent && r->start && r->flags) {
 			dev_dbg(&pdev->xdev->dev, "claiming resource %s/%d\n",
 				pci_name(dev), i);
-			pci_claim_resource(dev, i);
+			if (pci_claim_resource(dev, i)) {
+				dev_err(&pdev->xdev->dev, "Could not claim "
+					"resource %s/%d! Device offline. Try "
+					"giving less than 4GB to domain.\n",
+					pci_name(dev), i);
+			}
 		}
 	}
 
