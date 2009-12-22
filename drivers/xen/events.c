@@ -1101,7 +1101,7 @@ void xen_clear_irq_pending(int irq)
 	if (VALID_EVTCHN(evtchn))
 		clear_evtchn(evtchn);
 }
-
+EXPORT_SYMBOL(xen_clear_irq_pending);
 void xen_set_irq_pending(int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
@@ -1138,6 +1138,7 @@ void xen_poll_irq_timeout(int irq, u64 timeout)
 			BUG();
 	}
 }
+EXPORT_SYMBOL(xen_poll_irq_timeout);
 /* Poll waiting for an irq to become pending.  In the usual case, the
    irq will be disabled so it won't deliver an interrupt. */
 void xen_poll_irq(int irq)
