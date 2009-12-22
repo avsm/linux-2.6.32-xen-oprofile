@@ -304,7 +304,7 @@ static int increase_reservation(unsigned long nr_pages)
 static int decrease_reservation(unsigned long nr_pages)
 {
 	unsigned long  pfn, lpfn, mfn, i, j, flags;
-	struct page   *page;
+	struct page   *page = NULL;
 	int            need_sleep = 0;
 	int		discontig, discontig_free;
 	int		ret;
