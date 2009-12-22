@@ -65,7 +65,7 @@ static inline int match_slot(struct pci_dev *l, struct pci_dev *r)
 int pciback_add_pci_dev(struct pciback_device *pdev, struct pci_dev *dev,
 			int devid, publish_pci_dev_cb publish_cb)
 {
-	int err = 0, slot, func;
+	int err = 0, slot, func = -1;
 	struct pci_dev_entry *t, *dev_entry;
 	struct vpci_dev_data *vpci_dev = pdev->pci_dev_data;
 	unsigned long flags;
