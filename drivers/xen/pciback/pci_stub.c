@@ -496,16 +496,17 @@ static const struct pci_device_id pcistub_ids[] = {
 	{0,},
 };
 
+#define PCI_NODENAME_MAX 40
 static void kill_domain_by_device(struct pcistub_device *psdev)
 {
 	struct xenbus_transaction xbt;
 	int err;
-	char nodename[1024];
+	char nodename[PCI_NODENAME_MAX];
 
 	if (!psdev)
 		dev_err(&psdev->dev->dev,
 			"device is NULL when do AER recovery/kill_domain\n");
-	sprintf(nodename, "/local/domain/0/backend/pci/%d/0",
+	snprintf(nodename, PCI_NODENAME_MAX, "/local/domain/0/backend/pci/%d/0",
 		psdev->pdev->xdev->otherend_id);
 	nodename[strlen(nodename)] = '\0';
 
