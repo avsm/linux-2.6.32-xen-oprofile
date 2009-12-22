@@ -173,6 +173,7 @@ static void __init xen_banner(void)
 
 static __read_mostly unsigned int cpuid_leaf1_edx_mask = ~0;
 static __read_mostly unsigned int cpuid_leaf1_ecx_mask = ~0;
+static __read_mostly unsigned int cpuid_leaf81_edx_mask = ~0;
 
 static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 		      unsigned int *cx, unsigned int *dx)
@@ -186,7 +187,7 @@ static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 	 * unsupported kernel subsystems as possible.
 	 */
 	switch (*ax) {
-	case 1:
+	case 0x1:
 		maskecx = cpuid_leaf1_ecx_mask;
 		maskedx = cpuid_leaf1_edx_mask;
 		break;
@@ -194,6 +195,10 @@ static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 	case 0xb:
 		/* Suppress extended topology stuff */
 		maskebx = 0;
+		break;
+
+	case 0x80000001:
+		maskedx = cpuid_leaf81_edx_mask;
 		break;
 	}
 
@@ -217,6 +222,8 @@ static __init void xen_init_cpuid_mask(void)
 		~((1 << X86_FEATURE_MCE)  |  /* disable MCE */
 		  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
 		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
+
+	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
 
 	if (!xen_initial_domain())
 		cpuid_leaf1_edx_mask &=
@@ -405,7 +412,7 @@ static __init void xen_load_gdt_boot(const struct desc_ptr *dtr)
 
 		pte = pfn_pte(pfn, PAGE_KERNEL_RO);
 
-		if (HYPERVISOR_update_va_mapping((unsigned long)va, pte, 0))
+		if (HYPERVISOR_update_va_mapping(va, pte, 0))
 			BUG();
 
 		frames[f] = mfn;
@@ -518,11 +525,10 @@ static int cvt_gate_to_trap(int vector, const gate_desc *val,
 	} else if (addr == (unsigned long)machine_check) {
 		return 0;
 #endif
-	} else {
-		/* Some other trap using IST? */
-		if (WARN_ON(val->ist != 0))
-			return 0;
-	}
+	} else if (WARN(val->ist != 0,
+			"Unknown IST-using trap: vector %d, %pF, val->ist=%d\n",
+			vector, (void *)addr, val->ist))
+		return 0;
 #endif	/* CONFIG_X86_64 */
 	info->address = addr;
 
@@ -715,7 +721,7 @@ static u32 xen_safe_apic_wait_icr_idle(void)
         return 0;
 }
 
-static void set_xen_basic_apic_ops(void)
+static __init void set_xen_basic_apic_ops(void)
 {
 	apic->read = xen_apic_read;
 	apic->write = xen_apic_write;

@@ -6,6 +6,11 @@ nostackp := $(call cc-option, -fno-stack-protector)
 CFLAGS_physaddr.o		:= $(nostackp)
 CFLAGS_setup_nx.o		:= $(nostackp)
 
+# Make sure __phys_addr has no stackprotector
+nostackp := $(call cc-option, -fno-stack-protector)
+CFLAGS_ioremap.o		:= $(nostackp)
+CFLAGS_init.o			:= $(nostackp)
+
 obj-$(CONFIG_SMP)		+= tlb.o
 
 obj-$(CONFIG_X86_32)		+= pgtable_32.o iomap_32.o
