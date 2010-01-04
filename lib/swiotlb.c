@@ -102,16 +102,18 @@ static int late_alloc;
 static int __init
 setup_io_tlb_npages(char *str)
 {
-	if (isdigit(*str)) {
-		io_tlb_nslabs = simple_strtoul(str, &str, 0);
-		/* avoid tail segment of size < IO_TLB_SEGSIZE */
-		io_tlb_nslabs = ALIGN(io_tlb_nslabs, IO_TLB_SEGSIZE);
+	while (*str) {
+		if (isdigit(*str)) {
+			io_tlb_nslabs = simple_strtoul(str, &str, 0);
+			/* avoid tail segment of size < IO_TLB_SEGSIZE */
+			io_tlb_nslabs = ALIGN(io_tlb_nslabs, IO_TLB_SEGSIZE);
+		}
+		if (!strncmp(str, "force", 5))
+			swiotlb_force = 1;
+		str += strcspn(str, ",");
+		if (*str == ',')
+			++str;
 	}
-	if (*str == ',')
-		++str;
-	if (!strcmp(str, "force"))
-		swiotlb_force = 1;
-
 	return 1;
 }
 __setup("swiotlb=", setup_io_tlb_npages);
