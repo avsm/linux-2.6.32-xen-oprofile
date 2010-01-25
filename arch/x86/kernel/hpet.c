@@ -96,7 +96,7 @@ static int __init hpet_setup(char *str)
 }
 __setup("hpet=", hpet_setup);
 
-static int __init disable_hpet(char *str)
+int __init disable_hpet(char *str)
 {
 	boot_hpet_disable = 1;
 	return 1;

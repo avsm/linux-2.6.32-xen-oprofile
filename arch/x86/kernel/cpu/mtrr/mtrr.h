@@ -5,6 +5,8 @@
 #include <linux/types.h>
 #include <linux/stddef.h>
 
+#include <asm/mtrr.h>
+
 #define MTRR_CHANGE_MASK_FIXED     0x01
 #define MTRR_CHANGE_MASK_VARIABLE  0x02
 #define MTRR_CHANGE_MASK_DEFTYPE   0x04
@@ -25,6 +27,8 @@ struct mtrr_ops {
 	int	(*validate_add_page)(unsigned long base, unsigned long size,
 				     unsigned int type);
 	int	(*have_wrcomb)(void);
+
+	int	(*num_var_ranges)(void);
 };
 
 extern int generic_get_free_region(unsigned long base, unsigned long size,
@@ -73,6 +77,13 @@ void mtrr_wrmsr(unsigned, unsigned, unsigned);
 int amd_init_mtrr(void);
 int cyrix_init_mtrr(void);
 int centaur_init_mtrr(void);
+#ifdef CONFIG_XEN_DOM0
+void xen_init_mtrr(void);
+#else
+static inline void xen_init_mtrr(void)
+{
+}
+#endif
 
 extern int changed_by_mtrr_cleanup;
 extern int mtrr_cleanup(unsigned address_bits);

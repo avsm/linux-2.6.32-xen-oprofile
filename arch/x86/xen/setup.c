@@ -10,6 +10,7 @@
 #include <linux/pm.h>
 
 #include <asm/elf.h>
+#include <asm/hpet.h>
 #include <asm/vdso.h>
 #include <asm/e820.h>
 #include <asm/setup.h>
@@ -19,6 +20,7 @@
 
 #include <xen/page.h>
 #include <xen/interface/callback.h>
+#include <xen/interface/memory.h>
 #include <xen/interface/physdev.h>
 #include <xen/features.h>
 
@@ -36,21 +38,60 @@ extern void xen_syscall32_target(void);
 /**
  * machine_specific_memory_setup - Hook for machine specific memory setup.
  **/
-
 char * __init xen_memory_setup(void)
 {
+	static __initdata struct e820entry map[E820MAX];
+
 	unsigned long max_pfn = xen_start_info->nr_pages;
+	struct xen_memory_map memmap;
+	unsigned long long mem_end;
+	int op;
+	int rc;
+	int i;
 
 	max_pfn = min(MAX_DOMAIN_PAGES, max_pfn);
+	mem_end = PFN_PHYS((u64)max_pfn);
+
+	memmap.nr_entries = E820MAX;
+	set_xen_guest_handle(memmap.buffer, map);
+
+	op = xen_initial_domain() ?
+		XENMEM_machine_memory_map :
+		XENMEM_memory_map;
+	rc = HYPERVISOR_memory_op(op, &memmap);
+	if (rc == -ENOSYS) {
+		memmap.nr_entries = 1;
+		map[0].addr = 0ULL;
+		map[0].size = mem_end;
+		/* 8MB slack (to balance backend allocations). */
+		map[0].size += 8ULL << 20;
+		map[0].type = E820_RAM;
+		rc = 0;
+	}
+	BUG_ON(rc);
 
 	e820.nr_map = 0;
-
-	e820_add_region(0, PFN_PHYS((u64)max_pfn), E820_RAM);
+	for (i = 0; i < memmap.nr_entries; i++) {
+		unsigned long long end = map[i].addr + map[i].size;
+		if (map[i].type == E820_RAM) {
+			if (map[i].addr > mem_end)
+				continue;
+			if (end > mem_end) {
+				/* Truncate region to max_mem. */
+				map[i].size -= end - mem_end;
+			}
+		}
+		if (map[i].size > 0)
+			e820_add_region(map[i].addr, map[i].size, map[i].type);
+	}
 
 	/*
 	 * Even though this is normal, usable memory under Xen, reserve
 	 * ISA memory anyway because too many things think they can poke
 	 * about in there.
+	 *
+	 * In a dom0 kernel, this region is identity mapped with the
+	 * hardware ISA area, so it really is out of bounds.
 	 */
 	e820_add_region(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS,
 			E820_RESERVED);
@@ -182,13 +223,17 @@ void __init xen_arch_setup(void)
 	}
 #endif
 
+	/* 
+	 * Xen hypervisor uses HPET to wakeup cpu from deep c-states,
+	 * so the HPET usage in dom0 must be forbidden.
+	 */
+	disable_hpet(NULL);
+
 	memcpy(boot_command_line, xen_start_info->cmd_line,
 	       MAX_GUEST_CMDLINE > COMMAND_LINE_SIZE ?
 	       COMMAND_LINE_SIZE : MAX_GUEST_CMDLINE);
 
 	pm_idle = xen_idle;
-
-	paravirt_disable_iospace();
 
 	fiddle_vdso();
 }

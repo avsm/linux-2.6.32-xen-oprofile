@@ -110,6 +110,11 @@ centaur_validate_add_page(unsigned long base, unsigned long size, unsigned int t
 	return 0;
 }
 
+static int centaur_num_var_ranges(void)
+{
+	return 8;
+}
+
 static struct mtrr_ops centaur_mtrr_ops = {
 	.vendor            = X86_VENDOR_CENTAUR,
 	.set               = centaur_set_mcr,
@@ -117,6 +122,7 @@ static struct mtrr_ops centaur_mtrr_ops = {
 	.get_free_region   = centaur_get_free_region,
 	.validate_add_page = centaur_validate_add_page,
 	.have_wrcomb       = positive_have_wrcomb,
+	.num_var_ranges	   = centaur_num_var_ranges,
 };
 
 int __init centaur_init_mtrr(void)

@@ -135,6 +135,8 @@ struct pv_cpu_ops {
 	void (*load_sp0)(struct tss_struct *tss, struct thread_struct *t);
 
 	void (*set_iopl_mask)(unsigned mask);
+	void (*set_io_bitmap)(struct thread_struct *thread,
+			      unsigned long bytes_updated);
 
 	void (*wbinvd)(void);
 	void (*io_delay)(void);

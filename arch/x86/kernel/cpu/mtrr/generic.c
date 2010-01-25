@@ -749,8 +749,16 @@ int positive_have_wrcomb(void)
 	return 1;
 }
 
-/*
- * Generic structure...
+static int generic_num_var_ranges(void)
+{
+	unsigned long config = 0, dummy;
+
+	rdmsr(MSR_MTRRcap, config, dummy);
+
+	return config & 0xff;
+}
+
+/* generic structure...
  */
 struct mtrr_ops generic_mtrr_ops = {
 	.use_intel_if		= 1,
@@ -760,4 +768,5 @@ struct mtrr_ops generic_mtrr_ops = {
 	.set			= generic_set_mtrr,
 	.validate_add_page	= generic_validate_add_page,
 	.have_wrcomb		= generic_have_wrcomb,
+	.num_var_ranges	   	= generic_num_var_ranges,
 };

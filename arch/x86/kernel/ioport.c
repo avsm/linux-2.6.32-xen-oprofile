@@ -30,13 +30,29 @@ static void set_bitmap(unsigned long *bitmap, unsigned int base,
 	}
 }
 
+void native_set_io_bitmap(struct thread_struct *t,
+			  unsigned long bytes_updated)
+{
+	struct tss_struct *tss;
+
+	if (!bytes_updated)
+		return;
+
+	tss = &__get_cpu_var(init_tss);
+
+	/* Update the TSS: */
+	if (t->io_bitmap_ptr)
+		memcpy(tss->io_bitmap, t->io_bitmap_ptr, bytes_updated);
+	else
+		memset(tss->io_bitmap, 0xff, bytes_updated);
+}
+
 /*
  * this changes the io permissions bitmap in the current task.
  */
 asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 {
 	struct thread_struct *t = &current->thread;
-	struct tss_struct *tss;
 	unsigned int i, max_long, bytes, bytes_updated;
 
 	if ((from + num <= from) || (from + num > IO_BITMAP_BITS))
@@ -61,13 +77,13 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 	}
 
 	/*
-	 * do it in the per-thread copy and in the TSS ...
+	 * do it in the per-thread copy
 	 *
-	 * Disable preemption via get_cpu() - we must not switch away
+	 * Disable preemption - we must not switch away
 	 * because the ->io_bitmap_max value must match the bitmap
 	 * contents:
 	 */
-	tss = &per_cpu(init_tss, get_cpu());
+	preempt_disable();
 
 	set_bitmap(t->io_bitmap_ptr, from, num, !turn_on);
 
@@ -85,10 +101,9 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 
 	t->io_bitmap_max = bytes;
 
-	/* Update the TSS: */
-	memcpy(tss->io_bitmap, t->io_bitmap_ptr, bytes_updated);
+	set_io_bitmap(t, bytes_updated);
 
-	put_cpu();
+	preempt_enable();
 
 	return 0;
 }

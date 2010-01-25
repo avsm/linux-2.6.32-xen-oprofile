@@ -30,6 +30,7 @@ void xen_setup_machphys_mapping(void);
 pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd, unsigned long max_pfn);
 void xen_ident_map_ISA(void);
 void xen_reserve_top(void);
+void xen_ident_map_ISA(void);
 
 char * __init xen_memory_setup(void);
 void __init xen_arch_setup(void);
@@ -78,6 +79,17 @@ static inline void xen_init_lock_cpu(int cpu)
 {
 }
 static inline void xen_uninit_lock_cpu(int cpu)
+{
+}
+#endif
+
+struct dom0_vga_console_info;
+
+#ifdef CONFIG_XEN_DOM0
+void xen_init_vga(const struct dom0_vga_console_info *, size_t size);
+#else
+static inline void xen_init_vga(const struct dom0_vga_console_info *info,
+				size_t size)
 {
 }
 #endif

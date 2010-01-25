@@ -66,6 +66,11 @@ DEFINE_PER_CPU(struct vcpu_info, xen_vcpu_info);
 enum xen_domain_type xen_domain_type = XEN_NATIVE;
 EXPORT_SYMBOL_GPL(xen_domain_type);
 
+unsigned long *machine_to_phys_mapping = (void *)MACH2PHYS_VIRT_START;
+EXPORT_SYMBOL(machine_to_phys_mapping);
+unsigned int   machine_to_phys_order;
+EXPORT_SYMBOL(machine_to_phys_order);
+
 struct start_info *xen_start_info;
 EXPORT_SYMBOL_GPL(xen_start_info);
 
@@ -167,9 +172,11 @@ static void __init xen_banner(void)
 
 	printk(KERN_INFO "Booting paravirtualized kernel on %s\n",
 	       pv_info.name);
-	printk(KERN_INFO "Xen version: %d.%d%s%s\n",
+	printk(KERN_INFO "Xen version: %d.%d%s%s%s\n",
 	       version >> 16, version & 0xffff, extra.extraversion,
-	       xen_feature(XENFEAT_mmu_pt_update_preserve_ad) ? " (preserve-AD)" : "");
+	       xen_feature(XENFEAT_mmu_pt_update_preserve_ad) ?
+			" (preserve-AD)" : "",
+	       xen_initial_domain() ? " (dom0)" : "");
 }
 
 static __read_mostly unsigned int cpuid_leaf1_edx_mask = ~0;
@@ -222,6 +229,7 @@ static __init void xen_init_cpuid_mask(void)
 	cpuid_leaf1_edx_mask =
 		~((1 << X86_FEATURE_MCE)  |  /* disable MCE */
 		  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
+		  (1 << X86_FEATURE_PAT)  |  /* disable PAT */
 		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
 
 	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
@@ -685,6 +693,18 @@ static void xen_set_iopl_mask(unsigned mask)
 	HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl);
 }
 
+static void xen_set_io_bitmap(struct thread_struct *thread,
+			      unsigned long bytes_updated)
+{
+	struct physdev_set_iobitmap set_iobitmap;
+
+	set_xen_guest_handle(set_iobitmap.bitmap,
+			     (char *)thread->io_bitmap_ptr);
+	set_iobitmap.nr_ports = thread->io_bitmap_ptr ? IO_BITMAP_BITS : 0;
+	WARN_ON(HYPERVISOR_physdev_op(PHYSDEVOP_set_iobitmap,
+				      &set_iobitmap));
+}
+
 static void xen_io_delay(void)
 {
 }
@@ -984,6 +1004,7 @@ static const struct pv_cpu_ops xen_cpu_ops __initdata = {
 	.load_sp0 = xen_load_sp0,
 
 	.set_iopl_mask = xen_set_iopl_mask,
+	.set_io_bitmap = xen_set_io_bitmap,
 	.io_delay = xen_io_delay,
 
 	/* Xen takes care of %gs when switching to usermode for us */
@@ -1026,6 +1047,14 @@ static void xen_machine_halt(void)
 	xen_reboot(SHUTDOWN_poweroff);
 }
 
+static void xen_machine_power_off(void)
+{
+	if (pm_power_off)
+		pm_power_off();
+	else
+		xen_reboot(SHUTDOWN_poweroff);
+}
+
 static void xen_crash_shutdown(struct pt_regs *regs)
 {
 	xen_reboot(SHUTDOWN_crash);
@@ -1034,7 +1063,7 @@ static void xen_crash_shutdown(struct pt_regs *regs)
 static const struct machine_ops __initdata xen_machine_ops = {
 	.restart = xen_restart,
 	.halt = xen_machine_halt,
-	.power_off = xen_machine_halt,
+	.power_off = xen_machine_power_off,
 	.shutdown = xen_machine_halt,
 	.crash_shutdown = xen_crash_shutdown,
 	.emergency_restart = xen_emergency_restart,
@@ -1066,6 +1095,8 @@ asmlinkage void __init xen_start_kernel(void)
 		return;
 
 	xen_domain_type = XEN_PV_DOMAIN;
+
+	xen_setup_machphys_mapping();
 
 	/* Install Xen paravirt ops */
 	pv_info = xen_info;
@@ -1144,6 +1175,8 @@ asmlinkage void __init xen_start_kernel(void)
 
 	pgd = (pgd_t *)xen_start_info->pt_base;
 
+	__supported_pte_mask |= _PAGE_IOMAP;
+
 	/* Don't do the full vcpu_info placement stuff until we have a
 	   possible map and a non-dummy shared_info. */
 	per_cpu(xen_vcpu, 0) = &HYPERVISOR_shared_info->vcpu_info[0];
@@ -1153,6 +1186,7 @@ asmlinkage void __init xen_start_kernel(void)
 
 	xen_raw_console_write("mapping kernel into physical memory\n");
 	pgd = xen_setup_kernel_pagetable(pgd, xen_start_info->nr_pages);
+	xen_ident_map_ISA();
 
 	init_mm.pgd = pgd;
 
@@ -1161,6 +1195,13 @@ asmlinkage void __init xen_start_kernel(void)
 	pv_info.kernel_rpl = 1;
 	if (xen_feature(XENFEAT_supervisor_mode_kernel))
 		pv_info.kernel_rpl = 0;
+
+	if (xen_initial_domain()) {
+		struct physdev_set_iopl set_iopl;
+		set_iopl.iopl = 1;
+		if (HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl) == -1)
+			BUG();
+	}
 
 	/* set the limit of our address space */
 	xen_reserve_top();
@@ -1184,6 +1225,16 @@ asmlinkage void __init xen_start_kernel(void)
 		add_preferred_console("xenboot", 0, NULL);
 		add_preferred_console("tty", 0, NULL);
 		add_preferred_console("hvc", 0, NULL);
+
+		boot_params.screen_info.orig_video_isVGA = 0;
+	} else {
+		const struct dom0_vga_console_info *info =
+			(void *)((char *)xen_start_info +
+				 xen_start_info->console.dom0.info_off);
+
+		xen_init_vga(info, xen_start_info->console.dom0.info_size);
+		xen_start_info->console.domU.mfn = 0;
+		xen_start_info->console.domU.evtchn = 0;
 	}
 
 	xen_raw_console_write("about to get started...\n");
