@@ -458,7 +458,7 @@ static int cvt_gate_to_trap(int vector, const gate_desc *val,
 		return 0;
 #ifdef CONFIG_X86_MCE
 	} else if (addr == (unsigned long)machine_check) {
-		return 0;
+		addr = (unsigned long)machine_check;
 #endif
 	} else {
 		/* Some other trap using IST? */
