@@ -395,9 +395,6 @@ static inline unsigned int io_apic_read(unsigned int apic, unsigned int reg)
 {
 	struct io_apic __iomem *io_apic;
 
-	if (xen_initial_domain())
-		return xen_io_apic_read(apic, reg);
-
 	io_apic = io_apic_base(apic);
 	writel(reg, &io_apic->index);
 	return readl(&io_apic->data);
@@ -406,11 +403,6 @@ static inline unsigned int io_apic_read(unsigned int apic, unsigned int reg)
 static inline void io_apic_write(unsigned int apic, unsigned int reg, unsigned int value)
 {
 	struct io_apic __iomem *io_apic;
-
-	if (xen_initial_domain()) {
-		xen_io_apic_write(apic, reg, value);
-		return;
-	}
 
 	io_apic = io_apic_base(apic);
 	writel(reg, &io_apic->index);
@@ -426,11 +418,6 @@ static inline void io_apic_write(unsigned int apic, unsigned int reg, unsigned i
 static inline void io_apic_modify(unsigned int apic, unsigned int reg, unsigned int value)
 {
 	struct io_apic __iomem *io_apic;
-
-	if (xen_initial_domain()) {
-		xen_io_apic_write(apic, reg, value);
-		return;
-	}
 
 	io_apic = io_apic_base(apic);
 
@@ -4153,11 +4140,6 @@ void __init ioapic_init_mappings(void)
 	unsigned long ioapic_phys, idx = FIX_IO_APIC_BASE_0;
 	struct resource *ioapic_res;
 	int i;
-
-	if (xen_initial_domain()) {
-		xen_io_apic_init();
-		return;
-	}
 
 	ioapic_res = ioapic_setup_resources(nr_ioapics);
 	for (i = 0; i < nr_ioapics; i++) {

@@ -15,35 +15,11 @@
 
 #include "xen-ops.h"
 
-static void xen_set_io_apic_routing(int irq, int trigger, int polarity)
-{
-	int ioapic, ioapic_pin;
-	int vector, gsi;
-	struct IO_APIC_route_entry entry;
-
-	gsi = xen_gsi_from_irq(irq);
-	vector = xen_vector_from_irq(irq);
-
-	ioapic = mp_find_ioapic(gsi);
-	if (ioapic == -1) {
-		printk(KERN_WARNING "xen_set_ioapic_routing: irq %d gsi %d ioapic %d\n",
-			irq, gsi, ioapic);
-		return;
-	}
-
-	ioapic_pin = mp_find_ioapic_pin(ioapic, gsi);
-
-	printk(KERN_INFO "xen_set_ioapic_routing: irq %d gsi %d vector %d ioapic %d pin %d triggering %d polarity %d\n",
-		irq, gsi, vector, ioapic, ioapic_pin, trigger, polarity);
-
-	setup_ioapic_entry(ioapic, -1, &entry, ~0, trigger, polarity, vector,
-			   ioapic_pin);
-	ioapic_write_entry(ioapic, ioapic_pin, entry);
-}
-
 int xen_register_gsi(u32 gsi, int triggering, int polarity)
 {
-	int irq;
+	int rc, irq;
+	struct physdev_setup_gsi setup_gsi;
+	struct physdev_map_pirq map_irq;
 	int shareable = 0;
 	char *name;
 
@@ -51,7 +27,7 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 		return -1;
 
 	printk(KERN_DEBUG "xen: registering gsi %u triggering %d polarity %d\n",
-	       gsi, triggering, polarity);
+			gsi, triggering, polarity);
 
 	if (triggering == ACPI_EDGE_SENSITIVE) {
 		shareable = 0;
@@ -65,11 +41,32 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 
 	printk(KERN_DEBUG "xen: --> irq=%d\n", irq);
 
-	if (irq >= 0)
-		xen_set_io_apic_routing(irq,
-					triggering == ACPI_EDGE_SENSITIVE ? 0 : 1,
-					polarity == ACPI_ACTIVE_HIGH ? 0 : 1);
+	if (irq >= 0) {
+		setup_gsi.gsi = gsi;
+		setup_gsi.triggering = (triggering == ACPI_EDGE_SENSITIVE ?
+				0 : 1);
+		setup_gsi.polarity = (polarity == ACPI_ACTIVE_HIGH ? 0 : 1);
 
+		rc = HYPERVISOR_physdev_op(PHYSDEVOP_setup_gsi, &setup_gsi);
+		if (rc == -EEXIST)
+			printk(KERN_INFO "Already setup the GSI :%d\n", gsi);
+		else if (rc) {
+			printk(KERN_ERR "Failed to setup GSI :%d, err_code:%d\n",
+					gsi, rc);
+			BUG();
+		}
+
+		map_irq.domid = DOMID_SELF;
+		map_irq.type = MAP_PIRQ_TYPE_GSI;
+		map_irq.index = gsi;
+		map_irq.pirq = irq;
+
+		rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
+		if (rc) {
+			printk(KERN_WARNING "xen map irq failed %d\n", rc);
+			irq = -1;
+		}
+	}
 	return irq;
 }
 
