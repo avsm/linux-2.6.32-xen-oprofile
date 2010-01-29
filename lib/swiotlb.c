@@ -174,7 +174,7 @@ void swiotlb_print_info(void)
  * structures for the software IO TLB used to implement the DMA API.
  */
 void __init
-swiotlb_init_with_default_size(size_t default_size, int verbose)
+swiotlb_init_early(size_t default_size, int verbose)
 {
 	unsigned long i, bytes;
 
@@ -217,7 +217,7 @@ swiotlb_init_with_default_size(size_t default_size, int verbose)
 void __init
 swiotlb_init(int verbose)
 {
-	swiotlb_init_with_default_size(64 * (1<<20), verbose);	/* default to 64MB */
+	swiotlb_init_early(64 * (1<<20), verbose);	/* default to 64MB */
 }
 
 /*
@@ -226,7 +226,7 @@ swiotlb_init(int verbose)
  * This should be just like above, but with some error catching.
  */
 int
-swiotlb_late_init_with_default_size(size_t default_size)
+swiotlb_init_late(size_t default_size)
 {
 	unsigned long i, bytes, req_nslabs = io_tlb_nslabs;
 	unsigned int order;
