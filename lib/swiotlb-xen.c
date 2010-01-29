@@ -13,13 +13,6 @@
 #include <xen/page.h>
 #include <xen/xen-ops.h>
 
-/* Function prototypes */
-void
-xen_swiotlb_unmap_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
-			   int nelems, enum dma_data_direction dir,
-			   struct dma_attrs *attrs);
-
-/* Real code */
 static dma_addr_t xen_phys_to_bus(struct device *hwdev, phys_addr_t paddr)
 {
 	return phys_to_machine(XPADDR(paddr)).maddr;;
