@@ -247,11 +247,11 @@ static void
 xen_swiotlb_sync_single(struct device *hwdev, dma_addr_t dev_addr,
 		    size_t size, int dir, int target)
 {
-	phys_addr_t paddr = dma_to_phys(hwdev, dev_addr);
+	phys_addr_t paddr = xen_bus_to_phys(hwdev, dev_addr);
 
 	BUG_ON(dir == DMA_NONE);
 
-	if (is_xen_swiotlb_buffer(paddr)) {
+	if (is_xen_swiotlb_buffer(dev_addr)) {
 		do_sync_single(hwdev, phys_to_virt(paddr), size, dir, target);
 		return;
 	}
