@@ -133,14 +133,13 @@ void
 xen_swiotlb_free_coherent(struct device *hwdev, size_t size, void *vaddr,
 		      dma_addr_t dev_addr)
 {
-	phys_addr_t paddr = dma_to_phys(hwdev, dev_addr);
+	int order = get_order(size);
 
-	WARN_ON(irqs_disabled());
-	if (!is_xen_swiotlb_buffer(paddr))
-		free_pages((unsigned long)vaddr, get_order(size));
-	else
-		/* DMA_TO_DEVICE to avoid memcpy in do_unmap_single */
-		do_unmap_single(hwdev, vaddr, size, DMA_TO_DEVICE);
+	if (dma_release_from_coherent(hwdev, order, vaddr))
+		return;
+
+	xen_destroy_contiguous_region((unsigned long)vaddr, order);
+	free_pages((unsigned long)vaddr, order);
 }
 EXPORT_SYMBOL(xen_swiotlb_free_coherent);
 
