@@ -48,14 +48,6 @@
  */
 #define IO_TLB_MIN_SLABS ((1<<20) >> IO_TLB_SHIFT)
 
-/*
- * Enumeration for sync targets
- */
-enum dma_sync_target {
-	SYNC_FOR_CPU = 0,
-	SYNC_FOR_DEVICE = 1,
-};
-
 int swiotlb_force;
 
 /*
@@ -63,18 +55,18 @@ int swiotlb_force;
  * do_sync_single_*, to see if the memory was in fact allocated by this
  * API.
  */
-static char *io_tlb_start, *io_tlb_end;
+char *io_tlb_start, *io_tlb_end;
 
 /*
  * The number of IO TLB blocks (in groups of 64) betweeen io_tlb_start and
  * io_tlb_end.  This is command line adjustable via setup_io_tlb_npages.
  */
-static unsigned long io_tlb_nslabs;
+unsigned long io_tlb_nslabs;
 
 /*
  * When the IOMMU overflows we return a fallback buffer. This sets the size.
  */
-static unsigned long io_tlb_overflow = 32*1024;
+unsigned long io_tlb_overflow = 32*1024;
 
 void *io_tlb_overflow_buffer;
 
@@ -340,7 +332,7 @@ void __init swiotlb_free(void)
 	}
 }
 
-static int is_swiotlb_buffer(phys_addr_t paddr)
+int is_swiotlb_buffer(phys_addr_t paddr)
 {
 	return paddr >= virt_to_phys(io_tlb_start) &&
 		paddr < virt_to_phys(io_tlb_end);
@@ -349,7 +341,7 @@ static int is_swiotlb_buffer(phys_addr_t paddr)
 /*
  * Bounce: copy the swiotlb buffer back to the original dma location
  */
-static void swiotlb_bounce(phys_addr_t phys, char *dma_addr, size_t size,
+void swiotlb_bounce(phys_addr_t phys, char *dma_addr, size_t size,
 			   enum dma_data_direction dir)
 {
 	unsigned long pfn = PFN_DOWN(phys);
@@ -390,7 +382,7 @@ static void swiotlb_bounce(phys_addr_t phys, char *dma_addr, size_t size,
 /*
  * Allocates bounce buffer and returns its kernel virtual address.
  */
-static void *
+void *
 do_map_single(struct device *hwdev, phys_addr_t phys,
 	       unsigned long start_dma_addr, size_t size, int dir)
 {
@@ -496,7 +488,7 @@ found:
 /*
  * dma_addr is the kernel virtual address of the bounce buffer to unmap.
  */
-static void
+void
 do_unmap_single(struct device *hwdev, char *dma_addr, size_t size, int dir)
 {
 	unsigned long flags;
@@ -537,7 +529,7 @@ do_unmap_single(struct device *hwdev, char *dma_addr, size_t size, int dir)
 	spin_unlock_irqrestore(&io_tlb_lock, flags);
 }
 
-static void
+void
 do_sync_single(struct device *hwdev, char *dma_addr, size_t size,
 	    int dir, int target)
 {
