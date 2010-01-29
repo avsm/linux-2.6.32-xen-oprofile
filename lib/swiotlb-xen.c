@@ -340,10 +340,11 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 	start_dma_addr = xen_virt_to_bus(hwdev, io_tlb_start);
 	for_each_sg(sgl, sg, nelems, i) {
 		phys_addr_t paddr = sg_phys(sg);
-		dma_addr_t dev_addr = phys_to_dma(hwdev, paddr);
+		dma_addr_t dev_addr = xen_phys_to_bus(hwdev, paddr);
 
-		if (swiotlb_force ||
-		    !dma_capable(hwdev, dev_addr, sg->length)) {
+		if (swiotlb_force || 
+		    !is_buffer_dma_capable(mask, dev_addr, sg->length) ||
+		    range_straddles_page_boundary(paddr, sg->length)) {
 			void *map = do_map_single(hwdev, sg_phys(sg),
 						  start_dma_addr,
 						  sg->length, dir);
