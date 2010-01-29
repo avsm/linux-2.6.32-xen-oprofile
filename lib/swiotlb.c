@@ -162,9 +162,9 @@ void swiotlb_print_info(void)
 	pstart = virt_to_phys(io_tlb_start);
 	pend = virt_to_phys(io_tlb_end);
 
-	printk(KERN_INFO "Placing %luMB software IO TLB between %p - %p\n",
+	printk(KERN_INFO "DMA: Placing %luMB software IO TLB between %p - %p\n",
 	       bytes >> 20, io_tlb_start, io_tlb_end);
-	printk(KERN_INFO "software IO TLB at phys %#llx - %#llx\n",
+	printk(KERN_INFO "DMA: software IO TLB at phys %#llx - %#llx\n",
 	       (unsigned long long)pstart,
 	       (unsigned long long)pend);
 }
@@ -190,7 +190,7 @@ swiotlb_init_early(size_t default_size, int verbose)
 	 */
 	io_tlb_start = alloc_bootmem_low_pages(bytes);
 	if (!io_tlb_start)
-		panic("Cannot allocate SWIOTLB buffer");
+		panic("DMA: Cannot allocate SWIOTLB buffer");
 	io_tlb_end = io_tlb_start + bytes;
 
 	/*
@@ -209,7 +209,7 @@ swiotlb_init_early(size_t default_size, int verbose)
 	 */
 	io_tlb_overflow_buffer = alloc_bootmem_low(io_tlb_overflow);
 	if (!io_tlb_overflow_buffer)
-		panic("Cannot allocate SWIOTLB overflow buffer!\n");
+		panic("DMA: Cannot allocate SWIOTLB overflow buffer!\n");
 	if (verbose)
 		swiotlb_print_info();
 }
@@ -255,8 +255,8 @@ swiotlb_init_late(size_t default_size)
 		goto cleanup1;
 
 	if (order != get_order(bytes)) {
-		printk(KERN_WARNING "Warning: only able to allocate %ld MB "
-		       "for software IO TLB\n", (PAGE_SIZE << order) >> 20);
+		printk(KERN_WARNING "DMA: Warning: only able to allocate %ld MB"
+		       " for software IO TLB\n", (PAGE_SIZE << order) >> 20);
 		io_tlb_nslabs = SLABS_PER_PAGE << order;
 		bytes = io_tlb_nslabs << IO_TLB_SHIFT;
 	}
@@ -602,7 +602,8 @@ swiotlb_alloc_coherent(struct device *hwdev, size_t size,
 
 	/* Confirm address can be DMA'd by device */
 	if (dev_addr + size - 1 > dma_mask) {
-		printk("hwdev DMA mask = 0x%016Lx, dev_addr = 0x%016Lx\n",
+		dev_err(hwdev, "DMA: hwdev DMA mask = 0x%016Lx, " \
+		       "dev_addr = 0x%016Lx\n",
 		       (unsigned long long)dma_mask,
 		       (unsigned long long)dev_addr);
 
@@ -640,8 +641,7 @@ swiotlb_full(struct device *dev, size_t size, int dir, int do_panic)
 	 * When the mapping is small enough return a static buffer to limit
 	 * the damage, or panic when the transfer is too big.
 	 */
-	printk(KERN_ERR "DMA: Out of SW-IOMMU space for %zu bytes at "
-	       "device %s\n", size, dev ? dev_name(dev) : "?");
+	dev_err(dev, "DMA: Out of SW-IOMMU space for %zu bytes.", size);
 
 	if (size <= io_tlb_overflow || !do_panic)
 		return;
@@ -694,7 +694,7 @@ dma_addr_t swiotlb_map_page(struct device *dev, struct page *page,
 	 * Ensure that the address returned is DMA'ble
 	 */
 	if (!dma_capable(dev, dev_addr, size))
-		panic("map_single: bounce buffer is not DMA'ble");
+		panic("DMA: swiotlb_map_single: bounce buffer is not DMA'ble");
 
 	return dev_addr;
 }
