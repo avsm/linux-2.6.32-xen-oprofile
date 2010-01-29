@@ -1039,6 +1039,9 @@ int __init acpi_probe_gsi(void)
 			max_gsi = gsi;
 	}
 
+	if (xen_initial_domain())
+		max_gsi += 255; /* Plus maximum entries of an ioapic. */
+
 	return max_gsi + 1;
 }
 

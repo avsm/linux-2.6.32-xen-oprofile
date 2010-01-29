@@ -1795,6 +1795,8 @@ __init pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd,
 }
 #endif	/* CONFIG_X86_64 */
 
+static unsigned char dummy_ioapic_mapping[PAGE_SIZE] __page_aligned_bss;
+
 static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 {
 	pte_t pte;
@@ -1830,7 +1832,7 @@ static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 		 * We just don't map the IO APIC - all access is via
 		 * hypercalls.  Keep the address in the pte for reference.
 		 */
-		pte = pfn_pte(phys, PAGE_NONE);
+		pte = __pte(__pa(dummy_ioapic_mapping) | __PAGE_KERNEL);
 		break;
 #endif
 

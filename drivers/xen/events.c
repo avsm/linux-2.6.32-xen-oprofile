@@ -74,7 +74,7 @@ enum xen_irq_type {
  * event channel - irq->event channel mapping
  * cpu - cpu this event channel is bound to
  * index - type-specific information:
- *    PIRQ - vector, with MSB being "needs EIO"
+ *    PIRQ - with MSB being "needs EIO"
  *    VIRQ - virq number
  *    IPI - IPI vector
  *    EVTCHN -
@@ -90,7 +90,6 @@ struct irq_info
 		enum ipi_vector ipi;
 		struct {
 			unsigned short nr;
-			unsigned char vector;
 			unsigned char flags;
 		} pirq;
 	} u;
@@ -141,10 +140,10 @@ static struct irq_info mk_virq_info(unsigned short evtchn, unsigned short virq)
 }
 
 static struct irq_info mk_pirq_info(unsigned short evtchn,
-				    unsigned short pirq, unsigned short vector)
+				    unsigned short pirq)
 {
 	return (struct irq_info) { .type = IRQT_PIRQ, .evtchn = evtchn,
-			.cpu = 0, .u.pirq = { .nr = pirq, .vector = vector } };
+			.cpu = 0, .u.pirq = { .nr = pirq } };
 }
 
 /*
@@ -194,16 +193,6 @@ static unsigned gsi_from_irq(unsigned irq)
 	BUG_ON(info->type != IRQT_PIRQ);
 
 	return info->u.pirq.nr;
-}
-
-static unsigned vector_from_irq(unsigned irq)
-{
-	struct irq_info *info = info_for_irq(irq);
-
-	BUG_ON(info == NULL);
-	BUG_ON(info->type != IRQT_PIRQ);
-
-	return info->u.pirq.vector;
 }
 
 static enum xen_irq_type type_from_irq(unsigned irq)
@@ -536,14 +525,13 @@ static int find_irq_by_gsi(unsigned gsi)
 }
 
 /*
- * Allocate a physical irq, along with a vector.  We don't assign an
- * event channel until the irq actually started up.  Return an
+ * Allocate a physical irq.  We don't assign an event channel
+ * until the irq actually started up.  Return an
  * existing irq if we've already got one for the gsi.
  */
 int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 {
 	int irq;
-	struct physdev_irq irq_op;
 
 	spin_lock(&irq_mapping_update_lock);
 
@@ -564,14 +552,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 				      handle_level_irq, name);
 
-	irq_op.irq = gsi;
-	if (HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op)) {
-		dynamic_irq_cleanup(irq);
-		irq = -ENOSPC;
- 		goto out;
- 	}
-
-	irq_info[irq] = mk_pirq_info(0, gsi, irq_op.vector);
+	irq_info[irq] = mk_pirq_info(0, gsi);
  	irq_info[irq].u.pirq.flags |= shareable ? PIRQ_SHAREABLE : 0;
 out:
 	spin_unlock(&irq_mapping_update_lock);
@@ -654,8 +635,8 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		irq = -1;
 		goto out;
 	}
+	irq_info[irq] = mk_pirq_info(0, map_irq.pirq);
 
-	irq_info[irq] = mk_pirq_info(0, map_irq.pirq, map_irq.index);
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 			handle_level_irq,
 			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
@@ -665,11 +646,6 @@ out:
 	return irq;
 }
 #endif
-
-int xen_vector_from_irq(unsigned irq)
-{
-	return vector_from_irq(irq);
-}
 
 int xen_gsi_from_irq(unsigned irq)
 {
