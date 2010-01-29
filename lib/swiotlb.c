@@ -102,7 +102,27 @@ static int late_alloc;
 static int __init
 setup_io_tlb_npages(char *str)
 {
+	int get_value(const char *token, char *str, char **endp)
+	{
+		ssize_t len;
+		int val = 0;
+
+		len = strlen(token);
+		if (!strncmp(str, token, len)) {
+			str += len;
+			if (*str == '=')
+				++str;
+			if (*str != '\0')
+				val = simple_strtoul(str, endp, 0);
+		}
+		*endp = str;
+		return val;
+	}
+
+	int val;
+
 	while (*str) {
+		/* The old syntax */
 		if (isdigit(*str)) {
 			io_tlb_nslabs = simple_strtoul(str, &str, 0);
 			/* avoid tail segment of size < IO_TLB_SEGSIZE */
@@ -110,14 +130,22 @@ setup_io_tlb_npages(char *str)
 		}
 		if (!strncmp(str, "force", 5))
 			swiotlb_force = 1;
-		str += strcspn(str, ",");
-		if (*str == ',')
-			++str;
+		/* The new syntax: swiotlb=nslabs=16384,overflow=32768,force */
+		val = get_value("nslabs", str, &str);
+		if (val)
+			io_tlb_nslabs = ALIGN(val, IO_TLB_SEGSIZE);
+
+		val = get_value("overflow", str, &str);
+		if (val)
+			io_tlb_overflow = val;
+		str = strpbrk(str, ",");
+		if (!str)
+			break;
+		str++; /* skip ',' */
 	}
 	return 1;
 }
 __setup("swiotlb=", setup_io_tlb_npages);
-/* make io_tlb_overflow tunable too? */
 
 /* Note that this doesn't work with highmem page */
 static dma_addr_t swiotlb_virt_to_bus(struct device *hwdev,
