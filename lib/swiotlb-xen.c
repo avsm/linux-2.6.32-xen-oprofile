@@ -143,6 +143,61 @@ xen_swiotlb_free_coherent(struct device *hwdev, size_t size, void *vaddr,
 }
 EXPORT_SYMBOL(xen_swiotlb_free_coherent);
 
+
+static int max_dma_bits = 32;
+
+static int 
+xen_swiotlb_fixup(void *buf, size_t size, unsigned long nslabs)
+{
+	int i, rc;
+	int dma_bits;
+
+	printk(KERN_INFO "xen_swiotlb_fixup: buf=%p size=%zu\n",
+		buf, size);
+
+	dma_bits = get_order(IO_TLB_SEGSIZE << IO_TLB_SHIFT) + PAGE_SHIFT;
+
+	i = 0;
+	do {
+		int slabs = min(nslabs - i, (unsigned long)IO_TLB_SEGSIZE);
+
+		do {
+			rc = xen_create_contiguous_region(
+				(unsigned long)buf + (i << IO_TLB_SHIFT),
+				get_order(slabs << IO_TLB_SHIFT),
+				dma_bits);
+		} while (rc && dma_bits++ < max_dma_bits);
+		if (rc)
+			return rc;
+
+		i += slabs;
+	} while(i < nslabs);
+	return 0;
+}
+
+void __init xen_swiotlb_init(int verbose)
+{
+	int rc = 0;
+
+	swiotlb_init_early(64 * (1<<20), verbose);
+
+  	if ((rc = xen_swiotlb_fixup(io_tlb_start,
+			  io_tlb_nslabs << IO_TLB_SHIFT,
+			  io_tlb_nslabs)))
+		goto error;
+
+	if ((rc = xen_swiotlb_fixup(io_tlb_overflow_buffer,
+			io_tlb_overflow,
+			io_tlb_overflow >> IO_TLB_SHIFT)))
+		goto error;
+
+	return;
+error:	
+	panic("DMA(%d): Failed to exchange pages allocated for DMA with Xen! "\
+	      "We either don't have the permission or you do not have enough"\
+	      "free memory under 4GB!\n", rc);
+}
+
 /*
  * Map a single buffer of the indicated size for DMA in streaming mode.  The
  * physical address to use is returned.
