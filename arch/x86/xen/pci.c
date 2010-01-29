@@ -1,12 +1,14 @@
 #include <linux/kernel.h>
 #include <linux/acpi.h>
 #include <linux/pci.h>
+#include <linux/msi.h>
 
 #include <asm/mpspec.h>
 #include <asm/io_apic.h>
 #include <asm/pci_x86.h>
 
 #include <asm/xen/hypervisor.h>
+#include <asm/xen/pci.h>
 
 #include <xen/interface/xen.h>
 #include <xen/events.h>
@@ -93,3 +95,26 @@ void __init xen_setup_pirqs(void)
 			polarity ? ACPI_ACTIVE_LOW : ACPI_ACTIVE_HIGH);
 	}
 }
+
+#ifdef CONFIG_PCI_MSI
+int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
+{
+	int irq, ret;
+	struct msi_desc *msidesc;
+
+	list_for_each_entry(msidesc, &dev->msi_list, list) {
+		irq = xen_create_msi_irq(dev, msidesc, type);
+		if (irq < 0)
+			return -1;
+
+		ret = set_irq_msi(irq, msidesc);
+		if (ret)
+			goto error;
+	}
+	return 0;
+
+error:
+	xen_destroy_irq(irq);
+	return ret;
+}
+#endif

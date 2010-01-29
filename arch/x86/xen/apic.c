@@ -1,7 +1,6 @@
 #include <linux/kernel.h>
 #include <linux/threads.h>
 #include <linux/bitmap.h>
-#include <linux/pci.h>
 
 #include <asm/io_apic.h>
 #include <asm/acpi.h>
@@ -47,8 +46,6 @@ void xen_init_apic(void)
 {
 	if (!xen_initial_domain())
 		return;
-
-	pci_no_msi();
 
 #ifdef CONFIG_ACPI
 	/*
