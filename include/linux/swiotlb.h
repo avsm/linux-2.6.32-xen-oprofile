@@ -22,6 +22,7 @@ extern int swiotlb_force;
  */
 #define IO_TLB_SHIFT 11
 
+/* swiotlb-core.c */
 extern void swiotlb_init(int verbose);
 #ifdef CONFIG_SWIOTLB
 extern void __init swiotlb_free(void);
@@ -30,8 +31,8 @@ static inline void swiotlb_free(void) { }
 #endif
 extern void swiotlb_print_info(void);
 
-/* Internal book-keeping functions. Must be linked against the library
- * to take advantage of them.*/
+/* swiotlb-core.c: Internal book-keeping functions.
+ * Must be linked against the library to take advantage of them.*/
 #ifdef CONFIG_SWIOTLB
 /*
  * Enumeration for sync targets
