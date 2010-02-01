@@ -94,6 +94,12 @@ static inline void xen_init_vga(const struct dom0_vga_console_info *info,
 }
 #endif
 
+#ifdef CONFIG_XEN_DOM0
+void xen_init_apic(void);
+#else
+static inline void xen_init_apic(void) {}
+#endif
+
 /* Declare an asm function, along with symbols needed to make it
    inlineable */
 #define DECL_ASM(ret, name, ...)		\

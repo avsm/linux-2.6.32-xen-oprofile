@@ -1921,6 +1921,8 @@ __init pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd,
 }
 #endif	/* CONFIG_X86_64 */
 
+static unsigned char dummy_ioapic_mapping[PAGE_SIZE] __page_aligned_bss;
+
 static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 {
 	pte_t pte;
@@ -1949,6 +1951,16 @@ static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 		/* All local page mappings */
 		pte = pfn_pte(phys, prot);
 		break;
+
+#ifdef CONFIG_X86_IO_APIC
+	case FIX_IO_APIC_BASE_0 ... FIX_IO_APIC_BASE_END:
+		/*
+		 * We just don't map the IO APIC - all access is via
+		 * hypercalls.  Keep the address in the pte for reference.
+		 */
+		pte = __pte(__pa(dummy_ioapic_mapping) | __PAGE_KERNEL);
+		break;
+#endif
 
 	case FIX_PARAVIRT_BOOTMAP:
 		/* This is an MFN, but it isn't an IO mapping from the

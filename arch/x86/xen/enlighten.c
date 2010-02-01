@@ -1201,6 +1201,7 @@ asmlinkage void __init xen_start_kernel(void)
 		set_iopl.iopl = 1;
 		if (HYPERVISOR_physdev_op(PHYSDEVOP_set_iopl, &set_iopl) == -1)
 			BUG();
+		xen_init_apic();
 	}
 
 	/* set the limit of our address space */

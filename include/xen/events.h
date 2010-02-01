@@ -58,4 +58,23 @@ void xen_poll_irq(int irq);
 /* Determine the IRQ which is bound to an event channel */
 unsigned irq_from_evtchn(unsigned int evtchn);
 
+/* Allocate an irq for a physical interrupt, given a gsi.  "Legacy"
+   GSIs are identity mapped; others are dynamically allocated as
+   usual. */
+int xen_allocate_pirq(unsigned gsi, int shareable, char *name);
+
+/* Return vector allocated to pirq */
+int xen_vector_from_irq(unsigned pirq);
+
+/* Return gsi allocated to pirq */
+int xen_gsi_from_irq(unsigned pirq);
+
+#ifdef CONFIG_XEN_DOM0_PCI
+void xen_setup_pirqs(void);
+#else
+static inline void xen_setup_pirqs(void)
+{
+}
+#endif
+
 #endif	/* _XEN_EVENTS_H */

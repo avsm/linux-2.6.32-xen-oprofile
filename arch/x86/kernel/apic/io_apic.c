@@ -63,7 +63,10 @@
 #include <asm/uv/uv_hub.h>
 #include <asm/uv/uv_irq.h>
 
+#include <asm/xen/hypervisor.h>
 #include <asm/apic.h>
+
+#include <asm/xen/pci.h>
 
 #define __apicdebuginit(type) static type __init
 #define for_each_irq_pin(entry, head) \
@@ -390,14 +393,18 @@ static inline void io_apic_eoi(unsigned int apic, unsigned int vector)
 
 static inline unsigned int io_apic_read(unsigned int apic, unsigned int reg)
 {
-	struct io_apic __iomem *io_apic = io_apic_base(apic);
+	struct io_apic __iomem *io_apic;
+
+	io_apic = io_apic_base(apic);
 	writel(reg, &io_apic->index);
 	return readl(&io_apic->data);
 }
 
 static inline void io_apic_write(unsigned int apic, unsigned int reg, unsigned int value)
 {
-	struct io_apic __iomem *io_apic = io_apic_base(apic);
+	struct io_apic __iomem *io_apic;
+
+	io_apic = io_apic_base(apic);
 	writel(reg, &io_apic->index);
 	writel(value, &io_apic->data);
 }
@@ -410,7 +417,9 @@ static inline void io_apic_write(unsigned int apic, unsigned int reg, unsigned i
  */
 static inline void io_apic_modify(unsigned int apic, unsigned int reg, unsigned int value)
 {
-	struct io_apic __iomem *io_apic = io_apic_base(apic);
+	struct io_apic __iomem *io_apic;
+
+	io_apic = io_apic_base(apic);
 
 	if (sis_apic_bug)
 		writel(reg, &io_apic->index);
@@ -3446,6 +3455,9 @@ int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
 
+	if (xen_domain())
+		return xen_setup_msi_irqs(dev, nvec, type);
+
 	node = dev_to_node(&dev->dev);
 	irq_want = nr_irqs_gsi;
 	sub_handle = 0;
@@ -3495,7 +3507,10 @@ error:
 
 void arch_teardown_msi_irq(unsigned int irq)
 {
-	destroy_irq(irq);
+	if (xen_domain())
+		xen_destroy_irq(irq);
+	else
+		destroy_irq(irq);
 }
 
 #if defined (CONFIG_DMAR) || defined (CONFIG_INTR_REMAP)
@@ -3809,6 +3824,11 @@ void __init probe_nr_irqs_gsi(void)
 	}
 
 	printk(KERN_DEBUG "nr_irqs_gsi: %d\n", nr_irqs_gsi);
+}
+
+int get_nr_irqs_gsi(void)
+{
+	return nr_irqs_gsi;
 }
 
 #ifdef CONFIG_SPARSE_IRQ
