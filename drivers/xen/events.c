@@ -1262,6 +1262,7 @@ void __init xen_init_IRQ(void)
 
 	cpu_evtchn_mask_p = kcalloc(nr_cpu_ids, sizeof(struct cpu_evtchn_s),
 				    GFP_KERNEL);
+        irq_info = kcalloc(nr_irqs, sizeof(*irq_info), GFP_KERNEL);
 
 	evtchn_to_irq = kcalloc(NR_EVENT_CHANNELS, sizeof(*evtchn_to_irq), GFP_KERNEL);
 	for(i = 0; i < NR_EVENT_CHANNELS; i++)
