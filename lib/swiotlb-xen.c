@@ -13,20 +13,19 @@
 #include <xen/page.h>
 #include <xen/xen-ops.h>
 
-static dma_addr_t xen_phys_to_bus(struct device *hwdev, phys_addr_t paddr)
+static dma_addr_t xen_phys_to_bus(phys_addr_t paddr)
 {
 	return phys_to_machine(XPADDR(paddr)).maddr;;
 }
 
-static phys_addr_t xen_bus_to_phys(struct device *hwdev, dma_addr_t baddr)
+static phys_addr_t xen_bus_to_phys(dma_addr_t baddr)
 {
 	return machine_to_phys(XMADDR(baddr)).paddr;
 }
 
-static dma_addr_t xen_virt_to_bus(struct device *hwdev,
-				  void *address)
+static dma_addr_t xen_virt_to_bus(void *address)
 {
-	return xen_phys_to_bus(hwdev, virt_to_phys(address));
+	return xen_phys_to_bus(virt_to_phys(address));
 }
 
 static int check_pages_physically_contiguous(unsigned long pfn,
@@ -205,7 +204,7 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 {
 	unsigned long start_dma_addr;
 	phys_addr_t phys = page_to_phys(page) + offset;
-	dma_addr_t dev_addr = xen_phys_to_bus(dev, phys);
+	dma_addr_t dev_addr = xen_phys_to_bus(phys);
 	void *map;
 
 	BUG_ON(dir == DMA_NONE);
@@ -221,14 +220,14 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	/*
 	 * Oh well, have to allocate and map a bounce buffer.
 	 */
-	start_dma_addr = xen_virt_to_bus(dev, io_tlb_start);
+	start_dma_addr = xen_virt_to_bus(io_tlb_start);
 	map = do_map_single(dev, phys, start_dma_addr, size, dir);
 	if (!map) {
 		swiotlb_full(dev, size, dir, 1);
 		map = io_tlb_overflow_buffer;
 	}
 
-	dev_addr = xen_virt_to_bus(dev, map);
+	dev_addr = xen_virt_to_bus(map);
 
 	/*
 	 * Ensure that the address returned is DMA'ble
@@ -251,7 +250,7 @@ EXPORT_SYMBOL_GPL(xen_swiotlb_map_page);
 static void unmap_single(struct device *hwdev, dma_addr_t dev_addr,
 			 size_t size, int dir)
 {
-	phys_addr_t paddr = xen_bus_to_phys(hwdev, dev_addr);
+	phys_addr_t paddr = xen_bus_to_phys(dev_addr);
 
 	BUG_ON(dir == DMA_NONE);
 
@@ -295,7 +294,7 @@ static void
 xen_swiotlb_sync_single(struct device *hwdev, dma_addr_t dev_addr,
 		    size_t size, int dir, int target)
 {
-	phys_addr_t paddr = xen_bus_to_phys(hwdev, dev_addr);
+	phys_addr_t paddr = xen_bus_to_phys(dev_addr);
 
 	BUG_ON(dir == DMA_NONE);
 
@@ -385,10 +384,10 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 	u64 mask = dma_get_mask(hwdev);
 	BUG_ON(dir == DMA_NONE);
 
-	start_dma_addr = xen_virt_to_bus(hwdev, io_tlb_start);
+	start_dma_addr = xen_virt_to_bus(io_tlb_start);
 	for_each_sg(sgl, sg, nelems, i) {
 		phys_addr_t paddr = sg_phys(sg);
-		dma_addr_t dev_addr = xen_phys_to_bus(hwdev, paddr);
+		dma_addr_t dev_addr = xen_phys_to_bus(paddr);
 
 		if (swiotlb_force || 
 		    !is_buffer_dma_capable(mask, dev_addr, sg->length) ||
@@ -405,7 +404,7 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 				sgl[0].dma_length = 0;
 				return 0;
 			}
-			sg->dma_address = xen_virt_to_bus(hwdev, map);
+			sg->dma_address = xen_virt_to_bus(map);
 		} else
 			sg->dma_address = dev_addr;
 		sg->dma_length = sg->length;
@@ -488,7 +487,7 @@ EXPORT_SYMBOL(xen_swiotlb_sync_sg_for_device);
 int
 xen_swiotlb_dma_mapping_error(struct device *hwdev, dma_addr_t dma_addr)
 {
-	return (dma_addr == xen_virt_to_bus(hwdev, io_tlb_overflow_buffer));
+	return (dma_addr == xen_virt_to_bus(io_tlb_overflow_buffer));
 }
 EXPORT_SYMBOL(xen_swiotlb_dma_mapping_error);
 
@@ -501,6 +500,6 @@ EXPORT_SYMBOL(xen_swiotlb_dma_mapping_error);
 int
 xen_swiotlb_dma_supported(struct device *hwdev, u64 mask)
 {
-	return xen_virt_to_bus(hwdev, io_tlb_end - 1) <= mask;
+	return xen_virt_to_bus(io_tlb_end - 1) <= mask;
 }
 EXPORT_SYMBOL(xen_swiotlb_dma_supported);
