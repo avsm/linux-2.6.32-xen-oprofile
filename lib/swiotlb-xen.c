@@ -94,51 +94,37 @@ void *
 xen_swiotlb_alloc_coherent(struct device *hwdev, size_t size,
 		       dma_addr_t *dma_handle, gfp_t flags)
 {
-	dma_addr_t dev_addr;
 	void *ret;
 	int order = get_order(size);
 	u64 dma_mask = DMA_BIT_MASK(32);
-	unsigned long start_dma_addr;
+	unsigned long vstart;
+
+	/*
+	* Ignore region specifiers - the kernel's ideas of
+	* pseudo-phys memory layout has nothing to do with the
+	* machine physical layout.  We can't allocate highmem
+	* because we can't return a pointer to it.
+	*/
+	flags &= ~(__GFP_DMA | __GFP_HIGHMEM);
+
+	if (dma_alloc_from_coherent(hwdev, size, dma_handle, &ret))
+		return ret;
+
+	vstart = __get_free_pages(flags, order);
+	ret = (void *)vstart;
 
 	if (hwdev && hwdev->coherent_dma_mask)
 		dma_mask = hwdev->coherent_dma_mask;
 
-	ret = (void *)__get_free_pages(flags, order);
-	if (ret && xen_virt_to_bus(hwdev, ret) + size - 1 > dma_mask) {
-		/*
-		 * The allocated memory isn't reachable by the device.
-		 */
-		free_pages((unsigned long) ret, order);
-		ret = NULL;
-	}
-	if (!ret) {
-		/*
-		 * We are either out of memory or the device can't DMA
-		 * to GFP_DMA memory; fall back on do_map_single(), which
-		 * will grab memory from the lowest available address range.
-		 */
-		start_dma_addr = xen_virt_to_bus(hwdev, io_tlb_start);
-		ret = do_map_single(hwdev, 0, start_dma_addr, size,
-				    DMA_FROM_DEVICE);
-		if (!ret)
+	if (ret) {
+		if (xen_create_contiguous_region(vstart, order,
+						 fls64(dma_mask)) != 0) {
+			free_pages(vstart, order);
 			return NULL;
+		}
+		memset(ret, 0, size);
+		*dma_handle = virt_to_machine(ret).maddr;
 	}
-
-	memset(ret, 0, size);
-	dev_addr = xen_virt_to_bus(hwdev, ret);
-
-	/* Confirm address can be DMA'd by device */
-	if (dev_addr + size - 1 > dma_mask) {
-		dev_err(hwdev, "DMA: hwdev DMA mask = 0x%016Lx, " \
-		       "dev_addr = 0x%016Lx\n",
-		       (unsigned long long)dma_mask,
-		       (unsigned long long)dev_addr);
-
-		/* DMA_TO_DEVICE to avoid memcpy in do_unmap_single */
-		do_unmap_single(hwdev, ret, size, DMA_TO_DEVICE);
-		return NULL;
-	}
-	*dma_handle = dev_addr;
 	return ret;
 }
 EXPORT_SYMBOL(xen_swiotlb_alloc_coherent);
@@ -181,7 +167,8 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	 * we can safely return the device addr and not worry about bounce
 	 * buffering it.
 	 */
-	if (dma_capable(dev, dev_addr, size) && !swiotlb_force)
+	if (is_buffer_dma_capable(dma_get_mask(dev), dev_addr, size) &&
+	    !range_straddles_page_boundary(phys, size) && !swiotlb_force)
 		return dev_addr;
 
 	/*
@@ -199,10 +186,9 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	/*
 	 * Ensure that the address returned is DMA'ble
 	 */
-	if (!dma_capable(dev, dev_addr, size))
-		panic("DMA: xen_swiotlb_map_single: bounce buffer is not " \
-		      "DMA'ble");
-
+	if (!is_buffer_dma_capable(dma_get_mask(dev), dev_addr, size))
+		panic("DMA: xen_swiotlb_map_single: bounce buffer  is not " \
+		      "DMA'ble\n");
 	return dev_addr;
 }
 EXPORT_SYMBOL_GPL(xen_swiotlb_map_page);
@@ -348,7 +334,7 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 	unsigned long start_dma_addr;
 	struct scatterlist *sg;
 	int i;
-
+	u64 mask = dma_get_mask(hwdev);
 	BUG_ON(dir == DMA_NONE);
 
 	start_dma_addr = xen_virt_to_bus(hwdev, io_tlb_start);
