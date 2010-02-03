@@ -157,7 +157,7 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 {
 	unsigned long start_dma_addr;
 	phys_addr_t phys = page_to_phys(page) + offset;
-	dma_addr_t dev_addr = phys_to_dma(dev, phys);
+	dma_addr_t dev_addr = xen_phys_to_bus(dev, phys);
 	void *map;
 
 	BUG_ON(dir == DMA_NONE);
@@ -203,11 +203,12 @@ EXPORT_SYMBOL_GPL(xen_swiotlb_map_page);
 static void unmap_single(struct device *hwdev, dma_addr_t dev_addr,
 			 size_t size, int dir)
 {
-	phys_addr_t paddr = dma_to_phys(hwdev, dev_addr);
+	phys_addr_t paddr = xen_bus_to_phys(hwdev, dev_addr);
 
 	BUG_ON(dir == DMA_NONE);
 
-	if (is_xen_swiotlb_buffer(paddr)) {
+	/* NOTE: We use dev_addr here, not paddr! */
+	if (is_xen_swiotlb_buffer(dev_addr)) {
 		do_unmap_single(hwdev, phys_to_virt(paddr), size, dir);
 		return;
 	}
