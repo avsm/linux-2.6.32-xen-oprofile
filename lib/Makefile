@@ -77,7 +77,8 @@ obj-$(CONFIG_TEXTSEARCH_FSM) += ts_fsm.o
 obj-$(CONFIG_SMP) += percpu_counter.o
 obj-$(CONFIG_AUDIT_GENERIC) += audit.o
 
-obj-$(CONFIG_SWIOTLB) += swiotlb-core.o swiotlb.o swiotlb-xen.o
+obj-$(CONFIG_SWIOTLB) += swiotlb-core.o swiotlb.o
+obj-$(CONFIG_SWIOTLB_XEN) +=  swiotlb-xen.o
 obj-$(CONFIG_IOMMU_HELPER) += iommu-helper.o
 obj-$(CONFIG_FAULT_INJECTION) += fault-inject.o
 
