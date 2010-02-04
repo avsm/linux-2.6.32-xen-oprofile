@@ -267,10 +267,14 @@ IOMMU (input/output memory management unit)
 
   iommu options only relevant to the software bounce buffering (SWIOTLB) IOMMU
   implementation:
-    swiotlb=<pages>[,force]
+    swiotlb=[npages=<pages>]
+    swiotlb=[force]
+    swiotlb=[overflow=<size>]
+
     <pages>            Prereserve that many 128K pages for the software IO
                        bounce buffering.
     force              Force all IO through the software TLB.
+    <size>             Size in bytes of the overflow buffer.
 
   Settings for the IBM Calgary hardware IOMMU currently found in IBM
   pSeries and xSeries machines:
