@@ -64,7 +64,7 @@ bool xen_dma_capable(struct device *dev, dma_addr_t dev_addr,
 {
 	int rc = 0;
 
-	rc =  is_buffer_dma_capable(dma_get_mask(dev), dev_addr, size) &&
+	rc =  dma_capable(dev, dev_addr, size) &&
 		 !range_straddles_page_boundary(phys, size);
 	return rc;
 }
@@ -213,7 +213,7 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	 * we can safely return the device addr and not worry about bounce
 	 * buffering it.
 	 */
-	if (is_buffer_dma_capable(dma_get_mask(dev), dev_addr, size) &&
+	if (dma_capable(dev, dev_addr, size) &&
 	    !range_straddles_page_boundary(phys, size) && !swiotlb_force)
 		return dev_addr;
 
@@ -232,7 +232,7 @@ dma_addr_t xen_swiotlb_map_page(struct device *dev, struct page *page,
 	/*
 	 * Ensure that the address returned is DMA'ble
 	 */
-	if (!is_buffer_dma_capable(dma_get_mask(dev), dev_addr, size))
+	if (!dma_capable(dev, dev_addr, size))
 		panic("DMA: xen_swiotlb_map_single: bounce buffer  is not " \
 		      "DMA'ble\n");
 	return dev_addr;
@@ -381,7 +381,6 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 	unsigned long start_dma_addr;
 	struct scatterlist *sg;
 	int i;
-	u64 mask = dma_get_mask(hwdev);
 	BUG_ON(dir == DMA_NONE);
 
 	start_dma_addr = xen_virt_to_bus(io_tlb_start);
@@ -390,7 +389,7 @@ xen_swiotlb_map_sg_attrs(struct device *hwdev, struct scatterlist *sgl,
 		dma_addr_t dev_addr = xen_phys_to_bus(paddr);
 
 		if (swiotlb_force || 
-		    !is_buffer_dma_capable(mask, dev_addr, sg->length) ||
+		    !dma_capable(hwdev, dev_addr, sg->length) ||
 		    range_straddles_page_boundary(paddr, sg->length)) {
 			void *map = do_map_single(hwdev, sg_phys(sg),
 						  start_dma_addr,
