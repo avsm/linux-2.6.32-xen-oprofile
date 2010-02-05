@@ -4,6 +4,7 @@
 #include <linux/cdrom.h>
 #include <linux/hdreg.h>
 #include <linux/module.h>
+#include <asm/tlbflush.h>
 
 #include <scsi/scsi.h>
 #include <scsi/scsi_ioctl.h>
@@ -167,7 +168,6 @@ blktap_map_uaddr_fn(pte_t *ptep, struct page *pmd_page,
 
 	BTDBG("ptep %p -> %012llx\n", ptep, pte_val(*pte));
 	set_pte(ptep, *pte);
-	__flush_tlb_single(addr);
 	return 0;
 }
 
@@ -186,7 +186,6 @@ blktap_umap_uaddr_fn(pte_t *ptep, struct page *pmd_page,
 
 	BTDBG("ptep %p\n", ptep);
 	pte_clear(mm, addr, ptep);
-	__flush_tlb_single(addr);
 	return 0;
 }
 
@@ -326,6 +325,7 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 		if (request->handles[i].kernel == INVALID_GRANT_HANDLE) {
 			kvaddr = request_to_kaddr(request, i);
 			blktap_umap_uaddr(&init_mm, kvaddr);
+			flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
 			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
 					    INVALID_P2M_ENTRY);
 		}
@@ -560,7 +560,9 @@ blktap_map(struct blktap *tap,
 
 	pte = mk_pte(page, ring->vma->vm_page_prot);
 	blktap_map_uaddr(ring->vma->vm_mm, uvaddr, pte_mkwrite(pte));
+	flush_tlb_mm(ring->vma->vm_mm);
 	blktap_map_uaddr(&init_mm, kvaddr, mk_pte(page, PAGE_KERNEL));
+	flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
 
 	set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT, pte_mfn(pte));
 	request->handles[seg].kernel = INVALID_GRANT_HANDLE;
