@@ -41,6 +41,10 @@ config SWIOTLB_XEN
        def_bool y
        depends on XEN && SWIOTLB
 
+config MICROCODE_XEN
+       def_bool y
+       depends on XEN_DOM0 && MICROCODE
+
 config XEN_DOM0
 	bool "Enable Xen privileged domain support"
 	depends on XEN && X86_IO_APIC && ACPI
