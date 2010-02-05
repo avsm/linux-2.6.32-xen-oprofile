@@ -315,15 +315,14 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 	down_write(&tap->ring.vma->vm_mm->mmap_sem);
 
 	for (i = 0; i < request->nr_pages; i++) {
+		kvaddr = request_to_kaddr(request, i);
 		BTDBG("request: %p, seg: %d, kvaddr: 0x%08lx, khandle: %u, "
 		      "uvaddr: 0x%08lx, uhandle: %u\n", request, i,
-		      request_to_kaddr(request, i),
-		      request->handles[i].kernel,
+		      kvaddr, request->handles[i].kernel,
 		      MMAP_VADDR(tap->ring.user_vstart, usr_idx, i),
 		      request->handles[i].user);
 
 		if (request->handles[i].kernel == INVALID_GRANT_HANDLE) {
-			kvaddr = request_to_kaddr(request, i);
 			blktap_umap_uaddr(tap->ring.vma->vm_mm, kvaddr);
 			flush_tlb_kernel_page(kvaddr);
 			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
@@ -450,7 +449,7 @@ blktap_prep_foreign(struct blktap *tap,
 
 #ifdef BLKTAP_CHAINED_BLKTAP
 	/* enable chained tap devices */
-	tap_page = pfn_to_page(__pa(kvaddr) >> PAGE_SHIFT);
+	tap_page = request_to_page(request, seg);
 	set_page_private(tap_page, page_private(page));
 	SetPageBlkback(tap_page);
 #endif
@@ -480,7 +479,7 @@ blktap_map_foreign(struct blktap *tap,
 	struct page *page;
 	int i, grant, err, usr_idx;
 	struct blktap_ring *ring;
-	unsigned long uvaddr, kvaddr, foreign_mfn;
+	unsigned long uvaddr, foreign_mfn;
 
 	if (!table->cnt)
 		return 0;
@@ -498,7 +497,6 @@ blktap_map_foreign(struct blktap *tap,
 			continue;
 
 		uvaddr = MMAP_VADDR(ring->user_vstart, usr_idx, i);
-		kvaddr = request_to_kaddr(request, i);
 
 		if (unlikely(table->grants[grant].status)) {
 			BTERR("invalid kernel buffer: could not remap it\n");
@@ -526,18 +524,19 @@ blktap_map_foreign(struct blktap *tap,
 		if (err)
 			continue;
 
-		page = pfn_to_page(__pa(kvaddr) >> PAGE_SHIFT);
+		page = request_to_page(request, i);
 
 		if (!xen_feature(XENFEAT_auto_translated_physmap))
-			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
+			set_phys_to_machine(page_to_pfn(page),
 					    FOREIGN_FRAME(foreign_mfn));
 		else if (vm_insert_page(ring->vma, uvaddr, page))
 			err |= 1;
 
 		BTDBG("pending_req: %p, seg: %d, page: %p, "
-		      "kvaddr: 0x%08lx, khandle: %u, uvaddr: 0x%08lx, "
+		      "kvaddr: 0x%p, khandle: %u, uvaddr: 0x%08lx, "
 		      "uhandle: %u\n", request, i, page,
-		      kvaddr, request->handles[i].kernel,		       
+		      pfn_to_kaddr(page_to_pfn(page)),
+		      request->handles[i].kernel,
 		      uvaddr, request->handles[i].user);
 	}
 
@@ -585,7 +584,7 @@ blktap_device_process_request(struct blktap *tap,
 	struct scatterlist *sg;
 	struct blktap_grant_table table;
 	unsigned int fsect, lsect, nr_sects;
-	unsigned long offset, uvaddr, kvaddr;
+	unsigned long offset, uvaddr;
 	struct blkif_request blkif_req, *target;
 
 	err = -1;
@@ -641,18 +640,17 @@ blktap_device_process_request(struct blktap *tap,
 			}
 
 			uvaddr = MMAP_VADDR(ring->user_vstart, usr_idx, i);
-			kvaddr = request_to_kaddr(request, i);
 			offset = (uvaddr - ring->vma->vm_start) >> PAGE_SHIFT;
-			page   = pfn_to_page(__pa(kvaddr) >> PAGE_SHIFT);
+			page   = request_to_page(request, i);
 			ring->foreign_map.map[offset] = page;
 			SetPageReserved(page);
 
 			BTDBG("mapped uaddr %08lx to page %p pfn 0x%lx\n",
-			      uvaddr, page, __pa(kvaddr) >> PAGE_SHIFT);
+			      uvaddr, page, page_to_pfn(page));
 			BTDBG("offset: 0x%08lx, pending_req: %p, seg: %d, "
-			      "page: %p, kvaddr: 0x%08lx, uvaddr: 0x%08lx\n",
+			      "page: %p, kvaddr: %p, uvaddr: 0x%08lx\n",
 			      offset, request, i,
-			      page, kvaddr, uvaddr);
+			      page, pfn_to_kaddr(page_to_pfn(page)), uvaddr);
 
 			request->nr_pages++;
 	}
