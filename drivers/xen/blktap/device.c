@@ -17,7 +17,8 @@
 
 #include "blktap.h"
 
-#ifdef CONFIG_XEN_BLKDEV_BACKEND
+#if defined(CONFIG_XEN_BLKDEV_BACKEND) || \
+    (defined(CONFIG_XEN_BLKDEV_BACKEND_MODULE) && defined(MODULE))
 #include "../blkback/blkback-pagemap.h"
 #else
 struct blkback_pagemap { };
@@ -324,7 +325,7 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 
 		if (request->handles[i].kernel == INVALID_GRANT_HANDLE) {
 			kvaddr = request_to_kaddr(request, i);
-			blktap_umap_uaddr(&init_mm, kvaddr);
+			blktap_umap_uaddr(tap->ring.vma->vm_mm, kvaddr);
 			flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
 			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
 					    INVALID_P2M_ENTRY);
@@ -561,7 +562,7 @@ blktap_map(struct blktap *tap,
 	pte = mk_pte(page, ring->vma->vm_page_prot);
 	blktap_map_uaddr(ring->vma->vm_mm, uvaddr, pte_mkwrite(pte));
 	flush_tlb_mm(ring->vma->vm_mm);
-	blktap_map_uaddr(&init_mm, kvaddr, mk_pte(page, PAGE_KERNEL));
+	blktap_map_uaddr(ring->vma->vm_mm, kvaddr, mk_pte(page, PAGE_KERNEL));
 	flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
 
 	set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT, pte_mfn(pte));
