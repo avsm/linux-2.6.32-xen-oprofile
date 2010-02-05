@@ -81,6 +81,7 @@
 #include <linux/fs.h>
 #include <linux/mm.h>
 
+#include <xen/xen.h>
 #include <asm/xen/hypervisor.h>
 #include <asm/microcode.h>
 #include <asm/processor.h>

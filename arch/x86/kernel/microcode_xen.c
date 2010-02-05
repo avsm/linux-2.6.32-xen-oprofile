@@ -13,6 +13,7 @@
 
 #include <asm/microcode.h>
 
+#include <xen/xen.h>
 #include <xen/interface/platform.h>
 #include <xen/interface/xen.h>
 
