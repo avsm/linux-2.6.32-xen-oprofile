@@ -136,8 +136,4 @@ int blkif_schedule(void *arg);
 int blkback_barrier(struct xenbus_transaction xbt,
 		    struct backend_info *be, int state);
 
-int blkback_pagemap_init(int);
-void blkback_pagemap_set(int, struct page *, domid_t, busid_t, grant_ref_t);
-void blkback_pagemap_clear(struct page *);
-
 #endif /* __BLKIF__BACKEND__COMMON_H__ */

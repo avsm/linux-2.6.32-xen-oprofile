@@ -1,4 +1,4 @@
-#include "common.h"
+#include <linux/module.h>
 #include "blkback-pagemap.h"
 
 static int blkback_pagemap_size;
@@ -22,6 +22,7 @@ blkback_pagemap_init(int pages)
 	blkback_pagemap_size = pages;
 	return 0;
 }
+EXPORT_SYMBOL_GPL(blkback_pagemap_init);
 
 void
 blkback_pagemap_set(int idx, struct page *page,
@@ -46,6 +47,7 @@ blkback_pagemap_set(int idx, struct page *page,
 	entry->busid = busid;
 	entry->gref  = gref;
 }
+EXPORT_SYMBOL_GPL(blkback_pagemap_set);
 
 void
 blkback_pagemap_clear(struct page *page)
@@ -66,6 +68,7 @@ blkback_pagemap_clear(struct page *page)
 
 	memset(entry, 0, sizeof(*entry));
 }
+EXPORT_SYMBOL_GPL(blkback_pagemap_clear);
 
 struct blkback_pagemap
 blkback_pagemap_read(struct page *page)
@@ -87,6 +90,8 @@ blkback_pagemap_read(struct page *page)
 	return *entry;
 }
 EXPORT_SYMBOL(blkback_pagemap_read);
+
+MODULE_LICENSE("Dual BSD/GPL");
 
 int
 blkback_pagemap_contains_page(struct page *page)

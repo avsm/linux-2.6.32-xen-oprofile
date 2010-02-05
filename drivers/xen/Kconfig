@@ -56,6 +56,11 @@ config XEN_BLKDEV_TAP
 	  as files, in memory, or on other hosts across the network.  This
 	  driver can safely coexist with the existing blockback driver.
 
+config XEN_BLKBACK_PAGEMAP
+	tristate
+	depends on XEN_BLKDEV_BACKEND != n && XEN_BLKDEV_TAP != n
+	default XEN_BLKDEV_BACKEND || XEN_BLKDEV_TAP
+
 config XENFS
 	tristate "Xen filesystem"
 	depends on XEN

@@ -17,14 +17,7 @@
 
 #include "blktap.h"
 
-#if defined(CONFIG_XEN_BLKDEV_BACKEND) || \
-    (defined(CONFIG_XEN_BLKDEV_BACKEND_MODULE) && defined(MODULE))
 #include "../blkback/blkback-pagemap.h"
-#else
-struct blkback_pagemap { };
-#define blkback_pagemap_read(page) BUG();
-#define blkback_pagemap_contains_page(page) 0
-#endif
 
 #if 0
 #define DPRINTK_IOCTL(_f, _a...) printk(KERN_ALERT _f, ## _a)
