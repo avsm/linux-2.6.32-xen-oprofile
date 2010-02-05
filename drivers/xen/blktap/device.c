@@ -197,6 +197,12 @@ blktap_umap_uaddr(struct mm_struct *mm, unsigned long address)
 				   PAGE_SIZE, blktap_umap_uaddr_fn, mm);
 }
 
+static inline void
+flush_tlb_kernel_page(unsigned long kvaddr)
+{
+	flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
+}
+
 static void
 blktap_device_end_dequeued_request(struct blktap_device *dev,
 				   struct request *req, int error)
@@ -326,7 +332,7 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 		if (request->handles[i].kernel == INVALID_GRANT_HANDLE) {
 			kvaddr = request_to_kaddr(request, i);
 			blktap_umap_uaddr(tap->ring.vma->vm_mm, kvaddr);
-			flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
+			flush_tlb_kernel_page(kvaddr);
 			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
 					    INVALID_P2M_ENTRY);
 		}
@@ -561,9 +567,9 @@ blktap_map(struct blktap *tap,
 
 	pte = mk_pte(page, ring->vma->vm_page_prot);
 	blktap_map_uaddr(ring->vma->vm_mm, uvaddr, pte_mkwrite(pte));
-	flush_tlb_mm(ring->vma->vm_mm);
+	flush_tlb_page(ring->vma, uvaddr);
 	blktap_map_uaddr(ring->vma->vm_mm, kvaddr, mk_pte(page, PAGE_KERNEL));
-	flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
+	flush_tlb_kernel_page(kvaddr);
 
 	set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT, pte_mfn(pte));
 	request->handles[seg].kernel = INVALID_GRANT_HANDLE;
