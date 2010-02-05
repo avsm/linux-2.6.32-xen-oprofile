@@ -424,7 +424,7 @@ blktap_sysfs_free(void)
 	class_destroy(class);
 }
 
-int
+int __init
 blktap_sysfs_init(void)
 {
 	struct class *cls;

@@ -4,6 +4,7 @@
 #include <linux/mm.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/init.h>
 #include <linux/scatterlist.h>
 #include <xen/blkif.h>
 #include <xen/grant_table.h>
