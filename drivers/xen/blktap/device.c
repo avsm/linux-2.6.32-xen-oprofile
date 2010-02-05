@@ -400,7 +400,8 @@ blktap_device_finish_request(struct blktap *tap,
 	ret = res->status == BLKIF_RSP_OKAY ? 0 : -EIO;
 
 	BTDBG("req %p res status %d operation %d/%d id %lld\n", req,
-		res->status, res->operation, request->operation, res->id);
+	      res->status, res->operation, request->operation,
+	      (unsigned long long)res->id);
 
 	switch (request->operation) {
 	case BLKIF_OP_READ:

@@ -276,7 +276,7 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 		tmp += sprintf(tmp, "req %d: id: %llu, usr_idx: %d, "
 			       "status: 0x%02x, pendcnt: %d, "
 			       "nr_pages: %u, op: %d, time: %lu:%lu\n",
-			       i, req->id, req->usr_idx,
+			       i, (unsigned long long)req->id, req->usr_idx,
 			       req->status, atomic_read(&req->pendcnt),
 			       req->nr_pages, req->operation, req->time.tv_sec,
 			       req->time.tv_usec);
