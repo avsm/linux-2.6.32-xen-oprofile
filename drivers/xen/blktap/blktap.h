@@ -4,6 +4,7 @@
 #include <linux/mm.h>
 #include <linux/fs.h>
 #include <linux/cdev.h>
+#include <linux/scatterlist.h>
 #include <xen/blkif.h>
 #include <xen/grant_table.h>
 
@@ -173,6 +174,7 @@ struct blktap {
 
 	int                            pending_cnt;
 	struct blktap_request         *pending_requests[MAX_PENDING_REQS];
+	struct scatterlist             sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
 	wait_queue_head_t              wq;
 	struct list_head               deferred_queue;

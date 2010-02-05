@@ -579,10 +579,9 @@ blktap_device_process_request(struct blktap *tap,
 			      struct request *req)
 {
 	struct page *page;
-	struct bio_vec *bvec;
-	int usr_idx, err;
-	struct req_iterator iter;
+	int i, usr_idx, err;
 	struct blktap_ring *ring;
+	struct scatterlist *sg;
 	struct blktap_grant_table table;
 	unsigned int fsect, lsect, nr_sects;
 	unsigned long offset, uvaddr, kvaddr;
@@ -609,42 +608,39 @@ blktap_device_process_request(struct blktap *tap,
 
 	nr_sects = 0;
 	request->nr_pages = 0;
-	blkif_req.nr_segments = 0;
-	rq_for_each_segment(bvec, req, iter) {
-			BUG_ON(blkif_req.nr_segments ==
-			       BLKIF_MAX_SEGMENTS_PER_REQUEST);
+	blkif_req.nr_segments = blk_rq_map_sg(req->q, req, tap->sg);
+	BUG_ON(blkif_req.nr_segments > BLKIF_MAX_SEGMENTS_PER_REQUEST);
+	for (i = 0; i < blkif_req.nr_segments; ++i) {
+			sg = tap->sg + i;
+			fsect = sg->offset >> 9;
+			lsect = fsect + (sg->length >> 9) - 1;
+			nr_sects += sg->length >> 9;
 
-			fsect     = bvec->bv_offset >> 9;
-			lsect     = fsect + (bvec->bv_len >> 9) - 1;
-			nr_sects += bvec->bv_len >> 9;
-
-			blkif_req.seg[blkif_req.nr_segments] =
+			blkif_req.seg[i] =
 				(struct blkif_request_segment) {
 				.gref       = 0,
 				.first_sect = fsect,
 				.last_sect  = lsect };
 
-			if (blkback_pagemap_contains_page(bvec->bv_page)) {
+			if (blkback_pagemap_contains_page(sg_page(sg))) {
 				/* foreign page -- use xen */
 				if (blktap_prep_foreign(tap,
 							request,
 							&blkif_req,
-							blkif_req.nr_segments,
-							bvec->bv_page,
+							i,
+							sg_page(sg),
 							&table))
 					goto out;
 			} else {
 				/* do it the old fashioned way */
 				blktap_map(tap,
 					   request,
-					   blkif_req.nr_segments,
-					   bvec->bv_page);
+					   i,
+					   sg_page(sg));
 			}
 
-			uvaddr = MMAP_VADDR(ring->user_vstart,
-					    usr_idx, blkif_req.nr_segments);
-			kvaddr = request_to_kaddr(request,
-						  blkif_req.nr_segments);
+			uvaddr = MMAP_VADDR(ring->user_vstart, usr_idx, i);
+			kvaddr = request_to_kaddr(request, i);
 			offset = (uvaddr - ring->vma->vm_start) >> PAGE_SHIFT;
 			page   = pfn_to_page(__pa(kvaddr) >> PAGE_SHIFT);
 			ring->foreign_map.map[offset] = page;
@@ -654,10 +650,9 @@ blktap_device_process_request(struct blktap *tap,
 			      uvaddr, page, __pa(kvaddr) >> PAGE_SHIFT);
 			BTDBG("offset: 0x%08lx, pending_req: %p, seg: %d, "
 			      "page: %p, kvaddr: 0x%08lx, uvaddr: 0x%08lx\n",
-			      offset, request, blkif_req.nr_segments,
+			      offset, request, i,
 			      page, kvaddr, uvaddr);
 
-			blkif_req.nr_segments++;
 			request->nr_pages++;
 	}
 
