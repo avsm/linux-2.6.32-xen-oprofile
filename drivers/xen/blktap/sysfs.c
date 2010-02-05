@@ -194,7 +194,7 @@ blktap_sysfs_resume_device(struct device *dev,
 out:
 	blktap_sysfs_exit(tap);
 
-	BTDBG("returning %d\n", (err ? err : size));
+	BTDBG("returning %zd\n", (err ? err : size));
 	return (err ? err : size);
 }
 
