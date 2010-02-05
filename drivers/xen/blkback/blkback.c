@@ -456,23 +456,19 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 			DPRINTK("invalid buffer -- could not remap it\n");
 			map[i].handle = BLKBACK_INVALID_HANDLE;
 			ret |= 1;
-		} else {
-			blkback_pagemap_set(vaddr_pagenr(pending_req, i),
-					    pending_page(pending_req, i),
-					    blkif->domid, req->handle,
-					    req->seg[i].gref);
-		}
-
-		pending_handle(pending_req, i) = map[i].handle;
-
-		if (ret)
 			continue;
+		}
 
 		set_phys_to_machine(
 			page_to_pfn(pending_page(pending_req, i)),
 			FOREIGN_FRAME(map[i].dev_bus_addr >> PAGE_SHIFT));
 		seg[i].buf  = map[i].dev_bus_addr |
 			(req->seg[i].first_sect << 9);
+		blkback_pagemap_set(vaddr_pagenr(pending_req, i),
+				    pending_page(pending_req, i),
+				    blkif->domid, req->handle,
+				    req->seg[i].gref);
+		pending_handle(pending_req, i) = map[i].handle;
 	}
 
 	if (ret)
