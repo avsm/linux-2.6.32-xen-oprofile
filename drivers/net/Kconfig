@@ -2787,6 +2787,7 @@ source "drivers/s390/net/Kconfig"
 config XEN_NETDEV_FRONTEND
 	tristate "Xen network device frontend driver"
 	depends on XEN
+	select XEN_XENBUS_FRONTEND
 	default y
 	help
 	  The network device frontend driver allows the kernel to

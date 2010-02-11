@@ -325,6 +325,7 @@ unsigned long arbitrary_virt_to_mfn(void *vaddr)
 
 	return PFN_DOWN(maddr.maddr);
 }
+EXPORT_SYMBOL_GPL(set_phys_to_machine);
 
 xmaddr_t arbitrary_virt_to_machine(void *vaddr)
 {
