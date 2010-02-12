@@ -80,3 +80,10 @@ config XEN_SYS_HYPERVISOR
 
 config XEN_XENBUS_FRONTEND
        tristate
+
+config XEN_GNTDEV
+	tristate "userspace grant access device driver"
+	depends on XEN
+	select MMU_NOTIFIER
+	help
+	  Allows userspace processes use grants.
