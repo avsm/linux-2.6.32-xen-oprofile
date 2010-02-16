@@ -57,6 +57,8 @@ struct gnttab_free_callback {
 	u16 count;
 };
 
+void gnttab_reset_grant_page(struct page *page);
+
 int gnttab_suspend(void);
 int gnttab_resume(void);
 
@@ -85,6 +87,8 @@ unsigned long gnttab_end_foreign_transfer_ref(grant_ref_t ref);
 unsigned long gnttab_end_foreign_transfer(grant_ref_t ref);
 
 int gnttab_query_foreign_access(grant_ref_t ref);
+
+int gnttab_copy_grant_page(grant_ref_t ref, struct page **pagep);
 
 /*
  * operations on reserved batches of grant references

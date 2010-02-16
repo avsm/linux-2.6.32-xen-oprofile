@@ -105,6 +105,9 @@ enum pageflags {
 #ifdef CONFIG_ARCH_USES_PG_UNCACHED
 	PG_uncached,		/* Page has been mapped as uncached */
 #endif
+#ifdef CONFIG_XEN
+	PG_foreign,
+#endif
 #ifdef CONFIG_MEMORY_FAILURE
 	PG_hwpoison,		/* hardware poisoned page. Don't touch */
 #endif
@@ -273,6 +276,21 @@ PAGEFLAG_FALSE(Mlocked) SETPAGEFLAG_NOOP(Mlocked)
 PAGEFLAG(Uncached, uncached)
 #else
 PAGEFLAG_FALSE(Uncached)
+#endif
+
+#ifdef CONFIG_XEN
+TESTPAGEFLAG(Foreign, foreign)
+__SETPAGEFLAG(Foreign, foreign)
+CLEARPAGEFLAG(Foreign, foreign)
+#define SetPageForeign(_page, dtor) do {				\
+	__SetPageForeign(_page);					\
+	BUG_ON((dtor) == (void (*)(struct page *, unsigned int))0);	\
+	(_page)->index = (long)(dtor);					\
+} while (0)
+#define PageForeignDestructor(_page, order)	\
+	((void (*)(struct page *, unsigned int))(_page)->index)(_page, order)
+#else
+PAGEFLAG_FALSE(Foreign)
 #endif
 
 #ifdef CONFIG_MEMORY_FAILURE
