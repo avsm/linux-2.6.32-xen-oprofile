@@ -38,6 +38,8 @@
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/wait.h>
+#include <linux/sched.h>
+
 #include <xen/interface/io/netif.h>
 #include <asm/io.h>
 #include <asm/pgalloc.h>
