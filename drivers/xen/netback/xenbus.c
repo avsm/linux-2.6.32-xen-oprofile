@@ -35,7 +35,7 @@ static void backend_create_netif(struct backend_info *be);
 
 static int netback_remove(struct xenbus_device *dev)
 {
-	struct backend_info *be = dev->dev.driver_data;
+  struct backend_info *be = dev_get_drvdata(&dev->dev);
 
 	//netback_remove_accelerators(be, dev);
 
@@ -45,7 +45,7 @@ static int netback_remove(struct xenbus_device *dev)
 		be->netif = NULL;
 	}
 	kfree(be);
-	dev->dev.driver_data = NULL;
+	dev_set_drvdata(&dev->dev, NULL);
 	return 0;
 }
 
@@ -70,7 +70,7 @@ static int netback_probe(struct xenbus_device *dev,
 	}
 
 	be->dev = dev;
-	dev->dev.driver_data = be;
+	dev_set_drvdata(&dev->dev, be);
 
 	sg = 1;
 	if (netbk_copy_skb_mode == NETBK_ALWAYS_COPY_SKB)
@@ -159,7 +159,7 @@ fail:
  */
 static int netback_uevent(struct xenbus_device *xdev, struct kobj_uevent_env *env)
 {
-	struct backend_info *be = xdev->dev.driver_data;
+	struct backend_info *be = dev_get_drvdata(&xdev->dev);
 	struct xen_netif *netif = be->netif;
 	char *val;
 
@@ -219,7 +219,7 @@ static void backend_create_netif(struct backend_info *be)
 static void frontend_changed(struct xenbus_device *dev,
 			     enum xenbus_state frontend_state)
 {
-	struct backend_info *be = dev->dev.driver_data;
+	struct backend_info *be = dev_get_drvdata(&dev->dev);
 
 	DPRINTK("%s", xenbus_strstate(frontend_state));
 
