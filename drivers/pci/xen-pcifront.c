@@ -689,7 +689,7 @@ static struct pcifront_device *alloc_pdev(struct xenbus_device *xdev)
 	/*Flag for registering PV AER handler*/
 	set_bit(_XEN_PCIB_AERHANDLER, (void *)&pdev->sh_info->flags);
 
-	xdev->dev.driver_data = pdev;
+	dev_set_drvdata(&xdev->dev, pdev);
 	pdev->xdev = xdev;
 
 	INIT_LIST_HEAD(&pdev->root_buses);
@@ -726,8 +726,7 @@ static void free_pdev(struct pcifront_device *pdev)
 		gnttab_end_foreign_access(pdev->gnt_ref, 0 /* r/w page */,
 					  (unsigned long)pdev->sh_info);
 
-	pdev->xdev->dev.driver_data = NULL;
-
+	dev_set_drvdata(&pdev->xdev->dev, NULL);
 	kfree(pdev);
 }
 
@@ -1044,7 +1043,7 @@ out:
 static void __init_refok pcifront_backend_changed(struct xenbus_device *xdev,
 						  enum xenbus_state be_state)
 {
-	struct pcifront_device *pdev = xdev->dev.driver_data;
+	struct pcifront_device *pdev = dev_get_drvdata(&xdev->dev);
 
 	switch (be_state) {
 	case XenbusStateUnknown:
@@ -1094,8 +1093,10 @@ out:
 
 static int pcifront_xenbus_remove(struct xenbus_device *xdev)
 {
-	if (xdev->dev.driver_data)
-		free_pdev(xdev->dev.driver_data);
+	struct pcifront_device *pdev = dev_get_drvdata(&xdev->dev);
+
+	if (pdev)
+		free_pdev(pdev);
 
 	return 0;
 }
