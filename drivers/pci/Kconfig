@@ -53,7 +53,7 @@ config PCI_STUB
 
 config XEN_PCIDEV_FRONTEND
         tristate "Xen PCI Frontend"
-        depends on XEN && PCI
+        depends on XEN && PCI && X86
         select HOTPLUG
 	select XEN_XENBUS_FRONTEND
 	default y
