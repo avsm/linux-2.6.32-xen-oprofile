@@ -160,7 +160,7 @@ blktap_map_uaddr_fn(pte_t *ptep, struct page *pmd_page,
 {
 	pte_t *pte = (pte_t *)data;
 
-	BTDBG("ptep %p -> %012llx\n", ptep, pte_val(*pte));
+	BTDBG("ptep %p -> %012llx\n", ptep, (unsigned long long)pte_val(*pte));
 	set_pte(ptep, *pte);
 	return 0;
 }
@@ -596,7 +596,7 @@ blktap_device_process_request(struct blktap *tap,
 	ring    = &tap->ring;
 	usr_idx = request->usr_idx;
 	blkif_req.id = usr_idx;
-	blkif_req.sector_number = (blkif_sector_t)req->sector;
+	blkif_req.sector_number = (blkif_sector_t)blk_rq_pos(req);
 	blkif_req.handle = 0;
 	blkif_req.operation = rq_data_dir(req) ?
 		BLKIF_OP_WRITE : BLKIF_OP_READ;
@@ -793,14 +793,14 @@ blktap_device_run_queue(struct blktap *tap)
 
 	BTDBG("running queue for %d\n", tap->minor);
 
-	while ((req = elv_next_request(rq)) != NULL) {
+	while ((req = blk_peek_request(rq)) != NULL) {
 		if (!blk_fs_request(req)) {
-			end_request(req, 0);
+			__blk_end_request_cur(req, 0);
 			continue;
 		}
 
 		if (blk_barrier_rq(req)) {
-			end_request(req, 0);
+			__blk_end_request_cur(req, 0);
 			continue;
 		}
 
@@ -826,14 +826,14 @@ blktap_device_run_queue(struct blktap *tap)
 			goto wait;
 		}
 
-		BTDBG("req %p: dev %d cmd %p, sec 0x%llx, (0x%x/0x%lx) "
+		BTDBG("req %p: dev %d cmd %p, sec 0x%llx, (0x%x/0x%x) "
 		      "buffer:%p [%s], pending: %p\n", req, tap->minor,
-		      req->cmd, (unsigned long long)req->sector,
-		      req->current_nr_sectors,
-		      req->nr_sectors, req->buffer,
+		      req->cmd, (unsigned long long)blk_rq_pos(req),
+		      blk_rq_cur_sectors(req),
+		      blk_rq_sectors(req), req->buffer,
 		      rq_data_dir(req) ? "write" : "read", request);
 
-		blkdev_dequeue_request(req);
+		blk_start_request(req);
 
 		spin_unlock_irq(&dev->lock);
 		down_read(&tap->tap_sem);
@@ -882,11 +882,11 @@ blktap_device_do_request(struct request_queue *rq)
 	return;
 
 fail:
-	while ((req = elv_next_request(rq))) {
+	while ((req = blk_peek_request(rq))) {
 		BTERR("device closed: failing secs %llu - %llu\n",
-		      (unsigned long long)req->sector,
-		      (unsigned long long)req->sector + req->nr_sectors);
-		end_request(req, 0);
+		      (unsigned long long)blk_rq_pos(req),
+		      (unsigned long long)blk_rq_pos(req) + blk_rq_sectors(req));
+		__blk_end_request_cur(req, 0);
 	}
 }
 
@@ -939,7 +939,7 @@ blktap_device_configure(struct blktap *tap)
 	set_capacity(dev->gd, tap->params.capacity);
 
 	/* Hard sector size and max sectors impersonate the equiv. hardware. */
-	blk_queue_hardsect_size(rq, tap->params.sector_size);
+	blk_queue_logical_block_size(rq, tap->params.sector_size);
 	blk_queue_max_sectors(rq, 512);
 
 	/* Each segment in a request is up to an aligned page in size. */
