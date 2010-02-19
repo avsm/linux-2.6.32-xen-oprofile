@@ -99,9 +99,11 @@ static inline int vaddr_pagenr(pending_req_t *req, int seg)
 	return (req - pending_reqs) * BLKIF_MAX_SEGMENTS_PER_REQUEST + seg;
 }
 
+#define pending_page(req, seg) pending_pages[vaddr_pagenr(req, seg)]
+
 static inline unsigned long vaddr(pending_req_t *req, int seg)
 {
-	unsigned long pfn = page_to_pfn(pending_pages[vaddr_pagenr(req, seg)]);
+	unsigned long pfn = page_to_pfn(pending_page(req, seg));
 	return (unsigned long)pfn_to_kaddr(pfn);
 }
 
@@ -178,6 +180,7 @@ static void fast_flush_area(pending_req_t *req)
 		handle = pending_handle(req, i);
 		if (handle == BLKBACK_INVALID_HANDLE)
 			continue;
+		blkback_pagemap_clear(pending_page(req, i));
 		gnttab_set_unmap_op(&unmap[invcount], vaddr(req, i),
 				    GNTMAP_host_map, handle);
 		pending_handle(req, i) = BLKBACK_INVALID_HANDLE;
@@ -453,18 +456,19 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 			DPRINTK("invalid buffer -- could not remap it\n");
 			map[i].handle = BLKBACK_INVALID_HANDLE;
 			ret |= 1;
+			continue;
 		}
 
-		pending_handle(pending_req, i) = map[i].handle;
-
-		if (ret)
-			continue;
-
-		set_phys_to_machine(__pa(vaddr(
-			pending_req, i)) >> PAGE_SHIFT,
+		set_phys_to_machine(
+			page_to_pfn(pending_page(pending_req, i)),
 			FOREIGN_FRAME(map[i].dev_bus_addr >> PAGE_SHIFT));
 		seg[i].buf  = map[i].dev_bus_addr |
 			(req->seg[i].first_sect << 9);
+		blkback_pagemap_set(vaddr_pagenr(pending_req, i),
+				    pending_page(pending_req, i),
+				    blkif->domid, req->handle,
+				    req->seg[i].gref);
+		pending_handle(pending_req, i) = map[i].handle;
 	}
 
 	if (ret)
@@ -492,7 +496,7 @@ static void dispatch_rw_block_io(blkif_t *blkif,
 
 		while ((bio == NULL) ||
 		       (bio_add_page(bio,
-				     virt_to_page(vaddr(pending_req, i)),
+				     pending_page(pending_req, i),
 				     seg[i].nsec << 9,
 				     seg[i].buf & ~PAGE_MASK) == 0)) {
 			if (bio) {
@@ -626,6 +630,9 @@ static int __init blkif_init(void)
 	pending_grant_handles = kmalloc(sizeof(pending_grant_handles[0]) *
 					mmap_pages, GFP_KERNEL);
 	pending_pages         = alloc_empty_pages_and_pagevec(mmap_pages);
+
+	if (blkback_pagemap_init(mmap_pages))
+		goto out_of_memory;
 
 	if (!pending_reqs || !pending_grant_handles || !pending_pages) {
 		rc = -ENOMEM;

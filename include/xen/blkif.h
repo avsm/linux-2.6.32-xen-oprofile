@@ -21,6 +21,7 @@
 #ifndef __XEN_BLKIF_H__
 #define __XEN_BLKIF_H__
 
+#include <xen/interface/xen.h>
 #include <xen/interface/io/ring.h>
 #include <xen/interface/io/blkif.h>
 #include <xen/interface/io/protocols.h>

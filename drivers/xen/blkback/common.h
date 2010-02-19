@@ -41,6 +41,8 @@
 #include <xen/blkif.h>
 #include <xen/grant_table.h>
 #include <xen/xenbus.h>
+#include "blkback-pagemap.h"
+
 
 #define DPRINTK(_f, _a...)			\
 	pr_debug("(file=%s, line=%d) " _f,	\

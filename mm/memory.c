@@ -553,6 +553,13 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 	if (is_zero_pfn(pfn))
 		return NULL;
 check_pfn:
+
+#if defined(CONFIG_XEN) && defined(CONFIG_X86)
+	/* XEN: Covers user-space grant mappings (even of local pages). */
+	if (unlikely(vma->vm_flags & VM_FOREIGN))
+		return NULL;
+#endif
+
 	if (unlikely(pfn > highest_memmap_pfn)) {
 		print_bad_pte(vma, addr, pte, NULL);
 		return NULL;
@@ -839,8 +846,12 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				     page->index > details->last_index))
 					continue;
 			}
-			ptent = ptep_get_and_clear_full(mm, addr, pte,
-							tlb->fullmm);
+			if (unlikely(vma->vm_ops && vma->vm_ops->zap_pte))
+				ptent = vma->vm_ops->zap_pte(vma, addr, pte,
+							     tlb->fullmm);
+			else
+				ptent = ptep_get_and_clear_full(mm, addr, pte,
+								tlb->fullmm);
 			tlb_remove_tlb_entry(tlb, pte, addr);
 			if (unlikely(!page))
 				continue;
@@ -1100,6 +1111,7 @@ unsigned long zap_page_range(struct vm_area_struct *vma, unsigned long address,
 		tlb_finish_mmu(tlb, address, end);
 	return end;
 }
+EXPORT_SYMBOL_GPL(zap_page_range);
 
 /**
  * zap_vma_ptes - remove ptes mapping the vma
@@ -1295,6 +1307,29 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 			nr_pages--;
 			continue;
 		}
+
+#ifdef CONFIG_XEN
+		if (vma && (vma->vm_flags & VM_FOREIGN)) {
+			struct vm_foreign_map *foreign_map =
+				vma->vm_private_data;
+			struct page **map = foreign_map->map;
+			int offset = (start - vma->vm_start) >> PAGE_SHIFT;
+			if (map[offset] != NULL) {
+			        if (pages) {
+			                struct page *page = map[offset];
+
+					pages[i] = page;
+					get_page(page);
+				}
+				if (vmas)
+					vmas[i] = vma;
+				i++;
+				start += PAGE_SIZE;
+				nr_pages--;
+				continue;
+			}
+		}
+#endif
 
 		if (!vma ||
 		    (vma->vm_flags & (VM_IO | VM_PFNMAP)) ||
@@ -1770,6 +1805,10 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 		return -EINVAL;
 
 	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP;
+
+#if CONFIG_XEN
+	vma->vm_mm->context.has_foreign_mappings = 1;
+#endif
 
 	err = track_pfn_vma_new(vma, &prot, pfn, PAGE_ALIGN(size));
 	if (err) {

@@ -283,6 +283,7 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long va)
 
 	preempt_enable();
 }
+EXPORT_SYMBOL_GPL(flush_tlb_page);
 
 void flush_tlb_all(void)
 {
@@ -297,3 +298,4 @@ void flush_tlb_all(void)
 
 	put_cpu();
 }
+EXPORT_SYMBOL_GPL(flush_tlb_all);

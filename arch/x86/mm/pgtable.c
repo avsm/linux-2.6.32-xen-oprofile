@@ -4,6 +4,9 @@
 #include <asm/tlb.h>
 #include <asm/fixmap.h>
 
+#include <xen/xen.h>
+#include <asm/xen/hypervisor.h>
+
 #define PGALLOC_GFP GFP_KERNEL | __GFP_NOTRACK | __GFP_REPEAT | __GFP_ZERO
 
 pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
@@ -267,6 +270,12 @@ out:
 
 void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 {
+#ifdef CONFIG_XEN
+	/* EEW */
+	extern void xen_late_unpin_pgd(struct mm_struct *mm, pgd_t *pgd);
+	if (xen_pv_domain())
+		xen_late_unpin_pgd(mm, pgd);
+#endif
 	pgd_mop_up_pmds(mm, pgd);
 	pgd_dtor(pgd);
 	paravirt_pgd_free(mm, pgd);

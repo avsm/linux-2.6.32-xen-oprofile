@@ -194,6 +194,26 @@ static inline unsigned p2m_index(unsigned long pfn)
 	return pfn % P2M_ENTRIES_PER_PAGE;
 }
 
+static int lookup_pte_fn(
+	pte_t *pte, struct page *pmd_page, unsigned long addr, void *data)
+{
+	uint64_t *ptep = (uint64_t *)data;
+	if (ptep)
+		*ptep = ((uint64_t)pfn_to_mfn(page_to_pfn(pmd_page)) <<
+			 PAGE_SHIFT) | ((unsigned long)pte & ~PAGE_MASK);
+	return 0;
+}
+
+int create_lookup_pte_addr(struct mm_struct *mm,
+			   unsigned long address,
+			   uint64_t *ptep)
+{
+	return apply_to_page_range(mm, address, PAGE_SIZE,
+				   lookup_pte_fn, ptep);
+}
+
+EXPORT_SYMBOL(create_lookup_pte_addr);
+
 /* Build the parallel p2m_top_mfn structures */
 void xen_build_mfn_list_list(void)
 {
@@ -1305,7 +1325,7 @@ void xen_exit_mmap(struct mm_struct *mm)
 	spin_lock(&mm->page_table_lock);
 
 	/* pgd may not be pinned in the error exit path of execve */
-	if (xen_page_pinned(mm->pgd))
+	if (xen_page_pinned(mm->pgd) && !mm->context.has_foreign_mappings)
 		xen_pgd_unpin(mm);
 
 	spin_unlock(&mm->page_table_lock);
@@ -1508,6 +1528,13 @@ static int xen_pgd_alloc(struct mm_struct *mm)
 #endif
 
 	return ret;
+}
+
+void xen_late_unpin_pgd(struct mm_struct *mm, pgd_t *pgd)
+{
+	if (xen_page_pinned(pgd))
+		__xen_pgd_unpin(mm, pgd);
+
 }
 
 static void xen_pgd_free(struct mm_struct *mm, pgd_t *pgd)

@@ -109,6 +109,9 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 
 	mutex_init(&mm->context.lock);
 	mm->context.size = 0;
+#ifdef CONFIG_XEN
+	mm->context.has_foreign_mappings = 0;
+#endif
 	old_mm = current->mm;
 	if (old_mm && old_mm->context.size > 0) {
 		mutex_lock(&old_mm->context.lock);
