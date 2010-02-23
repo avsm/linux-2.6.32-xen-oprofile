@@ -275,8 +275,10 @@ CLEARPAGEFLAG(Foreign, foreign)
 	BUG_ON((dtor) == (void (*)(struct page *, unsigned int))0);	\
 	(_page)->index = (long)(dtor);					\
 } while (0)
+#define _PageForeignDestructor(_page) \
+	((void (*)(struct page *, unsigned int))(_page)->index)
 #define PageForeignDestructor(_page, order)	\
-	((void (*)(struct page *, unsigned int))(_page)->index)(_page, order)
+	_PageForeignDestructor(_page)(_page, order)
 #else
 PAGEFLAG_FALSE(Foreign)
 #endif

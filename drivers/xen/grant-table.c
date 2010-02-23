@@ -555,10 +555,9 @@ int gnttab_copy_grant_page(grant_ref_t ref, struct page **pagep)
 	}
 
 	new_page->mapping = page->mapping;
-	new_page->index = page->index;
-	set_bit(PG_foreign, &new_page->flags);
+	SetPageForeign(new_page, _PageForeignDestructor(page));
 	if (PageReserved(page))
-		set_bit(PG_reserved, &new_page->flags);
+		SetPageReserved(new_page);
 	*pagep = new_page;
 
 	SetPageForeign(page, gnttab_page_free);
