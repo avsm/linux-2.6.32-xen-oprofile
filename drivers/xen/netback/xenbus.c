@@ -213,6 +213,16 @@ static void backend_create_netif(struct backend_info *be)
 }
 
 
+static void disconnect_backend(struct xenbus_device *dev)
+{
+	struct backend_info *be = dev_get_drvdata(&dev->dev);
+
+	if (be->netif) {
+		netif_disconnect(be->netif);
+		be->netif = NULL;
+	}
+}
+
 /**
  * Callback received when the frontend's state changes.
  */
@@ -246,11 +256,9 @@ static void frontend_changed(struct xenbus_device *dev,
 		break;
 
 	case XenbusStateClosing:
-		if (be->netif) {
+		if (be->netif)
 			kobject_uevent(&dev->dev.kobj, KOBJ_OFFLINE);
-			netif_disconnect(be->netif);
-			be->netif = NULL;
-		}
+		disconnect_backend(dev);
 		xenbus_switch_state(dev, XenbusStateClosing);
 		break;
 
