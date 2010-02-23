@@ -104,6 +104,9 @@ static int netbk_set_sg(struct net_device *dev, u32 data)
 			return -ENOSYS;
 	}
 
+	if (dev->mtu > ETH_DATA_LEN)
+		dev->mtu = ETH_DATA_LEN;
+
 	return ethtool_op_set_sg(dev, data);
 }
 
@@ -207,6 +210,7 @@ struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int
 	memset(netif, 0, sizeof(*netif));
 	netif->domid  = domid;
 	netif->handle = handle;
+	netif->features = NETIF_F_SG;
 	atomic_set(&netif->refcnt, 1);
 	init_waitqueue_head(&netif->waiting_to_free);
 	netif->dev = dev;
@@ -223,7 +227,7 @@ struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int
 	init_timer(&netif->tx_queue_timeout);
 
 	dev->netdev_ops	= &netback_ops;
-	dev->features	= NETIF_F_IP_CSUM;
+	dev->features   = NETIF_F_IP_CSUM|NETIF_F_SG;
 
 	SET_ETHTOOL_OPS(dev, &network_ethtool_ops);
 
