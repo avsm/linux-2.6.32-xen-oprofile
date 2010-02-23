@@ -116,13 +116,10 @@ static inline int netif_page_index(struct page *pg)
 /*
  * This is the amount of packet we copy rather than map, so that the
  * guest can't fiddle with the contents of the headers while we do
- * packet processing on them (netfilter, routing, etc).  This could
- * probably do with being larger, since 1) 64-bytes isn't necessarily
- * long enough to cover a full christmas-tree ip+tcp header, let alone
- * packet contents, and 2) the data is probably in cache anyway
- * (though perhaps some other cpu's cache).
+ * packet processing on them (netfilter, routing, etc). 72 is enough
+ * to cover TCP+IP headers including options.
  */
-#define PKT_PROT_LEN 64
+#define PKT_PROT_LEN 72
 
 static struct pending_tx_info {
 	struct xen_netif_tx_request req;
