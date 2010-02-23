@@ -1346,6 +1346,16 @@ static void net_tx_submit(void)
 
 		netbk_fill_frags(skb);
 
+		/*
+		 * If the initial fragment was < PKT_PROT_LEN then
+		 * pull through some bytes from the other fragments to
+		 * increase the linear region to PKT_PROT_LEN bytes.
+		 */
+		if (skb_headlen(skb) < PKT_PROT_LEN && skb_is_nonlinear(skb)) {
+			int target = min_t(int, skb->len, PKT_PROT_LEN);
+			__pskb_pull_tail(skb, target - skb_headlen(skb));
+		}
+
 		skb->dev      = netif->dev;
 		skb->protocol = eth_type_trans(skb, skb->dev);
 
