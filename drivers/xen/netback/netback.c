@@ -343,25 +343,6 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return 0;
 }
 
-#if 0
-static void xen_network_done_notify(void)
-{
-	static struct net_device *eth0_dev = NULL;
-	if (unlikely(eth0_dev == NULL))
-		eth0_dev = __dev_get_by_name("eth0");
-	netif_rx_schedule(eth0_dev);
-}
-/*
- * Add following to poll() function in NAPI driver (Tigon3 is example):
- *  if ( xen_network_done() )
- *      tg3_enable_ints(tp);
- */
-int xen_network_done(void)
-{
-	return skb_queue_empty(&rx_queue);
-}
-#endif
-
 struct netrx_pending_operations {
 	unsigned trans_prod, trans_cons;
 	unsigned mmu_prod, mmu_mcl;
@@ -676,10 +657,6 @@ static void net_rx_action(unsigned long unused)
 	/* More work to do? */
 	if (!skb_queue_empty(&rx_queue) && !timer_pending(&net_timer))
 		tasklet_schedule(&net_rx_tasklet);
-#if 0
-	else
-		xen_network_done_notify();
-#endif
 }
 
 static void net_alarm(unsigned long unused)
