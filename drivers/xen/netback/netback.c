@@ -116,13 +116,10 @@ static inline int netif_page_index(struct page *pg)
 /*
  * This is the amount of packet we copy rather than map, so that the
  * guest can't fiddle with the contents of the headers while we do
- * packet processing on them (netfilter, routing, etc).  This could
- * probably do with being larger, since 1) 64-bytes isn't necessarily
- * long enough to cover a full christmas-tree ip+tcp header, let alone
- * packet contents, and 2) the data is probably in cache anyway
- * (though perhaps some other cpu's cache).
+ * packet processing on them (netfilter, routing, etc). 72 is enough
+ * to cover TCP+IP headers including options.
  */
-#define PKT_PROT_LEN 64
+#define PKT_PROT_LEN 72
 
 static struct pending_tx_info {
 	struct xen_netif_tx_request req;
@@ -342,25 +339,6 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	dev_kfree_skb(skb);
 	return 0;
 }
-
-#if 0
-static void xen_network_done_notify(void)
-{
-	static struct net_device *eth0_dev = NULL;
-	if (unlikely(eth0_dev == NULL))
-		eth0_dev = __dev_get_by_name("eth0");
-	netif_rx_schedule(eth0_dev);
-}
-/*
- * Add following to poll() function in NAPI driver (Tigon3 is example):
- *  if ( xen_network_done() )
- *      tg3_enable_ints(tp);
- */
-int xen_network_done(void)
-{
-	return skb_queue_empty(&rx_queue);
-}
-#endif
 
 struct netrx_pending_operations {
 	unsigned trans_prod, trans_cons;
@@ -676,10 +654,6 @@ static void net_rx_action(unsigned long unused)
 	/* More work to do? */
 	if (!skb_queue_empty(&rx_queue) && !timer_pending(&net_timer))
 		tasklet_schedule(&net_rx_tasklet);
-#if 0
-	else
-		xen_network_done_notify();
-#endif
 }
 
 static void net_alarm(unsigned long unused)
@@ -1368,6 +1342,16 @@ static void net_tx_submit(void)
 			skb->ip_summed = CHECKSUM_NONE;
 
 		netbk_fill_frags(skb);
+
+		/*
+		 * If the initial fragment was < PKT_PROT_LEN then
+		 * pull through some bytes from the other fragments to
+		 * increase the linear region to PKT_PROT_LEN bytes.
+		 */
+		if (skb_headlen(skb) < PKT_PROT_LEN && skb_is_nonlinear(skb)) {
+			int target = min_t(int, skb->len, PKT_PROT_LEN);
+			__pskb_pull_tail(skb, target - skb_headlen(skb));
+		}
 
 		skb->dev      = netif->dev;
 		skb->protocol = eth_type_trans(skb, skb->dev);
