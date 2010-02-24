@@ -15,8 +15,12 @@
  * an Intel IOMMU. So make the correct use of the PCI DMA API contingent
  * on the Intel IOMMU support (CONFIG_DMAR).
  * Only newer chipsets need to bother with this, of course.
+ *
+ * Xen guests accessing graphics hardware also need proper translation
+ * between pseudo-physical addresses and real machine addresses, which
+ * is also achieved by using the DMA API.
  */
-#ifdef CONFIG_DMAR
+#if defined(CONFIG_DMAR) || defined(CONFIG_XEN)
 #define USE_PCI_DMA_API 1
 #endif
 
