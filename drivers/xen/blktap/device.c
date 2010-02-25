@@ -1027,8 +1027,8 @@ blktap_device_destroy(struct blktap *tap)
 #endif
 
 	del_gendisk(dev->gd);
-	put_disk(dev->gd);
 	blk_cleanup_queue(dev->gd->queue);
+	put_disk(dev->gd);
 
 	dev->gd = NULL;
 
