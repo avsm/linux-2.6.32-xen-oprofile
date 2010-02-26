@@ -360,7 +360,6 @@ blktap_sysfs_destroy(struct blktap *tap)
 				     !atomic_read(&tap->ring.sysfs_refcnt)))
 		return -EAGAIN;
 
-	put_device(dev);
 	device_schedule_callback(dev, device_unregister);
 
 	return 0;
