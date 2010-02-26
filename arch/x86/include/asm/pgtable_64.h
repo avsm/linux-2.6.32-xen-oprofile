@@ -160,7 +160,7 @@ extern void cleanup_highmap(void);
 #define pgtable_cache_init()   do { } while (0)
 #define check_pgt_cache()      do { } while (0)
 
-#define PAGE_AGP    PAGE_KERNEL_NOCACHE
+#define PAGE_AGP    PAGE_KERNEL_IO_NOCACHE
 #define HAVE_PAGE_AGP 1
 
 /* fs/proc/kcore.c */

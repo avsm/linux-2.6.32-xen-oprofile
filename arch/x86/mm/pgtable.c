@@ -17,6 +17,16 @@
 
 gfp_t __userpte_alloc_gfp = PGALLOC_GFP | PGALLOC_USER_GFP;
 
+pgprot_t arch_vm_get_page_prot(unsigned vm_flags)
+{
+	pgprot_t ret = __pgprot(0);
+
+	if (vm_flags & VM_IO)
+		ret = __pgprot(_PAGE_IOMAP);
+
+	return ret;
+}
+
 pte_t *pte_alloc_one_kernel(struct mm_struct *mm, unsigned long address)
 {
 	return (pte_t *)__get_free_page(PGALLOC_GFP);
