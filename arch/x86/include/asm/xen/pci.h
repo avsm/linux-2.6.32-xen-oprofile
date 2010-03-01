@@ -4,6 +4,7 @@
 #if defined(CONFIG_PCI_MSI)
 #if defined(CONFIG_PCI_XEN)
 void xen_pci_teardown_msi_dev(struct pci_dev *dev);
+void xen_pci_teardown_msi_irq(int irq);
 int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
 
 /* The drivers/pci/xen-pcifront.c sets this structure to
@@ -44,6 +45,7 @@ static inline void xen_pci_frontend_disable_msix(struct pci_dev *dev)
 }
 #else
 static inline void xen_pci_teardown_msi_dev(struct pci_dev *dev) { }
+static inline void xen_pci_teardown_msi_irq(int irq) { }
 static inline int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 {
 	return -ENODEV;

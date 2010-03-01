@@ -594,6 +594,26 @@ out:
 	return irq;
 }
 
+int xen_destroy_irq(int irq)
+{
+	struct irq_desc *desc;
+	int rc = -ENOENT;
+
+	spin_lock(&irq_mapping_update_lock);
+
+	desc = irq_to_desc(irq);
+	if (!desc)
+		goto out;
+
+	irq_info[irq] = mk_unbound_info();
+
+	dynamic_irq_cleanup(irq);
+
+out:
+	spin_unlock(&irq_mapping_update_lock);
+	return rc;
+}
+
 int xen_vector_from_irq(unsigned irq)
 {
 	return vector_from_irq(irq);

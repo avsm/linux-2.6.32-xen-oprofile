@@ -87,7 +87,12 @@ void xen_pci_teardown_msi_dev(struct pci_dev *dev)
 
 }
 
+void xen_pci_teardown_msi_irq(int irq)
+{
+	xen_destroy_irq(irq);
+}
 #endif
+
 static int xen_pcifront_enable_irq(struct pci_dev *dev)
 {
 	int rc;

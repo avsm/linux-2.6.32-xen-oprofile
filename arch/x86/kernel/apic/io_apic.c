@@ -3500,7 +3500,10 @@ error:
 
 void arch_teardown_msi_irq(unsigned int irq)
 {
-	destroy_irq(irq);
+	if (xen_domain())
+		xen_pci_teardown_msi_irq(irq);
+	else
+		destroy_irq(irq);
 }
 
 void arch_teardown_msi_irqs(struct pci_dev *dev)
