@@ -549,7 +549,9 @@ int xen_allocate_pirq(unsigned gsi, char *name)
 		goto out;	/* XXX need refcount? */
 	}
 
-	if (identity_mapped_irq(gsi)) {
+	/* If we are a PV guest, we don't have GSIs (no ACPI passed). Therefore
+	 * we are using the !xen_initial_domain() to drop in the function.*/
+	if (identity_mapped_irq(gsi) || !xen_initial_domain()) {
 		irq = gsi;
 		irq_to_desc_alloc_node(irq, 0);
 		dynamic_irq_init(irq);
@@ -560,7 +562,13 @@ int xen_allocate_pirq(unsigned gsi, char *name)
 				      handle_level_irq, name);
 
 	irq_op.irq = irq;
-	if (HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op)) {
+	irq_op.vector = 0;
+
+	/* Only the privileged domain can do this. For non-priv, the pcifront
+	 * driver provides a PCI bus that does the call to do exactly
+	 * this in the priv domain. */
+	if (xen_initial_domain() &&
+	    HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op)) {
 		dynamic_irq_cleanup(irq);
 		irq = -ENOSPC;
 		goto out;

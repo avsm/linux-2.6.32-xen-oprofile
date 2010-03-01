@@ -14,8 +14,23 @@
 
 #include <asm/xen/hypervisor.h>
 
+#include <xen/events.h>
+
 static int xen_pcifront_enable_irq(struct pci_dev *dev)
 {
+	int rc;
+
+	dev_info(&dev->dev, "Xen PCI enabling IRQ: %d\n", dev->irq);
+
+	if (dev->irq < 0)
+		return -EINVAL;
+
+	rc = xen_allocate_pirq(dev->irq, "pcifront");
+	if (rc < 0) {
+		dev_warn(&dev->dev, "Xen PCI IRQ: %d, failed to register:%d\n",
+			 dev->irq, rc);
+		return rc;
+	}
 	return 0;
 }
 
