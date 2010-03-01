@@ -15,10 +15,16 @@ static __init int pci_arch_init(void)
 	if (!(pci_probe & PCI_PROBE_NOEARLY))
 		pci_mmcfg_early_init();
 
+#ifdef CONFIG_PCI_XEN
+	if (!pci_xen_init())
+		return 0;
+#endif
+
 #ifdef CONFIG_PCI_OLPC
 	if (!pci_olpc_init())
 		return 0;	/* skip additional checks if it's an XO */
 #endif
+
 #ifdef CONFIG_PCI_BIOS
 	pci_pcbios_init();
 #endif
