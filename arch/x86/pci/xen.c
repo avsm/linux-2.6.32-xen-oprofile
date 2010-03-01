@@ -15,6 +15,12 @@
 #include <asm/xen/hypervisor.h>
 
 #include <xen/events.h>
+#include <asm/xen/pci.h>
+
+#if defined(CONFIG_PCI_MSI)
+struct xen_pci_frontend_ops *xen_pci_frontend;
+EXPORT_SYMBOL_GPL(xen_pci_frontend);
+#endif
 
 static int xen_pcifront_enable_irq(struct pci_dev *dev)
 {
