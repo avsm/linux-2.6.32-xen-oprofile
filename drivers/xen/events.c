@@ -363,13 +363,16 @@ static int find_unbound_irq(void)
 	struct irq_desc *desc;
 	int start = get_nr_hw_irqs();
 
+	if (start == nr_irqs)
+		goto no_irqs;
+
 	/* nr_irqs is a magic value. Must not use it.*/
 	for (irq = nr_irqs-1; irq > start; irq--)
 		if (irq_info[irq].type == IRQT_UNBOUND)
 			break;
 
-	if (irq == start || irq == nr_irqs)
-		panic("No available IRQ to bind to: increase nr_irqs!\n");
+	if (irq == start)
+		goto no_irqs;
 
 	desc = irq_to_desc_alloc_node(irq, 0);
 	if (WARN_ON(desc == NULL))
@@ -378,6 +381,9 @@ static int find_unbound_irq(void)
 	dynamic_irq_init(irq);
 
 	return irq;
+
+no_irqs:
+	panic("No available IRQ to bind to: increase nr_irqs!\n");
 }
 
 static bool identity_mapped_irq(unsigned irq)
