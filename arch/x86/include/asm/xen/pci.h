@@ -2,6 +2,8 @@
 #define _ASM_X86_XEN_PCI_H
 
 #if defined(CONFIG_PCI_MSI)
+void xen_pci_teardown_msi_dev(struct pci_dev *dev);
+int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
 
 /* The drivers/pci/xen-pcifront.c sets this structure to
  * its own functions.

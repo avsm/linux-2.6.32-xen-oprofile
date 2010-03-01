@@ -18,10 +18,76 @@
 #include <asm/xen/pci.h>
 
 #if defined(CONFIG_PCI_MSI)
+#include <linux/msi.h>
+
 struct xen_pci_frontend_ops *xen_pci_frontend;
 EXPORT_SYMBOL_GPL(xen_pci_frontend);
-#endif
 
+/*
+ * For MSI interrupts we have to use drivers/xen/event.s functions to
+ * allocate an irq_desc and setup the right */
+
+
+int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
+{
+	int irq, ret, i;
+	struct msi_desc *msidesc;
+	int *v;
+
+	v = kzalloc(sizeof(int) * min(1, nvec), GFP_KERNEL);
+	if (!v)
+		return -ENOMEM;
+
+	if (!xen_initial_domain()) {
+		if (type == PCI_CAP_ID_MSIX)
+			ret = xen_pci_frontend_enable_msix(dev, &v, nvec);
+		else
+			ret = xen_pci_frontend_enable_msi(dev, &v);
+		if (ret)
+			goto error;
+	}
+	i = 0;
+	list_for_each_entry(msidesc, &dev->msi_list, list) {
+		irq = xen_allocate_pirq(v[i], 0, /* not sharable */
+			(type == PCI_CAP_ID_MSIX) ?
+			"pcifront-msi-x":"pcifront-msi");
+		if (irq < 0)
+			return -1;
+
+		ret = set_irq_msi(irq, msidesc);
+		if (ret)
+			goto error_while;
+	}
+	kfree(v);
+	return 0;
+
+error_while:
+	unbind_from_irqhandler(irq, NULL);
+error:
+	if (ret == -ENODEV)
+		dev_err(&dev->dev,"Xen PCI frontend has not registered" \
+			" MSI/MSI-X support!\n");
+
+	kfree(v);
+	return ret;
+}
+
+void xen_pci_teardown_msi_dev(struct pci_dev *dev)
+{
+	/* Only do this when were are in non-privileged mode.*/
+	if (!xen_initial_domain()) {
+		struct msi_desc *msidesc;
+
+		msidesc = list_entry(dev->msi_list.next, struct msi_desc, list);
+		if (msidesc->msi_attrib.is_msix)
+			xen_pci_frontend_disable_msix(dev);
+		else
+			xen_pci_frontend_disable_msi(dev);
+	}
+
+}
+
+#endif
 static int xen_pcifront_enable_irq(struct pci_dev *dev)
 {
 	int rc;
