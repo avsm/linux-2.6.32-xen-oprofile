@@ -398,15 +398,19 @@ static void intel_i810_agp_enable(struct agp_bridge_data *bridge, u32 mode)
 /* Exists to support ARGB cursors */
 static struct page *i8xx_alloc_pages(void)
 {
+	void *addr;
+	dma_addr_t _d;
 	struct page *page;
 
-	page = alloc_pages(GFP_KERNEL | GFP_DMA32, 2);
-	if (page == NULL)
+	addr = dma_alloc_coherent(NULL, 4 * PAGE_SIZE, &_d, GFP_KERNEL);
+	if (addr == NULL)
 		return NULL;
+
+	page = virt_to_page(addr);
 
 	if (set_pages_uc(page, 4) < 0) {
 		set_pages_wb(page, 4);
-		__free_pages(page, 2);
+		dma_free_coherent(NULL, 4 * PAGE_SIZE, addr, _d);
 		return NULL;
 	}
 	get_page(page);
@@ -416,12 +420,17 @@ static struct page *i8xx_alloc_pages(void)
 
 static void i8xx_destroy_pages(struct page *page)
 {
+	void *addr;
+
 	if (page == NULL)
 		return;
 
 	set_pages_wb(page, 4);
 	put_page(page);
-	__free_pages(page, 2);
+
+	addr = page_address(page);
+
+	dma_free_coherent(NULL, 4 * PAGE_SIZE, addr, virt_to_bus(addr));
 	atomic_dec(&agp_bridge->current_memory_agp);
 }
 

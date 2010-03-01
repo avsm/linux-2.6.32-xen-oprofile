@@ -32,20 +32,73 @@
  */
 
 #include <linux/vmalloc.h>
+#include <linux/mm.h>
 #include "drmP.h"
 
 #define DEBUG_SCATTER 0
 
-static inline void *drm_vmalloc_dma(unsigned long size)
+static void *drm_vmalloc_dma(struct drm_device *drmdev, unsigned long size)
 {
 #if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
 	return __vmalloc(size, GFP_KERNEL, PAGE_KERNEL | _PAGE_NO_CACHE);
 #else
-	return vmalloc_32(size);
+	struct device *dev = &drmdev->pdev->dev;
+	struct page **pages;
+	void *addr;
+	const int npages = PFN_UP(size);
+	int i;
+
+	pages = kmalloc(npages * sizeof(*pages), GFP_KERNEL);
+	if (!pages)
+		goto fail;
+
+	for (i = 0; i < npages; i++) {
+		dma_addr_t phys;
+		void *addr;
+		addr = dma_alloc_coherent(dev, PAGE_SIZE, &phys, GFP_KERNEL);
+		if (addr == NULL)
+			goto out_free_pages;
+
+		pages[i] = virt_to_page(addr);
+	}
+
+	addr = vmap(pages, npages, VM_MAP | VM_IOREMAP, PAGE_KERNEL);
+
+	kfree(pages);
+
+	return addr;
+
+out_free_pages:
+	while (i > 0) {
+		void *addr = page_address(pages[--i]);
+		dma_free_coherent(dev, PAGE_SIZE, addr, virt_to_bus(addr));
+	}
+
+	kfree(pages);
+
+fail:
+	return NULL;
 #endif
 }
 
-void drm_sg_cleanup(struct drm_sg_mem * entry)
+static void drm_vfree_dma(struct drm_device *drmdev, void *addr, int npages,
+			  struct page **pages)
+{
+#if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
+	vfree(addr);
+#else
+	struct device *dev = &drmdev->pdev->dev;
+	int i;
+
+	for (i = 0; i < npages; i++) {
+		void *addr = page_address(pages[i]);
+		dma_free_coherent(dev, PAGE_SIZE, addr, virt_to_bus(addr));
+	}
+	vunmap(addr);
+#endif
+}
+
+void drm_sg_cleanup(struct drm_device *drmdev, struct drm_sg_mem * entry)
 {
 	struct page *page;
 	int i;
@@ -56,7 +109,7 @@ void drm_sg_cleanup(struct drm_sg_mem * entry)
 			ClearPageReserved(page);
 	}
 
-	vfree(entry->virtual);
+	drm_vfree_dma(drmdev, entry->virtual, entry->pages, entry->pagelist);
 
 	kfree(entry->busaddr);
 	kfree(entry->pagelist);
@@ -107,7 +160,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	}
 	memset((void *)entry->busaddr, 0, pages * sizeof(*entry->busaddr));
 
-	entry->virtual = drm_vmalloc_dma(pages << PAGE_SHIFT);
+	entry->virtual = drm_vmalloc_dma(dev, pages << PAGE_SHIFT);
 	if (!entry->virtual) {
 		kfree(entry->busaddr);
 		kfree(entry->pagelist);
@@ -180,7 +233,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	return 0;
 
       failed:
-	drm_sg_cleanup(entry);
+	drm_sg_cleanup(dev, entry);
 	return -ENOMEM;
 }
 EXPORT_SYMBOL(drm_sg_alloc);
@@ -212,7 +265,7 @@ int drm_sg_free(struct drm_device *dev, void *data,
 
 	DRM_DEBUG("virtual  = %p\n", entry->virtual);
 
-	drm_sg_cleanup(entry);
+	drm_sg_cleanup(dev, entry);
 
 	return 0;
 }

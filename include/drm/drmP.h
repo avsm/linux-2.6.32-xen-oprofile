@@ -1388,7 +1388,7 @@ extern int drm_vma_info(struct seq_file *m, void *data);
 #endif
 
 				/* Scatter Gather Support (drm_scatter.h) */
-extern void drm_sg_cleanup(struct drm_sg_mem * entry);
+extern void drm_sg_cleanup(struct drm_device *dev, struct drm_sg_mem * entry);
 extern int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
 extern int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request);

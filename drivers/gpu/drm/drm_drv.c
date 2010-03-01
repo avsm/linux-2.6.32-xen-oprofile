@@ -201,7 +201,7 @@ int drm_lastclose(struct drm_device * dev)
 	}
 	if (drm_core_check_feature(dev, DRIVER_SG) && dev->sg &&
 	    !drm_core_check_feature(dev, DRIVER_MODESET)) {
-		drm_sg_cleanup(dev->sg);
+		drm_sg_cleanup(dev, dev->sg);
 		dev->sg = NULL;
 	}
 
