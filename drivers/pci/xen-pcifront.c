@@ -12,6 +12,7 @@
 #include <xen/page.h>
 #include <linux/spinlock.h>
 #include <linux/pci.h>
+#include <linux/msi.h>
 #include <xen/xenbus.h>
 #include <xen/interface/io/pciif.h>
 #include <linux/interrupt.h>
@@ -255,8 +256,7 @@ struct pci_ops pcifront_bus_ops = {
 
 #ifdef CONFIG_PCI_MSI
 int pci_frontend_enable_msix(struct pci_dev *dev,
-		struct msix_entry *entries,
-		int nvec)
+		int **vector, int nvec)
 {
 	int err;
 	int i;
@@ -269,6 +269,7 @@ int pci_frontend_enable_msix(struct pci_dev *dev,
 	};
 	struct pcifront_sd *sd = dev->bus->sysdata;
 	struct pcifront_device *pdev = pcifront_get_pdev(sd);
+	struct msi_desc *entry;
 
 	if (nvec > SH_INFO_MAX_VEC) {
 		dev_err(&dev->dev, "too much vector for pci frontend: %x."
@@ -276,18 +277,21 @@ int pci_frontend_enable_msix(struct pci_dev *dev,
 		return -EINVAL;
 	}
 
-	for (i = 0; i < nvec; i++) {
-		op.msix_entries[i].entry = entries[i].entry;
-		op.msix_entries[i].vector = entries[i].vector;
+	i = 0;
+	list_for_each_entry(entry, &dev->msi_list, list) {
+		op.msix_entries[i].entry = entry->msi_attrib.entry_nr;
+		/* Vector is useless at this point. */
+		op.msix_entries[i].vector = -1;
+		i++;
 	}
 
 	err = do_pci_op(pdev, &op);
 
-	if (!err) {
-		if (!op.value) {
+	if (likely(!err)) {
+		if (likely(!op.value)) {
 			/* we get the result */
 			for (i = 0; i < nvec; i++)
-				entries[i].vector = op.msix_entries[i].vector;
+				*vector[i] = op.msix_entries[i].vector;
 			return 0;
 		} else {
 			printk(KERN_DEBUG "enable msix get value %x\n",
@@ -319,7 +323,7 @@ void pci_frontend_disable_msix(struct pci_dev *dev)
 		dev_err(&dev->dev, "pci_disable_msix get err %x\n", err);
 }
 
-int pci_frontend_enable_msi(struct pci_dev *dev)
+int pci_frontend_enable_msi(struct pci_dev *dev, int **vector)
 {
 	int err;
 	struct xen_pci_op op = {
@@ -333,7 +337,7 @@ int pci_frontend_enable_msi(struct pci_dev *dev)
 
 	err = do_pci_op(pdev, &op);
 	if (likely(!err)) {
-		dev->irq = op.value;
+		*vector[0] = op.value;
 	} else {
 		dev_err(&dev->dev, "pci frontend enable msi failed for dev "
 				   "%x:%x \n", op.bus, op.devfn);
