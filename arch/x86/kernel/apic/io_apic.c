@@ -64,6 +64,8 @@
 #include <asm/uv/uv_irq.h>
 
 #include <asm/apic.h>
+#include <asm/xen/hypervisor.h>
+#include <asm/xen/pci.h>
 
 #define __apicdebuginit(type) static type __init
 #define for_each_irq_pin(entry, head) \
@@ -3446,6 +3448,9 @@ int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
 
+	if (xen_domain())
+		return xen_pci_setup_msi_irqs(dev, nvec, type);
+
 	node = dev_to_node(&dev->dev);
 	irq_want = nr_irqs_gsi;
 	sub_handle = 0;
@@ -3501,6 +3506,11 @@ void arch_teardown_msi_irq(unsigned int irq)
 void arch_teardown_msi_irqs(struct pci_dev *dev)
 {
 	struct msi_desc *entry;
+
+	/* If we are non-privileged PV domain, we have to
+	* to call xen_teardown_msi_dev first. */
+	if (xen_domain())
+		xen_pci_teardown_msi_dev(dev);
 
 	list_for_each_entry(entry, &dev->msi_list, list) {
 		int i, nvec;

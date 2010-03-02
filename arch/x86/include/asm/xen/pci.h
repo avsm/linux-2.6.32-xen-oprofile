@@ -2,6 +2,7 @@
 #define _ASM_X86_XEN_PCI_H
 
 #if defined(CONFIG_PCI_MSI)
+#if defined(CONFIG_PCI_XEN)
 void xen_pci_teardown_msi_dev(struct pci_dev *dev);
 int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
 
@@ -41,5 +42,13 @@ static inline void xen_pci_frontend_disable_msix(struct pci_dev *dev)
 	if (xen_pci_frontend && xen_pci_frontend->disable_msix)
 			xen_pci_frontend->disable_msix(dev);
 }
-#endif
+#else
+static inline void xen_pci_teardown_msi_dev(struct pci_dev *dev) { }
+static inline int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
+{
+	return -ENODEV;
+}
+#endif /* CONFIG_PCI_XEN */
+
+#endif /* CONFIG_PCI_MSI */
 #endif	/* _ASM_X86_XEN_PCI_H */
