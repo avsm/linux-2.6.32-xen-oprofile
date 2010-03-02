@@ -15,6 +15,7 @@
 #include <linux/msi.h>
 #include <xen/xenbus.h>
 #include <xen/interface/io/pciif.h>
+#include <asm/xen/pci.h>
 #include <linux/interrupt.h>
 #include <asm/atomic.h>
 #include <linux/workqueue.h>
@@ -255,8 +256,8 @@ struct pci_ops pcifront_bus_ops = {
 };
 
 #ifdef CONFIG_PCI_MSI
-int pci_frontend_enable_msix(struct pci_dev *dev,
-		int **vector, int nvec)
+static int pci_frontend_enable_msix(struct pci_dev *dev,
+				    int **vector, int nvec)
 {
 	int err;
 	int i;
@@ -304,7 +305,7 @@ int pci_frontend_enable_msix(struct pci_dev *dev,
 	}
 }
 
-void pci_frontend_disable_msix(struct pci_dev *dev)
+static void pci_frontend_disable_msix(struct pci_dev *dev)
 {
 	int err;
 	struct xen_pci_op op = {
@@ -323,7 +324,7 @@ void pci_frontend_disable_msix(struct pci_dev *dev)
 		dev_err(&dev->dev, "pci_disable_msix get err %x\n", err);
 }
 
-int pci_frontend_enable_msi(struct pci_dev *dev, int **vector)
+static int pci_frontend_enable_msi(struct pci_dev *dev, int **vector)
 {
 	int err;
 	struct xen_pci_op op = {
@@ -346,7 +347,7 @@ int pci_frontend_enable_msi(struct pci_dev *dev, int **vector)
 	return err;
 }
 
-void pci_frontend_disable_msi(struct pci_dev *dev)
+static void pci_frontend_disable_msi(struct pci_dev *dev)
 {
 	int err;
 	struct xen_pci_op op = {
@@ -368,6 +369,23 @@ void pci_frontend_disable_msi(struct pci_dev *dev)
 		/* how can pciback notify us fail? */
 		printk(KERN_DEBUG "get fake response frombackend \n");
 }
+
+static struct xen_pci_frontend_ops pci_frontend_ops = {
+	.enable_msi = pci_frontend_enable_msi,
+	.disable_msi = pci_frontend_disable_msi,
+	.enable_msix = pci_frontend_enable_msix,
+	.disable_msix = pci_frontend_disable_msix,
+};
+
+static void pci_frontend_registrar(int enable)
+{
+	if (enable)
+		xen_pci_frontend = &pci_frontend_ops;
+	else
+		xen_pci_frontend = NULL;
+};
+#else
+static inline void pci_frontend_registrar(int enable) { };
 #endif /* CONFIG_PCI_MSI */
 
 /* Claim resources for the PCI frontend as-is, backend won't allow changes */
@@ -1120,12 +1138,15 @@ static int __init pcifront_init(void)
 	if (!xen_domain())
 		return -ENODEV;
 
+	pci_frontend_registrar(1 /* enable */);
+
 	return xenbus_register_frontend(&xenbus_pcifront_driver);
 }
 
 static void __exit pcifront_cleanup(void)
 {
 	xenbus_unregister_driver(&xenbus_pcifront_driver);
+	pci_frontend_registrar(0 /* disable */);
 }
 module_init(pcifront_init);
 module_exit(pcifront_cleanup);
