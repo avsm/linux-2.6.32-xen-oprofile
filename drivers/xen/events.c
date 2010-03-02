@@ -89,7 +89,8 @@ struct irq_info
 		unsigned short virq;
 		enum ipi_vector ipi;
 		struct {
-			unsigned short nr;
+			unsigned short gsi;
+			unsigned char vector;
 			unsigned char flags;
 		} pirq;
 	} u;
@@ -145,10 +146,10 @@ static struct irq_info mk_virq_info(unsigned short evtchn, unsigned short virq)
 }
 
 static struct irq_info mk_pirq_info(unsigned short evtchn,
-				    unsigned short pirq)
+				    unsigned short gsi, unsigned short vector)
 {
 	return (struct irq_info) { .type = IRQT_PIRQ, .evtchn = evtchn,
-			.cpu = 0, .u.pirq = { .nr = pirq } };
+			.cpu = 0, .u.pirq = { .gsi = gsi, .vector = vector } };
 }
 
 /*
@@ -197,7 +198,17 @@ static unsigned gsi_from_irq(unsigned irq)
 	BUG_ON(info == NULL);
 	BUG_ON(info->type != IRQT_PIRQ);
 
-	return info->u.pirq.nr;
+	return info->u.pirq.gsi;
+}
+
+static unsigned vector_from_irq(unsigned irq)
+{
+	struct irq_info *info = info_for_irq(irq);
+
+	BUG_ON(info == NULL);
+	BUG_ON(info->type != IRQT_PIRQ);
+
+	return info->u.pirq.vector;
 }
 
 static enum xen_irq_type type_from_irq(unsigned irq)
@@ -358,12 +369,16 @@ static int find_unbound_irq(void)
 	struct irq_desc *desc;
 	int start = get_nr_hw_irqs();
 
-	for (irq = start; irq < nr_irqs; irq++)
+	if (start == nr_irqs)
+		goto no_irqs;
+
+	/* nr_irqs is a magic value. Must not use it.*/
+	for (irq = nr_irqs-1; irq > start; irq--)
 		if (irq_info[irq].type == IRQT_UNBOUND)
 			break;
 
-	if (irq == nr_irqs)
-		panic("No available IRQ to bind to: increase nr_irqs!\n");
+	if (irq == start)
+		goto no_irqs;
 
 	desc = irq_to_desc_alloc_node(irq, 0);
 	if (WARN_ON(desc == NULL))
@@ -372,6 +387,9 @@ static int find_unbound_irq(void)
 	dynamic_irq_init(irq);
 
 	return irq;
+
+no_irqs:
+	panic("No available IRQ to bind to: increase nr_irqs!\n");
 }
 
 static bool identity_mapped_irq(unsigned irq)
@@ -382,8 +400,7 @@ static bool identity_mapped_irq(unsigned irq)
 
 static void pirq_unmask_notify(int irq)
 {
-	struct irq_info *info = info_for_irq(irq);
-	struct physdev_eoi eoi = { .irq = info->u.pirq.nr };
+	struct physdev_eoi eoi = { .irq = irq };
 
 	if (unlikely(pirq_needs_eoi(irq))) {
 		int rc = HYPERVISOR_physdev_op(PHYSDEVOP_eoi, &eoi);
@@ -398,7 +415,7 @@ static void pirq_query_unmask(int irq)
 
 	BUG_ON(info->type != IRQT_PIRQ);
 
-	irq_status.irq = info->u.pirq.nr;
+	irq_status.irq = irq;
 	if (HYPERVISOR_physdev_op(PHYSDEVOP_irq_status_query, &irq_status))
 		irq_status.flags = 0;
 
@@ -426,7 +443,7 @@ static unsigned int startup_pirq(unsigned int irq)
 	if (VALID_EVTCHN(evtchn))
 		goto out;
 
-	bind_pirq.pirq = info->u.pirq.nr;
+	bind_pirq.pirq = irq;
 	/* NB. We are happy to share unless we are probing. */
 	bind_pirq.flags = info->u.pirq.flags & PIRQ_SHAREABLE ?
 					BIND_PIRQ__WILL_SHARE : 0;
@@ -530,13 +547,14 @@ static int find_irq_by_gsi(unsigned gsi)
 }
 
 /*
- * Allocate a physical irq.  We don't assign an event channel
- * until the irq actually started up.  Return an
+ * Allocate a physical irq, along with a vector.  We don't assign an
+ * event channel until the irq actually started up.  Return an
  * existing irq if we've already got one for the gsi.
  */
 int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 {
 	int irq;
+	struct physdev_irq irq_op;
 
 	spin_lock(&irq_mapping_update_lock);
 
@@ -547,7 +565,9 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 		goto out;	/* XXX need refcount? */
 	}
 
-	if (identity_mapped_irq(gsi)) {
+	/* If we are a PV guest, we don't have GSIs (no ACPI passed). Therefore
+	 * we are using the !xen_initial_domain() to drop in the function.*/
+	if (identity_mapped_irq(gsi) || !xen_initial_domain()) {
 		irq = gsi;
 		irq_to_desc_alloc_node(irq, 0);
 		dynamic_irq_init(irq);
@@ -557,10 +577,25 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 				      handle_level_irq, name);
 
-	irq_info[irq] = mk_pirq_info(0, gsi);
+	irq_op.irq = irq;
+	irq_op.vector = 0;
+
+	/* Only the privileged domain can do this. For non-priv, the pcifront
+	 * driver provides a PCI bus that does the call to do exactly
+	 * this in the priv domain. */
+	if (xen_initial_domain() &&
+	    HYPERVISOR_physdev_op(PHYSDEVOP_alloc_irq_vector, &irq_op)) {
+		dynamic_irq_cleanup(irq);
+		irq = -ENOSPC;
+		goto out;
+	}
+
+	irq_info[irq] = mk_pirq_info(0, gsi, irq_op.vector);
  	irq_info[irq].u.pirq.flags |= shareable ? PIRQ_SHAREABLE : 0;
+
 out:
 	spin_unlock(&irq_mapping_update_lock);
+
 	return irq;
 }
 
@@ -578,7 +613,7 @@ int xen_destroy_irq(int irq)
 	if (!desc)
 		goto out;
 
-	unmap_irq.pirq = info->u.pirq.nr;
+	unmap_irq.pirq = info->u.pirq.gsi;
 	unmap_irq.domid = DOMID_SELF;
 	rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
 	if (rc) {
@@ -640,7 +675,7 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		irq = -1;
 		goto out;
 	}
-	irq_info[irq] = mk_pirq_info(0, map_irq.pirq);
+	irq_info[irq] = mk_pirq_info(0, map_irq.pirq, map_irq.index);
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 			handle_level_irq,
@@ -651,6 +686,11 @@ out:
 	return irq;
 }
 #endif
+
+int xen_vector_from_irq(unsigned irq)
+{
+	return vector_from_irq(irq);
+}
 
 int xen_gsi_from_irq(unsigned irq)
 {
@@ -1205,7 +1245,7 @@ void xen_clear_irq_pending(int irq)
 	if (VALID_EVTCHN(evtchn))
 		clear_evtchn(evtchn);
 }
-
+EXPORT_SYMBOL(xen_clear_irq_pending);
 void xen_set_irq_pending(int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
@@ -1225,9 +1265,9 @@ bool xen_test_irq_pending(int irq)
 	return ret;
 }
 
-/* Poll waiting for an irq to become pending.  In the usual case, the
+/* Poll waiting for an irq to become pending with timeout.  In the usual case, the
    irq will be disabled so it won't deliver an interrupt. */
-void xen_poll_irq(int irq)
+void xen_poll_irq_timeout(int irq, u64 timeout)
 {
 	evtchn_port_t evtchn = evtchn_from_irq(irq);
 
@@ -1235,12 +1275,19 @@ void xen_poll_irq(int irq)
 		struct sched_poll poll;
 
 		poll.nr_ports = 1;
-		poll.timeout = 0;
+		poll.timeout = timeout;
 		set_xen_guest_handle(poll.ports, &evtchn);
 
 		if (HYPERVISOR_sched_op(SCHEDOP_poll, &poll) != 0)
 			BUG();
 	}
+}
+EXPORT_SYMBOL(xen_poll_irq_timeout);
+/* Poll waiting for an irq to become pending.  In the usual case, the
+   irq will be disabled so it won't deliver an interrupt. */
+void xen_poll_irq(int irq)
+{
+	xen_poll_irq_timeout(irq, 0 /* no timeout */);
 }
 
 void xen_irq_resume(void)
@@ -1304,9 +1351,10 @@ void __init xen_init_IRQ(void)
 
 	cpu_evtchn_mask_p = kcalloc(nr_cpu_ids, sizeof(struct cpu_evtchn_s),
 				    GFP_KERNEL);
-        irq_info = kcalloc(nr_irqs, sizeof(*irq_info), GFP_KERNEL);
+	irq_info = kcalloc(nr_irqs, sizeof(*irq_info), GFP_KERNEL);
 
-	evtchn_to_irq = kcalloc(NR_EVENT_CHANNELS, sizeof(*evtchn_to_irq), GFP_KERNEL);
+	evtchn_to_irq = kcalloc(NR_EVENT_CHANNELS, sizeof(*evtchn_to_irq),
+				    GFP_KERNEL);
 	for(i = 0; i < NR_EVENT_CHANNELS; i++)
 		evtchn_to_irq[i] = -1;
 

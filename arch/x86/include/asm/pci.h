@@ -50,6 +50,11 @@ extern unsigned int pcibios_assign_all_busses(void);
 #define pcibios_assign_all_busses()	0
 #endif
 
+static inline int pcibios_scan_all_fns(struct pci_bus *bus, int devfn)
+{
+	return pci_scan_all_fns;
+}
+
 extern unsigned long pci_mem_start;
 #define PCIBIOS_MIN_IO		0x1000
 #define PCIBIOS_MIN_MEM		(pci_mem_start)
@@ -88,6 +93,7 @@ extern void pci_iommu_alloc(void);
 
 /* MSI arch hook */
 #define arch_setup_msi_irqs arch_setup_msi_irqs
+#define arch_teardown_msi_irqs arch_teardown_msi_irqs
 
 #define PCI_DMA_BUS_IS_PHYS (dma_ops->is_phys)
 
@@ -129,6 +135,7 @@ extern void pci_iommu_alloc(void);
 #include <asm-generic/pci-dma-compat.h>
 
 /* generic pci stuff */
+#define HAVE_ARCH_PCIBIOS_SCAN_ALL_FNS
 #include <asm-generic/pci.h>
 #define PCIBIOS_MAX_MEM_32 0xffffffff
 

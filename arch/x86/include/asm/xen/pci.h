@@ -34,4 +34,56 @@ static inline int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 }
 #endif
 
+#if defined(CONFIG_PCI_MSI)
+#if defined(CONFIG_PCI_XEN)
+void xen_pci_teardown_msi_dev(struct pci_dev *dev);
+void xen_pci_teardown_msi_irq(int irq);
+int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
+
+/* The drivers/pci/xen-pcifront.c sets this structure to
+ * its own functions.
+ */
+struct xen_pci_frontend_ops {
+	int (*enable_msi)(struct pci_dev *dev, int **vectors);
+	void (*disable_msi)(struct pci_dev *dev);
+	int (*enable_msix)(struct pci_dev *dev, int **vectors, int nvec);
+	void (*disable_msix)(struct pci_dev *dev);
+};
+
+extern struct xen_pci_frontend_ops *xen_pci_frontend;
+	
+static inline int xen_pci_frontend_enable_msi(struct pci_dev *dev,
+					      int **vectors)
+{
+	if (xen_pci_frontend && xen_pci_frontend->enable_msi)
+		return xen_pci_frontend->enable_msi(dev, vectors);
+	return -ENODEV;
+}
+static inline void xen_pci_frontend_disable_msi(struct pci_dev *dev)
+{
+	if (xen_pci_frontend && xen_pci_frontend->disable_msi)
+			xen_pci_frontend->disable_msi(dev);
+}
+static inline int xen_pci_frontend_enable_msix(struct pci_dev *dev,
+					       int **vectors, int nvec)
+{
+	if (xen_pci_frontend && xen_pci_frontend->enable_msix)
+		return xen_pci_frontend->enable_msix(dev, vectors, nvec);
+	return -ENODEV;
+}
+static inline void xen_pci_frontend_disable_msix(struct pci_dev *dev)
+{
+	if (xen_pci_frontend && xen_pci_frontend->disable_msix)
+			xen_pci_frontend->disable_msix(dev);
+}
+#else
+static inline void xen_pci_teardown_msi_dev(struct pci_dev *dev) { }
+static inline void xen_pci_teardown_msi_irq(int irq) { }
+static inline int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
+{
+	return -ENODEV;
+}
+#endif /* CONFIG_PCI_XEN */
+
+#endif /* CONFIG_PCI_MSI */
 #endif	/* _ASM_X86_XEN_PCI_H */

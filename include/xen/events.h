@@ -61,6 +61,10 @@ bool xen_test_irq_pending(int irq);
    irq will be disabled so it won't deliver an interrupt. */
 void xen_poll_irq(int irq);
 
+/* Poll waiting for an irq to become pending with a timeout.  In the usual case, the
+   irq will be disabled so it won't deliver an interrupt. */
+void xen_poll_irq_timeout(int irq, u64 timeout);
+
 /* Determine the IRQ which is bound to an event channel */
 unsigned irq_from_evtchn(unsigned int evtchn);
 
@@ -68,6 +72,9 @@ unsigned irq_from_evtchn(unsigned int evtchn);
    GSIs are identity mapped; others are dynamically allocated as
    usual. */
 int xen_allocate_pirq(unsigned gsi, int shareable, char *name);
+
+/* De-allocates the above mentioned physical interrupt. */
+int xen_destroy_irq(int irq);
 
 /* Return vector allocated to pirq */
 int xen_vector_from_irq(unsigned pirq);
