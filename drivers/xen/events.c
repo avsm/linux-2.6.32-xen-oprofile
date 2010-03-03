@@ -400,7 +400,8 @@ static bool identity_mapped_irq(unsigned irq)
 
 static void pirq_unmask_notify(int irq)
 {
-	struct physdev_eoi eoi = { .irq = irq };
+	struct irq_info *info = info_for_irq(irq);
+	struct physdev_eoi eoi = { .irq = info->u.pirq.gsi };
 
 	if (unlikely(pirq_needs_eoi(irq))) {
 		int rc = HYPERVISOR_physdev_op(PHYSDEVOP_eoi, &eoi);
@@ -415,7 +416,7 @@ static void pirq_query_unmask(int irq)
 
 	BUG_ON(info->type != IRQT_PIRQ);
 
-	irq_status.irq = irq;
+	irq_status.irq = info->u.pirq.gsi;
 	if (HYPERVISOR_physdev_op(PHYSDEVOP_irq_status_query, &irq_status))
 		irq_status.flags = 0;
 
@@ -443,15 +444,15 @@ static unsigned int startup_pirq(unsigned int irq)
 	if (VALID_EVTCHN(evtchn))
 		goto out;
 
-	bind_pirq.pirq = irq;
+	bind_pirq.pirq = info->u.pirq.gsi;
 	/* NB. We are happy to share unless we are probing. */
 	bind_pirq.flags = info->u.pirq.flags & PIRQ_SHAREABLE ?
 					BIND_PIRQ__WILL_SHARE : 0;
 	rc = HYPERVISOR_event_channel_op(EVTCHNOP_bind_pirq, &bind_pirq);
 	if (rc != 0) {
 		if (!probing_irq(irq))
-			printk(KERN_INFO "Failed to obtain physical IRQ %d\n",
-			       irq);
+			printk(KERN_INFO "Failed to obtain physical IRQ %d" \
+				" (GSI:%d)\n", irq, info->u.pirq.gsi);
 		return 0;
 	}
 	evtchn = bind_pirq.port;
@@ -577,7 +578,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
 				      handle_level_irq, name);
 
-	irq_op.irq = irq;
+	irq_op.irq = gsi;
 	irq_op.vector = 0;
 
 	/* Only the privileged domain can do this. For non-priv, the pcifront
