@@ -613,14 +613,16 @@ int xen_destroy_irq(int irq)
 	if (!desc)
 		goto out;
 
-	unmap_irq.pirq = info->u.pirq.gsi;
-	unmap_irq.domid = DOMID_SELF;
-	rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
-	if (rc) {
-		printk(KERN_WARNING "unmap irq failed %d\n", rc);
-		goto out;
-	}
 
+	if (xen_initial_domain()) {
+		unmap_irq.pirq = info->u.pirq.gsi;
+		unmap_irq.domid = DOMID_SELF;
+		rc = HYPERVISOR_physdev_op(PHYSDEVOP_unmap_pirq, &unmap_irq);
+		if (rc) {
+			printk(KERN_WARNING "unmap irq failed %d\n", rc);
+			goto out;
+		}
+	}
 	irq_info[irq] = mk_unbound_info();
 
 	dynamic_irq_cleanup(irq);

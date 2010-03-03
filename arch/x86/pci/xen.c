@@ -34,6 +34,13 @@ int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	struct msi_desc *msidesc;
 	int *v;
 
+
+	/* Dom0 has another mechanism for this. The exit path
+	 * (xen_pci_teardown_msi_irq) is shared with Dom0.
+	 */
+	if (xen_initial_domain())
+		return xen_setup_msi_irqs(dev, nvec, type);
+
 	v = kzalloc(sizeof(int) * min(1, nvec), GFP_KERNEL);
 	if (!v)
 		return -ENOMEM;
