@@ -26,7 +26,7 @@ static struct pciback_device *alloc_pdev(struct xenbus_device *xdev)
 	dev_dbg(&xdev->dev, "allocated pdev @ 0x%p\n", pdev);
 
 	pdev->xdev = xdev;
-	xdev->dev.driver_data = pdev;
+	dev_set_drvdata(&xdev->dev, pdev);
 
 	spin_lock_init(&pdev->dev_lock);
 
@@ -75,7 +75,7 @@ static void free_pdev(struct pciback_device *pdev)
 
 	pciback_release_devices(pdev);
 
-	pdev->xdev->dev.driver_data = NULL;
+	dev_set_drvdata(&pdev->xdev->dev, NULL);
 	pdev->xdev = NULL;
 
 	kfree(pdev);
@@ -476,7 +476,7 @@ out:
 static void pciback_frontend_changed(struct xenbus_device *xdev,
 				     enum xenbus_state fe_state)
 {
-	struct pciback_device *pdev = xdev->dev.driver_data;
+	struct pciback_device *pdev = dev_get_drvdata(&xdev->dev);
 
 	dev_dbg(&xdev->dev, "fe state changed %d\n", fe_state);
 
@@ -669,7 +669,7 @@ out:
 
 static int pciback_xenbus_remove(struct xenbus_device *dev)
 {
-	struct pciback_device *pdev = dev->dev.driver_data;
+	struct pciback_device *pdev = dev_get_drvdata(&dev->dev);
 
 	if (pdev != NULL)
 		free_pdev(pdev);
