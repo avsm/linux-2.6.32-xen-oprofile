@@ -12,6 +12,7 @@
 #include <linux/kref.h>
 #include <linux/pci.h>
 #include <linux/wait.h>
+#include <linux/sched.h>
 #include <asm/atomic.h>
 #include <xen/events.h>
 #include <asm/xen/pci.h>

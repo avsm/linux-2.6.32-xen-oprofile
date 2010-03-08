@@ -7,6 +7,7 @@
 #include <linux/wait.h>
 #include <linux/bitops.h>
 #include <xen/events.h>
+#include <linux/sched.h>
 #include "pciback.h"
 
 int verbose_request;
