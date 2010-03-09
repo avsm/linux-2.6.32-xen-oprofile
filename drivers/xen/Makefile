@@ -10,6 +10,7 @@ obj-$(CONFIG_XEN_XENCOMM)		+= xencomm.o
 obj-$(CONFIG_XEN_BALLOON)		+= balloon.o
 obj-$(CONFIG_XEN_DEV_EVTCHN)		+= xen-evtchn.o
 obj-$(CONFIG_XEN_GNTDEV)		+= xen-gntdev.o
+obj-$(CONFIG_XEN_PCIDEV_BACKEND)	+= pciback/
 obj-$(CONFIG_XEN_BLKDEV_BACKEND)	+= blkback/
 obj-$(CONFIG_XEN_BLKDEV_TAP)            += blktap/
 obj-$(CONFIG_XEN_NETDEV_BACKEND)	+= netback/
