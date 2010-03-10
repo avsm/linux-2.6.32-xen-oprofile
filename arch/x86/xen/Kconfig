@@ -66,9 +66,10 @@ config XEN_DOM0_PCI
        select PCI_XEN
 
 config XEN_PCI_PASSTHROUGH
-       bool #"Enable support for Xen PCI passthrough devices"
+       bool "Enable support for Xen PCI passthrough devices"
        depends on XEN && PCI
        select PCI_XEN
+       select SWIOTLB_XEN
        help
          Enable support for passing PCI devices through to
 	 unprivileged domains. (COMPLETELY UNTESTED)
