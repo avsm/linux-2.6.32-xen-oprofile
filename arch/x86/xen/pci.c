@@ -71,6 +71,97 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 	return irq;
 }
 
+#ifdef CONFIG_ACPI
+#define BAD_MADT_ENTRY(entry, end) (					    \
+		(!entry) || (unsigned long)entry + sizeof(*entry) > end ||  \
+		((struct acpi_subtable_header *)entry)->length < sizeof(*entry))
+
+
+static int __init
+xen_acpi_parse_int_src_ovr(struct acpi_subtable_header * header,
+			   const unsigned long end)
+{
+	struct acpi_madt_interrupt_override *intsrc = NULL;
+
+	intsrc = (struct acpi_madt_interrupt_override *)header;
+
+	if (BAD_MADT_ENTRY(intsrc, end))
+		return -EINVAL;
+
+	acpi_table_print_madt_entry(header);
+
+	if (intsrc->source_irq == acpi_gbl_FADT.sci_interrupt) {
+		int gsi;
+		int trigger, polarity;
+
+		trigger = intsrc->inti_flags & ACPI_MADT_TRIGGER_MASK;
+		polarity = intsrc->inti_flags & ACPI_MADT_POLARITY_MASK;
+
+		/* Command-line over-ride via acpi_sci= */
+		if (acpi_sci_flags & ACPI_MADT_TRIGGER_MASK)
+			trigger = acpi_sci_flags & ACPI_MADT_TRIGGER_MASK;
+
+		if (acpi_sci_flags & ACPI_MADT_POLARITY_MASK)
+			polarity = acpi_sci_flags & ACPI_MADT_POLARITY_MASK;
+
+		printk("xen: sci override: source_irq=%d global_irq=%d trigger=%x polarity=%x\n",
+			intsrc->source_irq, intsrc->global_irq,
+			trigger, polarity);
+
+		switch (polarity) {
+		case ACPI_MADT_POLARITY_CONFORMS:
+		case ACPI_MADT_POLARITY_ACTIVE_LOW:
+			polarity = ACPI_ACTIVE_LOW;
+			break;
+
+		case ACPI_MADT_POLARITY_ACTIVE_HIGH:
+			polarity = ACPI_ACTIVE_HIGH;
+			break;
+
+		default:
+			return 0;
+		}
+
+		switch (trigger) {
+		case ACPI_MADT_TRIGGER_CONFORMS:
+		case ACPI_MADT_TRIGGER_LEVEL:
+			trigger = ACPI_LEVEL_SENSITIVE;
+			break;
+
+		case ACPI_MADT_TRIGGER_EDGE:
+			trigger = ACPI_EDGE_SENSITIVE;
+			break;
+
+		default:
+			return 0;
+		}
+
+		gsi = xen_register_gsi(intsrc->global_irq,
+				       trigger, polarity);
+		/*
+		 * stash over-ride to indicate we've been here
+		 * and for later update of acpi_gbl_FADT
+		 */
+		acpi_sci_override_gsi = gsi;
+
+		printk("xen: acpi sci %d\n", gsi);
+	}
+
+	return 0;
+}
+
+static __init void xen_setup_acpi_sci(void)
+{
+  acpi_table_parse_madt(ACPI_MADT_TYPE_INTERRUPT_OVERRIDE,
+			xen_acpi_parse_int_src_ovr,
+			nr_irqs);
+}
+#else
+static __init void xen_setup_acpi_sci(void)
+{
+}
+#endif
+
 void __init xen_setup_pirqs(void)
 {
 	int irq;
@@ -92,6 +183,8 @@ void __init xen_setup_pirqs(void)
 			trigger ? ACPI_LEVEL_SENSITIVE : ACPI_EDGE_SENSITIVE,
 			polarity ? ACPI_ACTIVE_LOW : ACPI_ACTIVE_HIGH);
 	}
+
+	xen_setup_acpi_sci();
 }
 
 #ifdef CONFIG_PCI_MSI
