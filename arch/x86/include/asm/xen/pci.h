@@ -1,41 +1,11 @@
 #ifndef _ASM_X86_XEN_PCI_H
 #define _ASM_X86_XEN_PCI_H
 
-#ifdef CONFIG_XEN_DOM0_PCI
-int xen_register_gsi(u32 gsi, int triggering, int polarity);
+#if defined(CONFIG_PCI_MSI)
+#if defined(CONFIG_PCI_XEN)
 int xen_create_msi_irq(struct pci_dev *dev,
 			struct msi_desc *msidesc,
 			int type);
-int xen_destroy_irq(int irq);
-#else
-static inline int xen_register_gsi(u32 gsi, int triggering, int polarity)
-{
-	return -1;
-}
-
-static inline int xen_create_msi_irq(struct pci_dev *dev,
-				struct msi_desc *msidesc,
-				int type)
-{
-	return -1;
-}
-static inline int xen_destroy_irq(int irq)
-{
-	return -1;
-}
-#endif
-
-#if defined(CONFIG_PCI_MSI) && defined(CONFIG_XEN_DOM0_PCI)
-int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
-#else
-static inline int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
-{
-	return -1;
-}
-#endif
-
-#if defined(CONFIG_PCI_MSI)
-#if defined(CONFIG_PCI_XEN)
 void xen_pci_teardown_msi_dev(struct pci_dev *dev);
 void xen_pci_teardown_msi_irq(int irq);
 int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
@@ -77,6 +47,12 @@ static inline void xen_pci_frontend_disable_msix(struct pci_dev *dev)
 			xen_pci_frontend->disable_msix(dev);
 }
 #else
+static inline int xen_create_msi_irq(struct pci_dev *dev,
+				struct msi_desc *msidesc,
+				int type)
+{
+	return -1;
+}
 static inline void xen_pci_teardown_msi_dev(struct pci_dev *dev) { }
 static inline void xen_pci_teardown_msi_irq(int irq) { }
 static inline int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
@@ -86,4 +62,41 @@ static inline int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type
 #endif /* CONFIG_PCI_XEN */
 
 #endif /* CONFIG_PCI_MSI */
+
+#ifdef CONFIG_XEN_DOM0_PCI
+int xen_register_gsi(u32 gsi, int triggering, int polarity);
+int xen_find_device_domain_owner(struct pci_dev *dev);
+int xen_register_device_domain_owner(struct pci_dev *dev, uint16_t domain);
+int xen_unregister_device_domain_owner(struct pci_dev *dev);
+
+#else
+static inline int xen_register_gsi(u32 gsi, int triggering, int polarity)
+{
+	return -1;
+}
+
+static inline int xen_find_device_domain_owner(struct pci_dev *dev)
+{
+	return -1;
+}
+static inline int xen_register_device_domain_owner(struct pci_dev *dev,
+						   uint16_t domain)
+{
+ 	return -1;
+}
+static inline int xen_unregister_device_domain_owner(struct pci_dev *dev)
+{
+ 	return -1;
+}
+#endif
+
+#if defined(CONFIG_PCI_MSI) && defined(CONFIG_XEN_DOM0_PCI)
+int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type);
+#else
+static inline int xen_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
+{
+	return -1;
+}
+#endif
+
 #endif	/* _ASM_X86_XEN_PCI_H */
