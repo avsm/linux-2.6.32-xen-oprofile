@@ -51,9 +51,9 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr, phys_addr_
 	if (end <= start)
 		return 0;
 
-	printk(KERN_INFO "xen_release_chunk: looking at area pfn %lx-%lx\n", start, end);
+	printk(KERN_INFO "xen_release_chunk: looking at area pfn %lx-%lx: ", start, end);
 	for(pfn = start; pfn < end; pfn++) {
-		unsigned long mfn = pfn_to_mfn(mfn);
+		unsigned long mfn = pfn_to_mfn(pfn);
 
 		/* Make sure pfn exists to start with */
 		if (mfn == INVALID_P2M_ENTRY || mfn_to_pfn(mfn) != pfn)
@@ -70,6 +70,7 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr, phys_addr_
 			len++;
 		}
 	}
+	printk(KERN_CONT "%ld pages freed\n", len);
 
 	return len;
 }
