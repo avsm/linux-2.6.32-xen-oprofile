@@ -33,7 +33,8 @@ extern void xen_sysenter_target(void);
 extern void xen_syscall_target(void);
 extern void xen_syscall32_target(void);
 
-static unsigned long __init xen_release_chunk(phys_addr_t start_addr, phys_addr_t end_addr)
+static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
+					      phys_addr_t end_addr)
 {
 	struct xen_memory_reservation reservation = {
 		.address_bits = 0,
@@ -51,7 +52,8 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr, phys_addr_
 	if (end <= start)
 		return 0;
 
-	printk(KERN_INFO "xen_release_chunk: looking at area pfn %lx-%lx: ", start, end);
+	printk(KERN_INFO "xen_release_chunk: looking at area pfn %lx-%lx: ",
+	       start, end);
 	for(pfn = start; pfn < end; pfn++) {
 		unsigned long mfn = pfn_to_mfn(pfn);
 
@@ -62,7 +64,8 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr, phys_addr_
 		set_xen_guest_handle(reservation.extent_start, &mfn);
 		reservation.nr_extents = 1;
 
-		ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
+		ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation,
+					   &reservation);
 		WARN(ret != 1, "Failed to release memory %lx-%lx err=%d\n",
 		     start, end, ret);
 		if (ret == 1) {
