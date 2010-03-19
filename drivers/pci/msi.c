@@ -20,6 +20,7 @@
 #include <asm/errno.h>
 #include <asm/io.h>
 
+#include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
 
 #include "pci.h"
@@ -269,8 +270,7 @@ void write_msi_msg(unsigned int irq, struct msi_msg *msg)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
 
-	if (!xen_initial_domain())
-		write_msi_msg_desc(desc, msg);
+	write_msi_msg_desc(desc, msg);
 }
 
 static int msi_free_irqs(struct pci_dev* dev);
@@ -345,6 +345,20 @@ static void __pci_restore_msix_state(struct pci_dev *dev)
 
 void pci_restore_msi_state(struct pci_dev *dev)
 {
+	if (xen_initial_domain()) {
+		struct physdev_restore_msi physdev;
+
+		if (!dev->msi_enabled && !dev->msix_enabled)
+			return;
+
+		pci_intx_for_msi(dev, 0);
+
+		physdev.bus = dev->bus->number;
+		physdev.devfn = dev->devfn;
+		HYPERVISOR_physdev_op(PHYSDEVOP_restore_msi, &physdev);
+
+		return;
+	}
 	__pci_restore_msi_state(dev);
 	__pci_restore_msix_state(dev);
 }
