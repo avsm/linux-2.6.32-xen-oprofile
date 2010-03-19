@@ -157,6 +157,14 @@ static inline int invalid_vm86_irq(int irq)
 #define CPU_VECTOR_LIMIT		(  8 * NR_CPUS      )
 #define IO_APIC_VECTOR_LIMIT		( 32 * MAX_IO_APICS )
 
+#ifndef __ASSEMBLY__
+# if defined(CONFIG_X86_IO_APIC) && defined(CONFIG_SPARSE_IRQ)
+extern int nr_dynamic_irqs;
+# else
+#  define NR_DYNAMIC_IRQS			 256
+# endif
+#endif
+
 #ifdef CONFIG_X86_IO_APIC
 # ifdef CONFIG_SPARSE_IRQ
 #  define NR_IRQS					\
@@ -165,13 +173,13 @@ static inline int invalid_vm86_irq(int irq)
 		(NR_VECTORS + IO_APIC_VECTOR_LIMIT))
 # else
 #  if NR_CPUS < MAX_IO_APICS
-#   define NR_IRQS 			(NR_VECTORS + 4*CPU_VECTOR_LIMIT)
+#   define NR_IRQS 			(NR_VECTORS + 4*CPU_VECTOR_LIMIT) + NR_DYNAMIC_IRQS
 #  else
-#   define NR_IRQS			(NR_VECTORS + IO_APIC_VECTOR_LIMIT)
+#   define NR_IRQS			(NR_VECTORS + IO_APIC_VECTOR_LIMIT) + NR_DYNAMIC_IRQS
 #  endif
 # endif
 #else /* !CONFIG_X86_IO_APIC: */
-# define NR_IRQS			NR_IRQS_LEGACY
+# define NR_IRQS			NR_IRQS_LEGACY + NR_DYNAMIC_IRQS
 #endif
 
 #endif /* _ASM_X86_IRQ_VECTORS_H */

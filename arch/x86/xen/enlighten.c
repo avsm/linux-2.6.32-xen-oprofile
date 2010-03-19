@@ -986,6 +986,10 @@ asmlinkage void __init xen_start_kernel(void)
 	pv_apic_ops = xen_apic_ops;
 	pv_mmu_ops = xen_mmu_ops;
 
+#ifdef CONFIG_SPARSE_IRQ
+	nr_dynamic_irqs += 256;
+#endif
+
 	xen_init_irq_ops();
 
 	xen_init_cpuid_mask();
