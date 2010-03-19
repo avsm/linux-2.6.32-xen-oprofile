@@ -1153,6 +1153,10 @@ asmlinkage void __init xen_start_kernel(void)
 	 */
 	xen_setup_stackprotector();
 
+#ifdef CONFIG_SPARSE_IRQ
+	nr_dynamic_irqs += 256;
+#endif
+
 	xen_init_irq_ops();
 	xen_init_cpuid_mask();
 
