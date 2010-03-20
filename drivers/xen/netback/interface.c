@@ -136,9 +136,14 @@ static const struct netif_stat {
 	{ "copied_skbs", offsetof(struct xen_netif, nr_copied_skbs) },
 };
 
-static int netbk_get_stats_count(struct net_device *dev)
+static int netbk_get_sset_count(struct net_device *dev, int string_set)
 {
-	return ARRAY_SIZE(netbk_stats);
+	switch (string_set) {
+	case ETH_SS_STATS:
+		return ARRAY_SIZE(netbk_stats);
+	default:
+		return -EINVAL;
+	}
 }
 
 static void netbk_get_ethtool_stats(struct net_device *dev,
@@ -176,7 +181,7 @@ static struct ethtool_ops network_ethtool_ops =
 	.set_tso = netbk_set_tso,
 	.get_link = ethtool_op_get_link,
 
-	.get_stats_count = netbk_get_stats_count,
+	.get_sset_count = netbk_get_sset_count,
 	.get_ethtool_stats = netbk_get_ethtool_stats,
 	.get_strings = netbk_get_strings,
 };

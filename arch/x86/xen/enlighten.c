@@ -755,7 +755,6 @@ static __init void set_xen_basic_apic_ops(void)
 
 #endif
 
-
 static void xen_clts(void)
 {
 	struct multicall_space mcs;
@@ -1159,6 +1158,10 @@ asmlinkage void __init xen_start_kernel(void)
 	 * -fstack-protector code can be executed.
 	 */
 	xen_setup_stackprotector();
+
+#ifdef CONFIG_SPARSE_IRQ
+	nr_dynamic_irqs += 256;
+#endif
 
 	xen_init_irq_ops();
 	xen_init_cpuid_mask();
