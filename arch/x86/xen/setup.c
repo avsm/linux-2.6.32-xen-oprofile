@@ -82,7 +82,7 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
 
 static unsigned long __init xen_return_unused_memory(const struct e820map *e820)
 {
-	unsigned long last_end = 0;
+	phys_addr_t last_end = 0;
 	unsigned long released = 0;
 	int i;
 
