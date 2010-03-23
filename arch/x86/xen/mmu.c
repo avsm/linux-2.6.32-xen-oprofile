@@ -1993,7 +1993,7 @@ static void xen_set_fixmap(unsigned idx, phys_addr_t phys, pgprot_t prot)
 		 * We just don't map the IO APIC - all access is via
 		 * hypercalls.  Keep the address in the pte for reference.
 		 */
-		pte = __pte(__pa(dummy_ioapic_mapping) | __PAGE_KERNEL);
+		pte = pfn_pte(PFN_DOWN(__pa(dummy_ioapic_mapping)), PAGE_KERNEL);
 		break;
 #endif
 
