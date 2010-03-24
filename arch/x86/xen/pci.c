@@ -44,6 +44,17 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 	if (irq < 0)
 		goto out;
 
+	map_irq.domid = DOMID_SELF;
+	map_irq.type = MAP_PIRQ_TYPE_GSI;
+	map_irq.index = gsi;
+	map_irq.pirq = irq;
+
+	rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
+	if (rc) {
+		printk(KERN_WARNING "xen map irq failed %d\n", rc);
+		return -1;
+	}
+
 	setup_gsi.gsi = gsi;
 	setup_gsi.triggering = (triggering == ACPI_EDGE_SENSITIVE ? 0 : 1);
 	setup_gsi.polarity = (polarity == ACPI_ACTIVE_HIGH ? 0 : 1);
@@ -55,17 +66,6 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 		printk(KERN_ERR "Failed to setup GSI :%d, err_code:%d\n",
 				gsi, rc);
 		BUG();
-	}
-
-	map_irq.domid = DOMID_SELF;
-	map_irq.type = MAP_PIRQ_TYPE_GSI;
-	map_irq.index = gsi;
-	map_irq.pirq = irq;
-
-	rc = HYPERVISOR_physdev_op(PHYSDEVOP_map_pirq, &map_irq);
-	if (rc) {
-		printk(KERN_WARNING "xen map irq failed %d\n", rc);
-		return -1;
 	}
 
 out:
