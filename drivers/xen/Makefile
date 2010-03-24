@@ -12,3 +12,4 @@ obj-$(CONFIG_XENFS)		+= xenfs/
 obj-$(CONFIG_XEN_SYS_HYPERVISOR)	+= sys-hypervisor.o
 obj-$(CONFIG_XEN_S3)           += acpi.o
 obj-$(CONFIG_ACPI_PROCESSOR_XEN) += acpi_processor.o
+obj-$(CONFIG_ACPI_HOTPLUG_MEMORY)  += xen_acpi_memhotplug.o

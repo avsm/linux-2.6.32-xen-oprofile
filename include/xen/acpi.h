@@ -70,6 +70,11 @@ static inline int xen_acpi_processor_get_performance(struct acpi_processor *pr)
 }
 #endif
 
+#if defined(CONFIG_ACPI_HOTPLUG_MEMORY) || \
+	defined(CONFIG_ACPI_HOTPLUG_MEMORY_MODULE)
+int xen_hotadd_memory(struct acpi_memory_device *mem_device);
+#endif
+
 #if defined(CONFIG_ACPI_PROCESSOR_XEN) || \
 defined(CONFIG_ACPI_PROCESSOR_XEN_MODULE)
 

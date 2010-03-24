@@ -157,7 +157,8 @@ static inline void unregister_hotplug_dock_device(acpi_handle handle)
 /*--------------------------------------------------------------------------
 				Memory
   -------------------------------------------------------------------------- */
-#if defined(CONFIG_ACPI_HOTPLUG_MEMORY) || (CONFIG_ACPI_HOTPLUG_MEMORY_MODULE)
+#if defined(CONFIG_ACPI_HOTPLUG_MEMORY) || \
+	defined(CONFIG_ACPI_HOTPLUG_MEMORY_MODULE)
 struct acpi_memory_info {
 	struct list_head list;
 	u64 start_addr;		/* Memory Range start physical addr */
