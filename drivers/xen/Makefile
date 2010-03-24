@@ -11,3 +11,4 @@ obj-$(CONFIG_XEN_DEV_EVTCHN)	+= evtchn.o
 obj-$(CONFIG_XENFS)		+= xenfs/
 obj-$(CONFIG_XEN_SYS_HYPERVISOR)	+= sys-hypervisor.o
 obj-$(CONFIG_XEN_S3)           += acpi.o
+obj-$(CONFIG_ACPI_PROCESSOR_XEN) += acpi_processor.o

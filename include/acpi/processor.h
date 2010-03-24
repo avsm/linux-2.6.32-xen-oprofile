@@ -238,6 +238,13 @@ struct acpi_processor_errata {
 	} piix4;
 };
 
+extern int acpi_processor_errata(struct acpi_processor *pr);
+extern int acpi_processor_add_fs(struct acpi_device *device);
+extern int acpi_processor_remove_fs(struct acpi_device *device);
+extern int acpi_processor_set_pdc(struct acpi_processor *pr);
+extern int acpi_processor_remove(struct acpi_device *device, int type);
+extern void acpi_processor_notify(struct acpi_device *device, u32 event);
+
 extern int acpi_processor_preregister_performance(struct
 						  acpi_processor_performance
 						  *performance);
@@ -295,6 +302,8 @@ static inline void acpi_processor_ffh_cstate_enter(struct acpi_processor_cx
 void acpi_processor_ppc_init(void);
 void acpi_processor_ppc_exit(void);
 int acpi_processor_ppc_has_changed(struct acpi_processor *pr);
+int acpi_processor_get_performance_info(struct acpi_processor *pr);
+int acpi_processor_get_psd(struct acpi_processor	*pr);
 #else
 static inline void acpi_processor_ppc_init(void)
 {
@@ -331,6 +340,7 @@ int acpi_processor_power_init(struct acpi_processor *pr,
 int acpi_processor_cst_has_changed(struct acpi_processor *pr);
 int acpi_processor_power_exit(struct acpi_processor *pr,
 			      struct acpi_device *device);
+int acpi_processor_get_power_info(struct acpi_processor *pr);
 int acpi_processor_suspend(struct acpi_device * device, pm_message_t state);
 int acpi_processor_resume(struct acpi_device * device);
 extern struct cpuidle_driver acpi_idle_driver;
