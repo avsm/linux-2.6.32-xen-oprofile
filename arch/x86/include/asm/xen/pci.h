@@ -2,6 +2,7 @@
 #define _ASM_X86_XEN_PCI_H
 
 #ifdef CONFIG_XEN_DOM0_PCI
+int xen_register_pirq(u32 gsi, int triggering);
 int xen_register_gsi(u32 gsi, int triggering, int polarity);
 int xen_create_msi_irq(struct pci_dev *dev,
 			struct msi_desc *msidesc,

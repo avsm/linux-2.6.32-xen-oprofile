@@ -15,19 +15,15 @@
 
 #include "xen-ops.h"
 
-int xen_register_gsi(u32 gsi, int triggering, int polarity)
+int xen_register_pirq(u32 gsi, int triggering)
 {
 	int rc, irq;
-	struct physdev_setup_gsi setup_gsi;
 	struct physdev_map_pirq map_irq;
 	int shareable = 0;
 	char *name;
 
 	if (!xen_domain())
 		return -1;
-
-	printk(KERN_DEBUG "xen: registering gsi %u triggering %d polarity %d\n",
-			gsi, triggering, polarity);
 
 	if (triggering == ACPI_EDGE_SENSITIVE) {
 		shareable = 0;
@@ -55,6 +51,26 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 		return -1;
 	}
 
+out:
+	return irq;
+}
+
+int xen_register_gsi(u32 gsi, int triggering, int polarity)
+{
+	int rc, irq;
+	struct physdev_setup_gsi setup_gsi;
+	struct physdev_map_pirq map_irq;
+	int shareable = 0;
+	char *name;
+
+	if (!xen_domain())
+		return -1;
+
+	printk(KERN_DEBUG "xen: registering gsi %u triggering %d polarity %d\n",
+			gsi, triggering, polarity);
+
+	irq = xen_register_pirq(gsi, triggering);
+
 	setup_gsi.gsi = gsi;
 	setup_gsi.triggering = (triggering == ACPI_EDGE_SENSITIVE ? 0 : 1);
 	setup_gsi.polarity = (polarity == ACPI_ACTIVE_HIGH ? 0 : 1);
@@ -65,10 +81,8 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 	else if (rc) {
 		printk(KERN_ERR "Failed to setup GSI :%d, err_code:%d\n",
 				gsi, rc);
-		BUG();
 	}
 
-out:
 	return irq;
 }
 
@@ -180,9 +194,8 @@ void __init xen_setup_pirqs(void)
 		if (acpi_get_override_irq(irq, &trigger, &polarity) == -1)
 			continue;
 
-		xen_register_gsi(irq,
-			trigger ? ACPI_LEVEL_SENSITIVE : ACPI_EDGE_SENSITIVE,
-			polarity ? ACPI_ACTIVE_LOW : ACPI_ACTIVE_HIGH);
+		xen_register_pirq(irq,
+			trigger ? ACPI_LEVEL_SENSITIVE : ACPI_EDGE_SENSITIVE);
 	}
 
 	xen_setup_acpi_sci();
