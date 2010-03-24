@@ -337,6 +337,13 @@ struct xenpf_cpu_ol {
 typedef struct xenpf_cpu_ol xenpf_cpu_ol_t;
 DEFINE_GUEST_HANDLE_STRUCT(xenpf_cpu_ol_t);
 
+#define XENPF_cpu_hotadd    58
+struct xenpf_cpu_hotadd {
+	uint32_t apic_id;
+	uint32_t acpi_id;
+	uint32_t pxm;
+};
+
 struct xen_platform_op {
 	uint32_t cmd;
 	uint32_t interface_version; /* XENPF_INTERFACE_VERSION */
@@ -354,6 +361,7 @@ struct xen_platform_op {
 		struct xenpf_set_processor_pminfo set_pminfo;
 		struct xenpf_pcpuinfo          pcpu_info;
 		struct xenpf_cpu_ol            cpu_ol;
+		struct xenpf_cpu_hotadd        cpu_add;
 		uint8_t                        pad[128];
 	} u;
 };

@@ -32,6 +32,7 @@
 #include <linux/cpufreq.h>
 #include <acpi/processor.h>
 #include <xen/acpi.h>
+#include <xen/pcpu.h>
 
 #include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
@@ -69,6 +70,49 @@ int processor_cntl_xen_power_cache(int cpu, int cx,
 }
 EXPORT_SYMBOL(processor_cntl_xen_power_cache);
 
+#ifdef CONFIG_ACPI_HOTPLUG_CPU
+static int xen_get_apic_id(acpi_handle handle)
+{
+	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
+	union acpi_object *obj;
+	struct acpi_madt_local_apic *lapic;
+	u8 physid;
+
+	if (ACPI_FAILURE(acpi_evaluate_object(handle, "_MAT", NULL, &buffer)))
+		return -EINVAL;
+
+	if (!buffer.length || !buffer.pointer)
+		return -EINVAL;
+
+	obj = buffer.pointer;
+	if (obj->type != ACPI_TYPE_BUFFER ||
+	    obj->buffer.length < sizeof(*lapic)) {
+		kfree(buffer.pointer);
+		return -EINVAL;
+	}
+
+	lapic = (struct acpi_madt_local_apic *)obj->buffer.pointer;
+
+	if (lapic->header.type != ACPI_MADT_TYPE_LOCAL_APIC ||
+	    !(lapic->lapic_flags & ACPI_MADT_ENABLED)) {
+		kfree(buffer.pointer);
+		return -EINVAL;
+	}
+
+	physid = lapic->id;
+	kfree(buffer.pointer);
+	buffer.length = ACPI_ALLOCATE_BUFFER;
+	buffer.pointer = NULL;
+
+	return physid;
+}
+#else
+static int xen_get_apic_id(acpi_handle handle)
+{
+	return -1;
+}
+#endif
+
 int processor_cntl_xen_notify(struct acpi_processor *pr, int event, int type)
 {
 	int ret = -EINVAL;
@@ -83,9 +127,17 @@ int processor_cntl_xen_notify(struct acpi_processor *pr, int event, int type)
 		ret = xen_ops.pm_ops[type](pr, event);
 		break;
 	case PROCESSOR_HOTPLUG:
+	{
+		int apic_id;
+
+		apic_id = xen_get_apic_id(pr->handle);
+		if (apic_id < 0)
+			break;
 		if (xen_ops.hotplug)
 			ret = xen_ops.hotplug(pr, type);
+		xen_pcpu_hotplug(type, apic_id);
 		break;
+	}
 	default:
 		printk(KERN_ERR "Unsupport processor events %d.\n", event);
 		break;
@@ -290,10 +342,56 @@ static int xen_tx_notifier(struct acpi_processor *pr, int action)
 {
 	return -EINVAL;
 }
+
+#ifdef CONFIG_ACPI_HOTPLUG_CPU
 static int xen_hotplug_notifier(struct acpi_processor *pr, int event)
 {
-	return -EINVAL;
+	int ret = -EINVAL;
+	uint32_t apic_id;
+	unsigned long long pxm;
+	acpi_status status = 0;
+
+	xen_platform_op_t op = {
+		.interface_version  = XENPF_INTERFACE_VERSION,
+	};
+
+	apic_id = xen_get_apic_id(pr->handle);
+	if (apic_id < 0) {
+		printk(KERN_WARNING "Can't get apic_id for acpi_id %x\n",
+		  pr->acpi_id);
+		return -1;
+	}
+
+	status = acpi_evaluate_integer(pr->handle, "_PXM",
+	  NULL, &pxm);
+	if (ACPI_FAILURE(status)) {
+		printk(KERN_WARNING "can't get pxm for acpi_id %x\n",
+		  pr->acpi_id);
+		return -1;
+	}
+
+	switch (event) {
+	case HOTPLUG_TYPE_ADD:
+		op.cmd = XENPF_cpu_hotadd;
+		op.u.cpu_add.apic_id = apic_id;
+		op.u.cpu_add.acpi_id = pr->acpi_id;
+		op.u.cpu_add.pxm = pxm;
+		ret = HYPERVISOR_dom0_op(&op);
+		break;
+	case HOTPLUG_TYPE_REMOVE:
+		printk(KERN_WARNING "Xen not support CPU hotremove\n");
+		ret = -ENOSYS;
+		break;
+	}
+
+	return ret;
 }
+#else
+static int xen_hotplug_notifier(struct acpi_processor *pr, int event)
+{
+	return -ENOSYS;
+}
+#endif
 
 static int __init xen_acpi_processor_extcntl_init(void)
 {
