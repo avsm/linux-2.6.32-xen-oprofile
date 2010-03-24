@@ -19,6 +19,8 @@
 
 #include <asm/io.h>
 
+#include <xen/acpi.h>
+
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
 
@@ -211,6 +213,21 @@ static int acpi_suspend_begin(suspend_state_t pm_state)
 	return error;
 }
 
+static void do_suspend(void)
+{
+	if (!xen_pv_acpi()) {
+		do_suspend_lowlevel();
+		return;
+	}
+
+	/*
+	 * Xen will save and restore CPU context, so
+	 * we can skip that and just go straight to
+	 * the suspend.
+	 */
+	acpi_enter_sleep_state(ACPI_STATE_S3);
+}
+
 /**
  *	acpi_suspend_enter - Actually enter a sleep state.
  *	@pm_state: ignored
@@ -244,7 +261,7 @@ static int acpi_suspend_enter(suspend_state_t pm_state)
 		break;
 
 	case ACPI_STATE_S3:
-		do_suspend_lowlevel();
+		do_suspend();
 		break;
 	}
 
