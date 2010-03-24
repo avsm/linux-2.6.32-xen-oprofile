@@ -154,4 +154,24 @@ static inline void unregister_hotplug_dock_device(acpi_handle handle)
 }
 #endif
 
+/*--------------------------------------------------------------------------
+				Memory
+  -------------------------------------------------------------------------- */
+#if defined(CONFIG_ACPI_HOTPLUG_MEMORY) || (CONFIG_ACPI_HOTPLUG_MEMORY_MODULE)
+struct acpi_memory_info {
+	struct list_head list;
+	u64 start_addr;		/* Memory Range start physical addr */
+	u64 length;		/* Memory Range length */
+	unsigned short caching;	/* memory cache attribute */
+	unsigned short write_protect;	/* memory read/write attribute */
+	unsigned int enabled:1;
+};
+
+struct acpi_memory_device {
+	struct acpi_device *device;
+	unsigned int state;	/* State of the memory device */
+	struct list_head res_list;
+};
+#endif
+
 #endif /*__ACPI_DRIVERS_H__*/

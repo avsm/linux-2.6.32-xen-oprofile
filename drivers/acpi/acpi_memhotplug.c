@@ -70,21 +70,6 @@ static struct acpi_driver acpi_memory_device_driver = {
 		},
 };
 
-struct acpi_memory_info {
-	struct list_head list;
-	u64 start_addr;		/* Memory Range start physical addr */
-	u64 length;		/* Memory Range length */
-	unsigned short caching;	/* memory cache attribute */
-	unsigned short write_protect;	/* memory read/write attribute */
-	unsigned int enabled:1;
-};
-
-struct acpi_memory_device {
-	struct acpi_device * device;
-	unsigned int state;	/* State of the memory device */
-	struct list_head res_list;
-};
-
 static int acpi_hotmem_initialized;
 
 static acpi_status
