@@ -31,6 +31,7 @@
 #include <linux/types.h>
 #include <linux/memory_hotplug.h>
 #include <acpi/acpi_drivers.h>
+#include <xen/acpi.h>
 
 #define ACPI_MEMORY_DEVICE_CLASS		"memory"
 #define ACPI_MEMORY_DEVICE_HID			"PNP0C80"
@@ -68,21 +69,6 @@ static struct acpi_driver acpi_memory_device_driver = {
 		.add = acpi_memory_device_add,
 		.remove = acpi_memory_device_remove,
 		},
-};
-
-struct acpi_memory_info {
-	struct list_head list;
-	u64 start_addr;		/* Memory Range start physical addr */
-	u64 length;		/* Memory Range length */
-	unsigned short caching;	/* memory cache attribute */
-	unsigned short write_protect;	/* memory read/write attribute */
-	unsigned int enabled:1;
-};
-
-struct acpi_memory_device {
-	struct acpi_device * device;
-	unsigned int state;	/* State of the memory device */
-	struct list_head res_list;
 };
 
 static int acpi_hotmem_initialized;
@@ -227,6 +213,9 @@ static int acpi_memory_enable_device(struct acpi_memory_device *mem_device)
 		mem_device->state = MEMORY_INVALID_STATE;
 		return result;
 	}
+
+	if (xen_initial_domain())
+		return xen_hotadd_memory(mem_device);
 
 	node = acpi_get_node(mem_device->device->handle);
 	/*

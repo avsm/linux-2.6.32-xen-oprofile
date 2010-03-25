@@ -58,6 +58,7 @@
 #include <acpi/acpi_bus.h>
 #include <acpi/acpi_drivers.h>
 #include <acpi/processor.h>
+#include <xen/acpi.h>
 
 #define PREFIX "ACPI: "
 
@@ -81,11 +82,9 @@ MODULE_DESCRIPTION("ACPI Processor Driver");
 MODULE_LICENSE("GPL");
 
 static int acpi_processor_add(struct acpi_device *device);
-static int acpi_processor_remove(struct acpi_device *device, int type);
 #ifdef CONFIG_ACPI_PROCFS
 static int acpi_processor_info_open_fs(struct inode *inode, struct file *file);
 #endif
-static void acpi_processor_notify(struct acpi_device *device, u32 event);
 static acpi_status acpi_processor_hotadd_init(acpi_handle handle, int *p_cpu);
 static int acpi_processor_handle_eject(struct acpi_processor *pr);
 
@@ -253,7 +252,7 @@ static int acpi_processor_errata_piix4(struct pci_dev *dev)
 	return 0;
 }
 
-static int acpi_processor_errata(struct acpi_processor *pr)
+int acpi_processor_errata(struct acpi_processor *pr)
 {
 	int result = 0;
 	struct pci_dev *dev = NULL;
@@ -284,7 +283,7 @@ static int acpi_processor_errata(struct acpi_processor *pr)
  * _PDC is required for a BIOS-OS handshake for most of the newer
  * ACPI processor features.
  */
-static int acpi_processor_set_pdc(struct acpi_processor *pr)
+int acpi_processor_set_pdc(struct acpi_processor *pr)
 {
 	struct acpi_object_list *pdc_in = pr->pdc;
 	acpi_status status = AE_OK;
@@ -353,7 +352,7 @@ static int acpi_processor_info_open_fs(struct inode *inode, struct file *file)
 			   PDE(inode)->data);
 }
 
-static int acpi_processor_add_fs(struct acpi_device *device)
+int acpi_processor_add_fs(struct acpi_device *device)
 {
 	struct proc_dir_entry *entry = NULL;
 
@@ -392,7 +391,7 @@ static int acpi_processor_add_fs(struct acpi_device *device)
 		return -EIO;
 	return 0;
 }
-static int acpi_processor_remove_fs(struct acpi_device *device)
+int acpi_processor_remove_fs(struct acpi_device *device)
 {
 
 	if (acpi_device_dir(device)) {
@@ -711,7 +710,7 @@ static int acpi_processor_get_info(struct acpi_device *device)
 
 static DEFINE_PER_CPU(void *, processor_device_array);
 
-static void acpi_processor_notify(struct acpi_device *device, u32 event)
+void acpi_processor_notify(struct acpi_device *device, u32 event)
 {
 	struct acpi_processor *pr = acpi_driver_data(device);
 	int saved;
@@ -879,7 +878,7 @@ err_free_cpumask:
 	return result;
 }
 
-static int acpi_processor_remove(struct acpi_device *device, int type)
+int acpi_processor_remove(struct acpi_device *device, int type)
 {
 	struct acpi_processor *pr = NULL;
 
@@ -1154,7 +1153,11 @@ static int __init acpi_processor_init(void)
 	if (result < 0)
 		goto out_proc;
 
-	result = acpi_bus_register_driver(&acpi_processor_driver);
+	if (xen_initial_domain())
+		result = xen_acpi_processor_init();
+	else
+		result = acpi_bus_register_driver(&acpi_processor_driver);
+
 	if (result < 0)
 		goto out_cpuidle;
 
@@ -1190,7 +1193,10 @@ static void __exit acpi_processor_exit(void)
 
 	acpi_processor_uninstall_hotplug_notify();
 
-	acpi_bus_unregister_driver(&acpi_processor_driver);
+	if (xen_initial_domain())
+		xen_acpi_processor_exit();
+	else
+		acpi_bus_unregister_driver(&acpi_processor_driver);
 
 	cpuidle_unregister_driver(&acpi_idle_driver);
 

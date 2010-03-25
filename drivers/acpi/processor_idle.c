@@ -58,6 +58,7 @@
 
 #include <acpi/acpi_bus.h>
 #include <acpi/processor.h>
+#include <xen/acpi.h>
 #include <asm/processor.h>
 
 #define PREFIX "ACPI: "
@@ -458,6 +459,9 @@ static int acpi_processor_get_power_info_cst(struct acpi_processor *pr)
 
 		cx.power = obj->integer.value;
 
+		/* cache control methods to notify xen*/
+		processor_cntl_xen_power_cache(pr->acpi_id, i, reg);
+
 		current_count++;
 		memcpy(&(pr->power.states[current_count]), &cx, sizeof(cx));
 
@@ -644,7 +648,7 @@ static int acpi_processor_power_verify(struct acpi_processor *pr)
 	return (working);
 }
 
-static int acpi_processor_get_power_info(struct acpi_processor *pr)
+int acpi_processor_get_power_info(struct acpi_processor *pr)
 {
 	unsigned int i;
 	int result;
@@ -1210,9 +1214,14 @@ int __cpuinit acpi_processor_power_init(struct acpi_processor *pr,
 	 * platforms that only support C1.
 	 */
 	if (pr->flags.power) {
-		acpi_processor_setup_cpuidle(pr);
-		if (cpuidle_register_device(&pr->power.dev))
-			return -EIO;
+		if (xen_initial_domain()) {
+			processor_cntl_xen_notify(pr,
+					PROCESSOR_PM_INIT, PM_TYPE_IDLE);
+		} else {
+			acpi_processor_setup_cpuidle(pr);
+			if (cpuidle_register_device(&pr->power.dev))
+				return -EIO;
+		}
 	}
 #ifdef CONFIG_ACPI_PROCFS
 	/* 'power' [R] */
