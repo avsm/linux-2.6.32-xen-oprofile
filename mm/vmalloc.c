@@ -558,12 +558,10 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	if (nr) {
 		BUG_ON(nr > atomic_read(&vmap_lazy_nr));
 		atomic_sub(nr, &vmap_lazy_nr);
-	}
 
-	if (nr || force_flush)
-		flush_tlb_kernel_range(*start, *end);
+		if (force_flush)
+			flush_tlb_kernel_range(*start, *end);
 
-	if (nr) {
 		spin_lock(&vmap_area_lock);
 		list_for_each_entry_safe(va, n_va, &valist, purge_list)
 			__free_vmap_area(va);
