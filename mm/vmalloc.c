@@ -528,6 +528,9 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	struct vmap_area *n_va;
 	int nr = 0;
 
+	if (atomic_read(&vmap_lazy_nr) == 0)
+		return;
+
 	/*
 	 * If sync is 0 but force_flush is 1, we'll go sync anyway but callers
 	 * should not expect such behaviour. This just simplifies locking for
