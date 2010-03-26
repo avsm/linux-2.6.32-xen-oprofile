@@ -31,6 +31,7 @@
 #include <asm/tlbflush.h>
 #include <asm/shmparam.h>
 
+bool vmap_lazy_unmap __read_mostly = true;
 
 /*** Page table manipulation functions ***/
 
@@ -502,6 +503,9 @@ static unsigned long lazy_max_pages(void)
 {
 	unsigned int log;
 
+	if (!vmap_lazy_unmap)
+		return 0;
+
 	log = fls(num_online_cpus());
 
 	return log * (32UL * 1024 * 1024 / PAGE_SIZE);
@@ -527,6 +531,9 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	struct vmap_area *va;
 	struct vmap_area *n_va;
 	int nr = 0;
+
+	if (atomic_read(&vmap_lazy_nr) == 0)
+		return;
 
 	/*
 	 * If sync is 0 but force_flush is 1, we'll go sync anyway but callers
@@ -558,12 +565,10 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	if (nr) {
 		BUG_ON(nr > atomic_read(&vmap_lazy_nr));
 		atomic_sub(nr, &vmap_lazy_nr);
-	}
 
-	if (nr || force_flush)
-		flush_tlb_kernel_range(*start, *end);
+		if (force_flush)
+			flush_tlb_kernel_range(*start, *end);
 
-	if (nr) {
 		spin_lock(&vmap_area_lock);
 		list_for_each_entry_safe(va, n_va, &valist, purge_list)
 			__free_vmap_area(va);
