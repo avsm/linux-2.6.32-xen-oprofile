@@ -11,6 +11,7 @@
 
 #include <acpi/processor.h>
 #include <asm/acpi.h>
+#include <asm/xen/hypervisor.h>
 
 static void init_intel_pdc(struct acpi_processor *pr, struct cpuinfo_x86 *c)
 {
@@ -87,6 +88,19 @@ void arch_acpi_processor_init_pdc(struct acpi_processor *pr)
 }
 
 EXPORT_SYMBOL(arch_acpi_processor_init_pdc);
+
+/* Initialize _PDC data based on the CPU vendor */
+void xen_arch_acpi_processor_init_pdc(struct acpi_processor *pr)
+{
+	struct cpuinfo_x86 *c = &cpu_data(0);
+
+	pr->pdc = NULL;
+	if (c->x86_vendor == X86_VENDOR_INTEL)
+		init_intel_pdc(pr, c);
+
+	return;
+}
+EXPORT_SYMBOL(xen_arch_acpi_processor_init_pdc);
 
 void arch_acpi_processor_cleanup_pdc(struct acpi_processor *pr)
 {

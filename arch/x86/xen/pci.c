@@ -60,9 +60,6 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 {
 	int rc, irq;
 	struct physdev_setup_gsi setup_gsi;
-	struct physdev_map_pirq map_irq;
-	int shareable = 0;
-	char *name;
 
 	if (!xen_domain())
 		return -1;

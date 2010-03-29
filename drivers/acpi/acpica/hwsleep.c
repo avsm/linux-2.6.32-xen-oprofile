@@ -47,6 +47,9 @@
 #include "actables.h"
 #include <linux/tboot.h>
 
+#include <xen/acpi.h>
+#include <asm/xen/hypervisor.h>
+
 #define _COMPONENT          ACPI_HARDWARE
 ACPI_MODULE_NAME("hwsleep")
 
@@ -346,6 +349,19 @@ acpi_status asmlinkage acpi_enter_sleep_state(u8 sleep_state)
 	tboot_sleep(sleep_state, pm1a_control, pm1b_control);
 
 	/* Write #2: Write both SLP_TYP + SLP_EN */
+	if (xen_pv_acpi()) {
+		int err;
+
+		err = acpi_notify_hypervisor_state(sleep_state,
+						   pm1a_control, pm1b_control);
+		if (err) {
+			ACPI_DEBUG_PRINT((ACPI_DB_INIT,
+					  "Hypervisor failure [%d]\n", err));
+			return_ACPI_STATUS(AE_ERROR);
+		}
+
+		return_ACPI_STATUS(AE_OK);
+	}
 
 	status = acpi_hw_write_pm1_control(pm1a_control, pm1b_control);
 	if (ACPI_FAILURE(status)) {

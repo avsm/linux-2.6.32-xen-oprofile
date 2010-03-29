@@ -12,6 +12,8 @@
 #include <asm/segment.h>
 #include <asm/desc.h>
 
+#include <xen/acpi.h>
+
 #include "realmode/wakeup.h"
 #include "sleep.h"
 
