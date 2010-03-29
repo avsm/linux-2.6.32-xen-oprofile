@@ -476,23 +476,16 @@ static int xenbus_probe_device_type(struct xen_bus_type *bus, const char *type)
 	unsigned int dir_n = 0;
 	int i;
 
-	printk(KERN_CRIT "%s type %s\n", __func__, type);
-
 	dir = xenbus_directory(XBT_NIL, bus->root, type, &dir_n);
-	if (IS_ERR(dir)) {
-		printk(KERN_CRIT "%s failed xenbus_directory\n", __func__);
+	if (IS_ERR(dir))
 		return PTR_ERR(dir);
-	}
 
 	for (i = 0; i < dir_n; i++) {
-		printk(KERN_CRIT "%s %d/%d %s\n", __func__, i+1,dir_n, dir[i]);
 		err = bus->probe(bus, type, dir[i]);
-		if (err) {
-			printk(KERN_CRIT "%s failed\n", __func__);
+		if (err)
 			break;
-		}
 	}
-	printk("%s done\n", __func__);
+
 	kfree(dir);
 	return err;
 }
@@ -503,23 +496,16 @@ int xenbus_probe_devices(struct xen_bus_type *bus)
 	char **dir;
 	unsigned int i, dir_n;
 
-	printk(KERN_CRIT "%s %s\n", __func__, bus->root);
-
 	dir = xenbus_directory(XBT_NIL, bus->root, "", &dir_n);
-	if (IS_ERR(dir)) {
-		printk(KERN_CRIT "%s failed xenbus_directory\n", __func__);
+	if (IS_ERR(dir))
 		return PTR_ERR(dir);
-	}
 
 	for (i = 0; i < dir_n; i++) {
-		printk(KERN_CRIT "%s %d/%d %s\n", __func__, i+1,dir_n, dir[i]);
 		err = xenbus_probe_device_type(bus, dir[i]);
-		if (err) {
-			printk(KERN_CRIT "%s failed\n", __func__);
+		if (err)
 			break;
-		}
 	}
-	printk("%s done\n", __func__);
+
 	kfree(dir);
 	return err;
 }
@@ -676,8 +662,6 @@ void xenbus_probe(struct work_struct *unused)
 {
 	BUG_ON((xenstored_ready <= 0));
 
-	printk(KERN_CRIT "xenbus_probe wake_waiting\n");
-
 	/* Notify others that xenstore is up */
 	blocking_notifier_call_chain(&xenstore_chain, 0, NULL);
 }
@@ -748,14 +732,12 @@ static int __init xenbus_probe_init(void)
 	proc_mkdir("xen", NULL);
 #endif
 
-	printk(KERN_CRIT "%s ok\n", __func__);
 	return 0;
 
   out_error:
 	if (page != 0)
 		free_page(page);
 
-	printk(KERN_CRIT "err %d in %s\n", err, __func__);
 	return err;
 }
 
