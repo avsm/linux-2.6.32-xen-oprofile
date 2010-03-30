@@ -647,7 +647,7 @@ void xen_set_pat(u64 pat)
 {
 	/* We expect Linux to use a PAT setting of
 	 * UC UC- WC WB (ignoring the PAT flag) */
-	WARN_ON(pat != 0x0007010600070106);
+	WARN_ON(pat != 0x0007010600070106ull);
 }
 
 pte_t xen_make_pte(pteval_t pte)
