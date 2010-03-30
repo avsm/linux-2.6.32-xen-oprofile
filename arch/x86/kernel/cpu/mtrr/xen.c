@@ -1,6 +1,8 @@
 #include <linux/init.h>
 #include <linux/mm.h>
 #
+#include <asm/pat.h>
+
 #include "mtrr.h"
 
 #include <xen/xen.h>
@@ -100,6 +102,8 @@ void __init xen_init_mtrr(void)
 	if (cpu_has_mtrr ||
 	    cpu_has_k6_mtrr ||
 	    cpu_has_cyrix_arr ||
-	    cpu_has_centaur_mcr)
+	    cpu_has_centaur_mcr) {
 		mtrr_if = &xen_mtrr_ops;
+		pat_init();
+	}
 }
