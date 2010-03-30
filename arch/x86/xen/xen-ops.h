@@ -31,6 +31,8 @@ void xen_ident_map_ISA(void);
 void xen_reserve_top(void);
 void xen_ident_map_ISA(void);
 
+void xen_set_pat(u64);
+
 void xen_post_allocator_init(void);
 
 char * __init xen_memory_setup(void);
