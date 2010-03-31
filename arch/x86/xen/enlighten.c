@@ -230,7 +230,6 @@ static __init void xen_init_cpuid_mask(void)
 	cpuid_leaf1_edx_mask =
 		~((1 << X86_FEATURE_MCE)  |  /* disable MCE */
 		  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
-		  (1 << X86_FEATURE_PAT)  |  /* disable PAT */
 		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
 
 	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
@@ -835,6 +834,11 @@ static int xen_write_msr_safe(unsigned int msr, unsigned low, unsigned high)
 		/* Fast syscall setup is all done in hypercalls, so
 		   these are all ignored.  Stub them out here to stop
 		   Xen console noise. */
+		break;
+
+	case MSR_IA32_CR_PAT:
+		if (smp_processor_id() == 0)
+			xen_set_pat(((u64)high << 32) | low);
 		break;
 
 	default:
