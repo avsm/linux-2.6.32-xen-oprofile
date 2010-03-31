@@ -568,7 +568,7 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	}
 	rcu_read_unlock();
 
-	if (nr)
+	if (nr) {
 		atomic_sub(nr, &vmap_lazy_nr);
 
 		if (force_flush)
