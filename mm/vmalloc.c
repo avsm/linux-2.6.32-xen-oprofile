@@ -532,9 +532,6 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	struct vmap_area *n_va;
 	int nr = 0;
 
-	if (atomic_read(&vmap_lazy_nr) == 0)
-		return;
-
 	/*
 	 * If sync is 0 but force_flush is 1, we'll go sync anyway but callers
 	 * should not expect such behaviour. This just simplifies locking for
@@ -565,10 +562,12 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 	if (nr) {
 		BUG_ON(nr > atomic_read(&vmap_lazy_nr));
 		atomic_sub(nr, &vmap_lazy_nr);
+	}
 
-		if (force_flush)
-			flush_tlb_kernel_range(*start, *end);
+	if (nr || force_flush)
+		flush_tlb_kernel_range(*start, *end);
 
+	if (nr) {
 		spin_lock(&vmap_area_lock);
 		list_for_each_entry_safe(va, n_va, &valist, purge_list)
 			__free_vmap_area(va);
