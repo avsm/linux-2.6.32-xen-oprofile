@@ -1038,6 +1038,70 @@ static ssize_t pcistub_slot_show(struct device_driver *drv, char *buf)
 
 DRIVER_ATTR(slots, S_IRUSR, pcistub_slot_show, NULL);
 
+static ssize_t pcistub_irq_handler_show(struct device_driver *drv, char *buf)
+{
+	struct pcistub_device *psdev;
+	struct pciback_dev_data *dev_data;
+	size_t count = 0;
+	unsigned long flags;
+
+	spin_lock_irqsave(&pcistub_devices_lock, flags);
+	list_for_each_entry(psdev, &pcistub_devices, dev_list) {
+		if (count >= PAGE_SIZE)
+			break;
+		if (!psdev->dev)
+			continue;
+		dev_data = pci_get_drvdata(psdev->dev);
+		if (!dev_data)
+			continue;
+		count +=
+		    scnprintf(buf + count, PAGE_SIZE - count, "%s:%s:%sing\n",
+			      pci_name(psdev->dev),
+			      dev_data->isr_on ? "on" : "off",
+			      dev_data->ack_intr ? "ack" : "not ack");
+	}
+	spin_unlock_irqrestore(&pcistub_devices_lock, flags);
+	return count;
+}
+
+DRIVER_ATTR(irq_handlers, S_IRUSR, pcistub_irq_handler_show, NULL);
+
+static ssize_t pcistub_irq_handler_switch(struct device_driver *drv,
+					  const char *buf,
+					  size_t count)
+{
+	struct pcistub_device *psdev;
+	struct pciback_dev_data *dev_data;
+	int domain, bus, slot, func;
+	int err = -ENOENT;
+
+	err = str_to_slot(buf, &domain, &bus, &slot, &func);
+	if (err)
+		goto out;
+
+	psdev = pcistub_device_find(domain, bus, slot, func);
+
+	if (!psdev)
+		goto out;
+
+	dev_data = pci_get_drvdata(psdev->dev);
+	if (!dev_data)
+		goto out;
+
+	dev_dbg(&psdev->dev->dev, "%s fake irq handler: %d->%d\n",
+		dev_data->irq_name, dev_data->isr_on,
+		!dev_data->isr_on);
+
+	dev_data->isr_on = !(dev_data->isr_on);
+	if (dev_data->isr_on)
+		dev_data->ack_intr = 1;
+out:
+	if (!err)
+		err = count;
+	return err;
+}
+DRIVER_ATTR(irq_handler_state, S_IWUSR, NULL, pcistub_irq_handler_switch);
+
 static ssize_t pcistub_quirk_add(struct device_driver *drv, const char *buf,
 				 size_t count)
 {
@@ -1177,7 +1241,10 @@ static void pcistub_exit(void)
 	driver_remove_file(&pciback_pci_driver.driver, &driver_attr_slots);
 	driver_remove_file(&pciback_pci_driver.driver, &driver_attr_quirks);
 	driver_remove_file(&pciback_pci_driver.driver, &driver_attr_permissive);
-
+	driver_remove_file(&pciback_pci_driver.driver,
+			   &driver_attr_irq_handlers);
+	driver_remove_file(&pciback_pci_driver.driver,
+			   &driver_attr_irq_handler_state);
 	pci_unregister_driver(&pciback_pci_driver);
 }
 
@@ -1236,6 +1303,12 @@ static int __init pcistub_init(void)
 		err = driver_create_file(&pciback_pci_driver.driver,
 					 &driver_attr_permissive);
 
+	if (!err)
+		err = driver_create_file(&pciback_pci_driver.driver,
+					 &driver_attr_irq_handlers);
+	if (!err)
+		err = driver_create_file(&pciback_pci_driver.driver,
+					&driver_attr_irq_handler_state);
 	if (err)
 		pcistub_exit();
 
