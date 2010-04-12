@@ -21,6 +21,8 @@
 #include "conf_space.h"
 #include "conf_space_quirks.h"
 
+#define DRV_NAME	"pciback"
+
 static char *pci_devs_to_hide;
 wait_queue_head_t aer_wait_queue;
 /*Add sem for sync AER handling and pciback remove/reconfigue ops,
@@ -290,12 +292,19 @@ static int __devinit pcistub_init_device(struct pci_dev *dev)
 	 * would need to be called somewhere to free the memory allocated
 	 * here and then to call kfree(pci_get_drvdata(psdev->dev)).
 	 */
-	dev_data = kzalloc(sizeof(*dev_data), GFP_ATOMIC);
+	dev_data = kzalloc(sizeof(*dev_data) +  strlen(DRV_NAME "[]")
+				+ strlen(pci_name(dev)) + 1, GFP_ATOMIC);
 	if (!dev_data) {
 		err = -ENOMEM;
 		goto out;
 	}
 	pci_set_drvdata(dev, dev_data);
+
+	/*
+	 * Setup name for fake IRQ handler. It will only be enabled
+	 * once the device is turned on by the guest.
+	 */
+	sprintf(dev_data->irq_name, DRV_NAME "[%s]", pci_name(dev));
 
 	dev_dbg(&dev->dev, "initializing config\n");
 
@@ -837,7 +846,7 @@ static struct pci_error_handlers pciback_error_handler = {
  */
 
 static struct pci_driver pciback_pci_driver = {
-	.name = "pciback",
+	.name = DRV_NAME,
 	.id_table = pcistub_ids,
 	.probe = pcistub_probe,
 	.remove = pcistub_remove,
