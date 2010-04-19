@@ -72,6 +72,7 @@ static int convert_log(struct mc_info *mi)
 	m.socketid = g_physinfo[i].mc_chipid;
 	m.cpu = m.extcpu = g_physinfo[i].mc_cpunr;
 	m.cpuvendor = (__u8)g_physinfo[i].mc_vendor;
+	m.mcgcap = g_physinfo[i].mc_msrvalues[0].value;
 	x86_mcinfo_lookup(&mic, mi, MC_TYPE_BANK);
 	do {
 		if (mic == NULL || mic->size == 0)
@@ -83,6 +84,7 @@ static int convert_log(struct mc_info *mi)
 			m.addr = mc_bank->mc_addr;
 			m.tsc = mc_bank->mc_tsc;
 			m.bank = mc_bank->mc_bank;
+			m.finished = 1;
 			/*log this record*/
 			mce_log(&m);
 		}
