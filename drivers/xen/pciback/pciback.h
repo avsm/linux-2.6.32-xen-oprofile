@@ -50,6 +50,7 @@ struct pciback_dev_data {
 	unsigned int enable_intx : 1;
 	unsigned int isr_on : 1; /* Whether the IRQ handler is installed. */ 
 	unsigned int ack_intr : 1; /* .. and ACK-ing */
+	unsigned long handled;
 	unsigned int irq; /* Saved in case device transitions to MSI/MSI-X */
 	char irq_name[0]; /* pciback[000:04:00.0] */
 };

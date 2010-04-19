@@ -226,7 +226,17 @@ irqreturn_t pciback_guest_interrupt(int irq, void *dev_id)
 	struct pci_dev *dev = (struct pci_dev *)dev_id;
 	struct pciback_dev_data *dev_data = pci_get_drvdata(dev);
 
-	if (dev_data->isr_on && dev_data->ack_intr)
+	if (dev_data->isr_on && dev_data->ack_intr) {
+		dev_data->handled++;
+		if ((dev_data->handled % 1000) == 0) {
+			if (xen_ignore_irq(irq)) {
+				printk(KERN_INFO "%s IRQ line is not shared "
+					"with other domains. Turning ISR off\n",
+					 dev_data->irq_name);
+				dev_data->ack_intr = 0;
+			}
+		}
 		return IRQ_HANDLED;
+	}
 	return IRQ_NONE;
 }

@@ -1055,10 +1055,11 @@ static ssize_t pcistub_irq_handler_show(struct device_driver *drv, char *buf)
 		if (!dev_data)
 			continue;
 		count +=
-		    scnprintf(buf + count, PAGE_SIZE - count, "%s:%s:%sing\n",
+		    scnprintf(buf + count, PAGE_SIZE - count, "%s:%s:%sing:%ld\n",
 			      pci_name(psdev->dev),
 			      dev_data->isr_on ? "on" : "off",
-			      dev_data->ack_intr ? "ack" : "not ack");
+			      dev_data->ack_intr ? "ack" : "not ack",
+			      dev_data->handled);
 	}
 	spin_unlock_irqrestore(&pcistub_devices_lock, flags);
 	return count;
