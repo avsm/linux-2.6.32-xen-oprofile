@@ -11,7 +11,8 @@
 
 #include <acpi/processor.h>
 #include <asm/acpi.h>
-#include <asm/xen/hypervisor.h>
+
+#include <xen/xen.h>
 
 static void init_intel_pdc(struct acpi_processor *pr, struct cpuinfo_x86 *c)
 {
@@ -60,7 +61,7 @@ static void init_intel_pdc(struct acpi_processor *pr, struct cpuinfo_x86 *c)
 	/*
 	 * If mwait/monitor is unsupported, C2/C3_FFH will be disabled
 	 */
-	if (!cpu_has(c, X86_FEATURE_MWAIT))
+	if (!cpu_has(c, X86_FEATURE_MWAIT) && !xen_initial_domain())
 		buf[2] &= ~(ACPI_PDC_C_C2C3_FFH);
 
 	obj->type = ACPI_TYPE_BUFFER;

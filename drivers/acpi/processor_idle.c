@@ -440,7 +440,8 @@ static int acpi_processor_get_power_info_cst(struct acpi_processor *pr)
 				cx.entry_method = ACPI_CSTATE_HALT;
 				snprintf(cx.desc, ACPI_CX_DESC_LEN, "ACPI HLT");
 			} else {
-				continue;
+				if (!xen_initial_domain())
+					continue;
 			}
 			if (cx.type == ACPI_STATE_C1 &&
 					(idle_halt || idle_nomwait)) {

@@ -41,7 +41,7 @@ int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (xen_initial_domain())
 		return xen_setup_msi_irqs(dev, nvec, type);
 
-	v = kzalloc(sizeof(int) * min(1, nvec), GFP_KERNEL);
+	v = kzalloc(sizeof(int) * max(1, nvec), GFP_KERNEL);
 	if (!v)
 		return -ENOMEM;
 
