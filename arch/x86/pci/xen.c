@@ -57,6 +57,7 @@ int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 		ret = set_irq_msi(irq, msidesc);
 		if (ret)
 			goto error_while;
+		i++;
 	}
 	kfree(v);
 	return 0;
