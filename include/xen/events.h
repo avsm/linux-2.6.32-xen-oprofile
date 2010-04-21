@@ -90,4 +90,7 @@ static inline void xen_setup_pirqs(void)
 }
 #endif
 
+/* Determine whether to ignore this IRQ if passed to a guest. */
+int xen_ignore_irq(int irq);
+
 #endif	/* _XEN_EVENTS_H */

@@ -1301,6 +1301,19 @@ void xen_poll_irq(int irq)
 	xen_poll_irq_timeout(irq, 0 /* no timeout */);
 }
 
+/* Check whether the IRQ line is shared with other guests. */
+int xen_ignore_irq(int irq)
+{
+	struct irq_info *info = info_for_irq(irq);
+	struct physdev_irq_status_query irq_status = { .irq =
+							info->u.pirq.gsi };
+
+	if (HYPERVISOR_physdev_op(PHYSDEVOP_irq_status_query, &irq_status))
+		return 0;
+	return !(irq_status.flags & XENIRQSTAT_shared);
+}
+EXPORT_SYMBOL_GPL(xen_ignore_irq);
+
 void xen_irq_resume(void)
 {
 	unsigned int cpu, irq, evtchn;
