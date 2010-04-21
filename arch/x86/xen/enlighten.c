@@ -228,15 +228,15 @@ static __init void xen_init_cpuid_mask(void)
 	unsigned int ax, bx, cx, dx;
 
 	cpuid_leaf1_edx_mask =
-		~((1 << X86_FEATURE_MCE)  |  /* disable MCE */
-		  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
-		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
+		~(1 << X86_FEATURE_ACC);   /* thermal monitoring */
 
 	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
 
 	if (!xen_initial_domain())
 		cpuid_leaf1_edx_mask &=
-			~((1 << X86_FEATURE_APIC) |  /* disable local APIC */
+			~((1 << X86_FEATURE_MCE)  |  /* disable MCE */
+			  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
+			  (1 << X86_FEATURE_APIC) |  /* disable local APIC */
 			  (1 << X86_FEATURE_ACPI));  /* disable ACPI */
 
 	ax = 1;
@@ -532,7 +532,8 @@ static int cvt_gate_to_trap(int vector, const gate_desc *val,
 		return 0;
 #ifdef CONFIG_X86_MCE
 	} else if (addr == (unsigned long)machine_check) {
-		return 0;
+		/* We can use the original machine_check handler,
+		   despite IST. */
 #endif
 	} else if (WARN(val->ist != 0,
 			"Unknown IST-using trap: vector %d, %pF, val->ist=%d\n",
