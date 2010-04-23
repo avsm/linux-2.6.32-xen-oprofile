@@ -35,6 +35,7 @@
 #include <asm/xen/hypercall.h>
 #include <asm/xen/hypervisor.h>
 
+#include <xen/hvm.h>
 #include <xen/xen-ops.h>
 #include <xen/events.h>
 #include <xen/interface/xen.h>
@@ -613,16 +614,12 @@ static DEFINE_PER_CPU(unsigned, xed_nesting_count);
  * a bitset of words which contain pending event bits.  The second
  * level is a bitset of pending events themselves.
  */
-void xen_evtchn_do_upcall(struct pt_regs *regs)
+void __xen_evtchn_do_upcall(struct pt_regs *regs)
 {
 	int cpu = get_cpu();
-	struct pt_regs *old_regs = set_irq_regs(regs);
 	struct shared_info *s = HYPERVISOR_shared_info;
 	struct vcpu_info *vcpu_info = __get_cpu_var(xen_vcpu);
  	unsigned count;
-
-	exit_idle();
-	irq_enter();
 
 	do {
 		unsigned long pending_words;
@@ -659,10 +656,26 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 	} while(count != 1);
 
 out:
-	irq_exit();
-	set_irq_regs(old_regs);
 
 	put_cpu();
+}
+
+void xen_evtchn_do_upcall(struct pt_regs *regs)
+{
+	struct pt_regs *old_regs = set_irq_regs(regs);
+
+	exit_idle();
+	irq_enter();
+
+	__xen_evtchn_do_upcall(regs);
+
+	irq_exit();
+	set_irq_regs(old_regs);
+}
+
+void xen_hvm_evtchn_do_upcall(struct pt_regs *regs)
+{
+	__xen_evtchn_do_upcall(regs);
 }
 
 /* Rebind a new event channel to an existing irq. */
@@ -939,5 +952,8 @@ void __init xen_init_IRQ(void)
 	for (i = 0; i < NR_EVENT_CHANNELS; i++)
 		mask_evtchn(i);
 
-	irq_ctx_init(smp_processor_id());
+	if (xen_hvm_domain())
+		native_init_IRQ();
+	else
+		irq_ctx_init(smp_processor_id());
 }
