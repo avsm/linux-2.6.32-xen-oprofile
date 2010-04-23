@@ -252,6 +252,33 @@ static int frontend_probe_and_watch(struct notifier_block *notifier,
 	return NOTIFY_DONE;
 }
 
+static int dev_suspend(struct device *dev, void *data)
+{
+	return xenbus_dev_suspend(dev, PMSG_SUSPEND);
+}
+
+static int dev_resume(struct device *dev, void *data)
+{
+	return xenbus_dev_resume(dev);
+}
+
+void xenbus_suspend(void)
+{
+	DPRINTK("");
+
+	bus_for_each_dev(&xenbus_frontend.bus, NULL, NULL, dev_suspend);
+	xs_suspend();
+}
+EXPORT_SYMBOL_GPL(xenbus_suspend);
+
+void xenbus_resume(void)
+{
+	DPRINTK("");
+
+	xs_resume();
+	bus_for_each_dev(&xenbus_frontend.bus, NULL, NULL, dev_resume);
+}
+EXPORT_SYMBOL_GPL(xenbus_resume);
 
 static int __init xenbus_probe_frontend_init(void)
 {
