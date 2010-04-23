@@ -743,6 +743,35 @@ static int xenbus_dev_resume(struct device *dev)
 	return 0;
 }
 
+static int dev_suspend(struct device *dev, void *data)
+{
+	return xenbus_dev_suspend(dev, PMSG_SUSPEND);
+}
+
+void xenbus_suspend(void)
+{
+	DPRINTK("");
+
+	bus_for_each_dev(&xenbus_frontend.bus, NULL, NULL, dev_suspend);
+	xs_suspend();
+}
+EXPORT_SYMBOL_GPL(xenbus_suspend);
+
+static int dev_resume(struct device *dev, void *data)
+{
+	return xenbus_dev_resume(dev);
+}
+
+void xenbus_resume(void)
+{
+	DPRINTK("");
+
+	xs_resume();
+	bus_for_each_dev(&xenbus_frontend.bus, NULL, NULL, dev_resume);
+}
+EXPORT_SYMBOL_GPL(xenbus_resume);
+
+
 /* A flag to determine if xenstored is 'ready' (i.e. has started) */
 int xenstored_ready = 0;
 

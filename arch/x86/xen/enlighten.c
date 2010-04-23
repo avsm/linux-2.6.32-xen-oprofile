@@ -1248,12 +1248,13 @@ static int init_hvm_pv_info(int *major, int *minor)
 	return 0;
 }
 
-static void __init init_shared_info(void)
+static void init_shared_info(void)
 {
 	struct xen_add_to_physmap xatp;
-	struct shared_info *shared_info_page;
+	static struct shared_info *shared_info_page = 0;
 
-	shared_info_page = (struct shared_info *) alloc_bootmem_pages(PAGE_SIZE);
+	if (!shared_info_page)
+		shared_info_page = (struct shared_info *) alloc_bootmem_pages(PAGE_SIZE);
 	xatp.domid = DOMID_SELF;
 	xatp.idx = 0;
 	xatp.space = XENMAPSPACE_shared_info;
@@ -1283,7 +1284,7 @@ void do_hvm_pv_evtchn_intr(void)
 	xen_hvm_evtchn_do_upcall(get_irq_regs());
 }
 
-void __init xen_guest_init(void)
+void xen_guest_init(void)
 {
 	int r;
 	int major, minor;

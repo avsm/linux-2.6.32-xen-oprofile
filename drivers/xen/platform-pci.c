@@ -33,6 +33,7 @@
 #include <xen/xenbus.h>
 #include <xen/events.h>
 #include <xen/hvm.h>
+#include <xen/xen-ops.h>
 
 #define DRV_NAME    "xen-platform-pci"
 
@@ -43,6 +44,8 @@ MODULE_LICENSE("GPL");
 static unsigned long platform_mmio;
 static unsigned long platform_mmio_alloc;
 static unsigned long platform_mmiolen;
+static uint64_t callback_via;
+struct pci_dev *xen_platform_pdev;
 
 unsigned long alloc_xen_mmio(unsigned long len)
 {
@@ -88,13 +91,33 @@ static int xen_allocate_irq(struct pci_dev *pdev)
 			"xen-platform-pci", pdev);
 }
 
+void platform_pci_disable_irq(void)
+{
+	printk(KERN_DEBUG "platform_pci_disable_irq\n");
+	disable_irq(xen_platform_pdev->irq);
+}
+
+void platform_pci_enable_irq(void)
+{
+	printk(KERN_DEBUG "platform_pci_enable_irq\n");
+	enable_irq(xen_platform_pdev->irq);
+}
+
+void platform_pci_resume(void)
+{
+	if (xen_set_callback_via(callback_via)) {
+		printk("platform_pci_resume failure!\n");
+		return;
+	}
+}
+
 static int __devinit platform_pci_init(struct pci_dev *pdev,
 				       const struct pci_device_id *ent)
 {
 	int i, ret;
 	long ioaddr, iolen;
 	long mmio_addr, mmio_len;
-	uint64_t callback_via;
+	xen_platform_pdev = pdev;
 
 	i = pci_enable_device(pdev);
 	if (i)
@@ -147,6 +170,10 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 	ret = xenbus_probe_init();
 	if (ret)
 		goto out;
+	ret = xen_setup_shutdown_event();
+	if (ret)
+		goto out;
+
 
 out:
 	if (ret) {

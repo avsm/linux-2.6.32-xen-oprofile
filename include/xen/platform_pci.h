@@ -31,11 +31,17 @@
 
 #ifdef CONFIG_XEN_PLATFORM_PCI
 unsigned long alloc_xen_mmio(unsigned long len);
+void platform_pci_resume(void);
+void platform_pci_disable_irq(void);
+void platform_pci_enable_irq(void);
 #else
 static inline unsigned long alloc_xen_mmio(unsigned long len)
 {
 	return ~0UL;
 }
+static inline void platform_pci_resume(void) {}
+static inline void platform_pci_disable_irq(void) {}
+static inline void platform_pci_enable_irq(void) {}
 #endif
 
 #endif /* _XEN_PLATFORM_PCI_H */
