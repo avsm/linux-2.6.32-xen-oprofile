@@ -35,6 +35,7 @@
 #include <xen/interface/memory.h>
 #include <xen/interface/hvm/hvm_op.h>
 #include <xen/interface/hvm/params.h>
+#include <xen/interface/platform_pci.h>
 #include <xen/features.h>
 #include <xen/page.h>
 #include <xen/hvm.h>
@@ -78,6 +79,7 @@ struct shared_info xen_dummy_shared_info;
 void *xen_initial_gdt;
 
 int xen_have_vector_callback;
+int unplug;
 
 /*
  * Point at some empty memory to start with. We map the real shared_info
@@ -1302,9 +1304,35 @@ void __init xen_guest_init(void)
 		generic_interrupt_extension = do_hvm_pv_evtchn_intr;
 		xen_have_vector_callback = 1;
 	}
-
+	if (unplug) {
+		/* unplug emulated devices */
+		outw(UNPLUG_ALL, XEN_IOPORT_UNPLUG);
+	}
 	have_vcpu_info_placement = 0;
 	x86_init.irqs.intr_init = xen_init_IRQ;
 	machine_ops = xen_machine_ops;
 }
 
+static int __init parse_unplug(char *arg)
+{
+	char *p, *q;
+
+	for (p = arg; p; p = q) {
+		q = strchr(arg, ',');
+		if (q)
+			*q++ = '\0';
+		if (!strcmp(p, "all"))
+			unplug |= UNPLUG_ALL;
+		else if (!strcmp(p, "ide-disks"))
+			unplug |= UNPLUG_ALL_IDE_DISKS;
+		else if (!strcmp(p, "aux-ide-disks"))
+			unplug |= UNPLUG_AUX_IDE_DISKS;
+		else if (!strcmp(p, "nics"))
+			unplug |= UNPLUG_ALL_NICS;
+		else
+			printk(KERN_WARNING "unrecognised option '%s' "
+				 "in module parameter 'dev_unplug'\n", p);
+	}
+	return 0;
+}
+early_param("xen_unplug", parse_unplug);
