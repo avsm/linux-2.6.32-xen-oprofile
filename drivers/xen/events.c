@@ -722,7 +722,7 @@ static int rebind_irq_to_cpu(unsigned irq, unsigned tcpu)
 	struct evtchn_bind_vcpu bind_vcpu;
 	int evtchn = evtchn_from_irq(irq);
 
-	if (!VALID_EVTCHN(evtchn))
+	if (!VALID_EVTCHN(evtchn) || xen_hvm_domain())
 		return -1;
 
 	/* Send future instances of this interrupt to other vcpu. */

@@ -779,15 +779,23 @@ void xenbus_probe(struct work_struct *unused)
 	blocking_notifier_call_chain(&xenstore_chain, 0, NULL);
 }
 
-static int __init xenbus_probe_init(void)
+static int __init __xenbus_probe_init(void)
+{
+	/* Delay initialization in the PV on HVM case */
+	if (xen_hvm_domain())
+		return 0;
+
+	if (!xen_pv_domain())
+		return -ENODEV;
+
+	return xenbus_probe_init();
+}
+
+int xenbus_probe_init(void)
 {
 	int err = 0;
 
 	DPRINTK("");
-
-	err = -ENODEV;
-	if (!xen_domain())
-		goto out_error;
 
 	/* Register ourselves with the kernel bus subsystem */
 	err = bus_register(&xenbus_frontend.bus);
@@ -847,7 +855,7 @@ static int __init xenbus_probe_init(void)
 	return err;
 }
 
-postcore_initcall(xenbus_probe_init);
+postcore_initcall(__xenbus_probe_init);
 
 MODULE_LICENSE("GPL");
 
