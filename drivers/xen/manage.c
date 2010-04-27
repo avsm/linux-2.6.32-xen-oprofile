@@ -142,6 +142,7 @@ static void do_hvm_suspend(void)
 	/* Make sure timer events get retriggered on all CPUs */
 	clock_was_set();
 
+out_destroy_sm:
 	stop_machine_destroy();
 
 out:
