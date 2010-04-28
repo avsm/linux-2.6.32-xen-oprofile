@@ -78,18 +78,24 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
 	return len;
 }
 
-static unsigned long __init xen_return_unused_memory(const struct e820map *e820)
+static unsigned long __init xen_return_unused_memory(unsigned long max_pfn,
+						     const struct e820map *e820)
 {
+	phys_addr_t max_addr = PFN_PHYS(max_pfn);
 	phys_addr_t last_end = 0;
 	unsigned long released = 0;
 	int i;
 
-	for (i = 0; i < e820->nr_map; i++) {
-		released += xen_release_chunk(last_end, e820->map[i].addr);
+	for (i = 0; i < e820->nr_map && last_end < max_addr; i++) {
+		phys_addr_t end = e820->map[i].addr;
+		end = min(max_addr, end);
+
+		released += xen_release_chunk(last_end, end);
 		last_end = e820->map[i].addr + e820->map[i].size;
 	}
 
-	released += xen_release_chunk(last_end, PFN_PHYS(xen_start_info->nr_pages));
+	if (last_end < max_addr)
+		released += xen_release_chunk(last_end, max_addr);
 
 	printk(KERN_INFO "released %ld pages of unused memory\n", released);
 	return released;
@@ -129,7 +135,7 @@ char * __init xen_memory_setup(void)
 
 	sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &e820.nr_map);
 
-	xen_return_unused_memory(&e820);
+	xen_return_unused_memory(xen_start_info->nr_pages, &e820);
 
 	return "Xen";
 }
