@@ -148,6 +148,9 @@ out_destroy_sm:
 	stop_machine_destroy();
 
 out:
+#ifdef CONFIG_PREEMPT
+	thaw_processes();
+#endif
 	shutting_down = SHUTDOWN_INVALID;
 }
 
