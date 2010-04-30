@@ -34,7 +34,6 @@ int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	struct msi_desc *msidesc;
 	int *v;
 
-
 	/* Dom0 has another mechanism for this. The exit path
 	 * (xen_pci_teardown_msi_irq) is shared with Dom0.
 	 */
@@ -64,6 +63,7 @@ int xen_pci_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 		ret = set_irq_msi(irq, msidesc);
 		if (ret)
 			goto error_while;
+		i++;
 	}
 	kfree(v);
 	return 0;

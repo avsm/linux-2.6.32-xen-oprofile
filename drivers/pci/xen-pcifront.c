@@ -292,7 +292,7 @@ static int pci_frontend_enable_msix(struct pci_dev *dev,
 		if (likely(!op.value)) {
 			/* we get the result */
 			for (i = 0; i < nvec; i++)
-				*vector[i] = op.msix_entries[i].vector;
+				*(*vector+i) = op.msix_entries[i].vector;
 			return 0;
 		} else {
 			printk(KERN_DEBUG "enable msix get value %x\n",
@@ -338,7 +338,7 @@ static int pci_frontend_enable_msi(struct pci_dev *dev, int **vector)
 
 	err = do_pci_op(pdev, &op);
 	if (likely(!err)) {
-		*vector[0] = op.value;
+		*(*vector) = op.value;
 	} else {
 		dev_err(&dev->dev, "pci frontend enable msi failed for dev "
 				   "%x:%x \n", op.bus, op.devfn);
