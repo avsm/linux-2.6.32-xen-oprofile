@@ -1117,12 +1117,27 @@ static int blkfront_is_ready(struct xenbus_device *dev)
 
 static int blkif_open(struct block_device *bdev, fmode_t mode)
 {
-	struct blkfront_info *info = bdev->bd_disk->private_data;
+	struct gendisk *disk = bdev->bd_disk;
+	struct blkfront_info *info;
+	int err = 0;
 
-	if (!info->xbdev)
-		return -ENODEV;
-	info->users++;
-	return 0;
+	info = disk->private_data;
+	if (!info)
+		/* xbdev gone */
+		return -ERESTARTSYS;
+
+	mutex_lock(&info->mutex);
+
+	if (!info->gd)
+		/* xbdev is closed */
+		err = -ERESTARTSYS;
+
+	mutex_unlock(&info->mutex);
+
+	if (!err)
+		++info->users;
+
+	return err;
 }
 
 static int blkif_release(struct gendisk *disk, fmode_t mode)
