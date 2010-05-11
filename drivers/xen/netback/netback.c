@@ -1332,14 +1332,10 @@ static void net_tx_submit(void)
 			netif_idx_release(pending_idx);
 		}
 
-		/*
-		 * Old frontends do not assert data_validated but we
-		 * can infer it from csum_blank so test both flags.
-		 */
-		if (txp->flags & (NETTXF_data_validated|NETTXF_csum_blank))
+		if (txp->flags & NETTXF_csum_blank)
 			skb->ip_summed = CHECKSUM_PARTIAL;
-		else
-			skb->ip_summed = CHECKSUM_NONE;
+		else if (txp->flags & NETTXF_data_validated)
+			skb->ip_summed = CHECKSUM_UNNECESSARY;
 
 		netbk_fill_frags(skb);
 
