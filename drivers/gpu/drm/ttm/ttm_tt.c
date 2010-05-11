@@ -38,7 +38,8 @@
 #include "ttm/ttm_module.h"
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_placement.h"
-
+#include <linux/dma-mapping.h>
+#include <xen/xen.h>
 static int ttm_tt_swapin(struct ttm_tt *ttm);
 
 /**
@@ -84,6 +85,16 @@ static struct page *ttm_tt_alloc_page(unsigned page_flags)
 	else
 		gfp_flags |= __GFP_HIGHMEM;
 
+	if ((page_flags & TTM_PAGE_FLAG_DMA32) && xen_pv_domain())
+	{
+		void *addr;
+		dma_addr_t _d;
+
+		addr = dma_alloc_coherent(NULL, PAGE_SIZE, &_d, GFP_KERNEL);
+		if (addr == NULL)
+			return NULL;
+		return virt_to_page(addr);
+	}
 	return alloc_page(gfp_flags);
 }
 
@@ -286,6 +297,7 @@ static void ttm_tt_free_alloced_pages(struct ttm_tt *ttm)
 	int i;
 	struct page *cur_page;
 	struct ttm_backend *be = ttm->be;
+	void *addr;
 
 	if (be)
 		be->func->clear(be);
@@ -300,7 +312,16 @@ static void ttm_tt_free_alloced_pages(struct ttm_tt *ttm)
 				       "Leaking pages.\n");
 			ttm_mem_global_free_page(ttm->glob->mem_glob,
 						 cur_page);
-			__free_page(cur_page);
+
+			if ((ttm->page_flags & TTM_PAGE_FLAG_DMA32) &&
+				xen_pv_domain()) {
+				addr = page_address(cur_page);
+				WARN_ON(!addr);
+				if (addr)
+					dma_free_coherent(NULL, PAGE_SIZE, addr,
+						  virt_to_bus(addr));
+			} else
+				__free_page(cur_page);
 		}
 	}
 	ttm->state = tt_unpopulated;
