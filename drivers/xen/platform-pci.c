@@ -27,6 +27,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 
+#include <xen/platform_pci.h>
 #include <xen/grant_table.h>
 #include <xen/xenbus.h>
 #include <xen/events.h>
@@ -194,6 +195,9 @@ static struct pci_driver platform_driver = {
 static int __init platform_pci_module_init(void)
 {
 	int rc;
+
+	if (!xen_platform_pci_enabled)
+		return -ENODEV;
 
 	rc = pci_register_driver(&platform_driver);
 	if (rc) {
