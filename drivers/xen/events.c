@@ -337,10 +337,20 @@ static int find_unbound_irq(void)
 {
 	int irq;
 	struct irq_desc *desc;
+	void *chip_data;
 
-	for (irq = 0; irq < nr_irqs; irq++)
+	for (irq = 0; irq < nr_irqs; irq++) {
+		desc = irq_to_desc(irq);
+		/* only 0->15 have init'd desc; handle irq > 16 */
+		if (desc == NULL)
+			break;
+		if (desc->chip == &no_irq_chip)
+			break;
+		if (desc->chip != &xen_dynamic_chip)
+			continue;
 		if (irq_info[irq].type == IRQT_UNBOUND)
 			break;
+	}
 
 	if (irq == nr_irqs)
 		panic("No available IRQ to bind to: increase nr_irqs!\n");
@@ -349,7 +359,10 @@ static int find_unbound_irq(void)
 	if (WARN_ON(desc == NULL))
 		return -1;
 
+	/* save and restore chip_data */
+	chip_data = desc->chip_data;
 	dynamic_irq_init(irq);
+	desc->chip_data = chip_data;
 
 	return irq;
 }
