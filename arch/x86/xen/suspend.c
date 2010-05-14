@@ -27,8 +27,12 @@ void xen_pre_suspend(void)
 
 void xen_hvm_post_suspend(int suspend_cancelled)
 {
+	int cpu;
 	xen_hvm_init_shared_info();
 	xen_callback_vector();
+	for_each_online_cpu(cpu) {
+		xen_setup_runstate_info(cpu);
+	}
 }
 
 void xen_post_suspend(int suspend_cancelled)

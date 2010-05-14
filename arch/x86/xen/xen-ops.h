@@ -44,14 +44,12 @@ void __init xen_build_dynamic_phys_to_machine(void);
 
 void xen_init_irq_ops(void);
 void xen_setup_timer(int cpu);
+void xen_setup_runstate_info(int cpu);
 void xen_teardown_timer(int cpu);
 cycle_t xen_clocksource_read(void);
 void xen_setup_cpu_clockevents(void);
-unsigned long xen_tsc_khz(void);
-void __init xen_time_init(void);
-unsigned long xen_get_wallclock(void);
-int xen_set_wallclock(unsigned long time);
-unsigned long long xen_sched_clock(void);
+void __init xen_init_time_ops(void);
+void __init xen_hvm_init_time_ops(void);
 
 irqreturn_t xen_debug_interrupt(int irq, void *dev_id);
 
