@@ -106,6 +106,7 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 	int i, ret;
 	long ioaddr, iolen;
 	long mmio_addr, mmio_len;
+	unsigned int max_nr_gframes;
 
 	i = pci_enable_device(pdev);
 	if (i)
@@ -153,6 +154,8 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 		}
 	}
 
+	max_nr_gframes = gnttab_max_grant_frames();
+	xen_hvm_resume_frames = alloc_xen_mmio(PAGE_SIZE * max_nr_gframes);
 	ret = gnttab_init();
 	if (ret)
 		goto out;

@@ -59,7 +59,8 @@ static unsigned int boot_max_nr_grant_frames;
 static int gnttab_free_count;
 static grant_ref_t gnttab_free_head;
 static DEFINE_SPINLOCK(gnttab_list_lock);
-static unsigned long hvm_pv_resume_frames;
+unsigned long xen_hvm_resume_frames;
+EXPORT_SYMBOL_GPL(xen_hvm_resume_frames);
 
 static struct grant_entry *shared;
 
@@ -434,7 +435,7 @@ static unsigned int __max_nr_grant_frames(void)
 	return query.max_nr_frames;
 }
 
-static inline unsigned int max_nr_grant_frames(void)
+unsigned int gnttab_max_grant_frames(void)
 {
 	unsigned int xen_max = __max_nr_grant_frames();
 
@@ -442,6 +443,7 @@ static inline unsigned int max_nr_grant_frames(void)
 		return boot_max_nr_grant_frames;
 	return xen_max;
 }
+EXPORT_SYMBOL_GPL(gnttab_max_grant_frames);
 
 static int gnttab_map(unsigned int start_idx, unsigned int end_idx)
 {
@@ -462,7 +464,7 @@ static int gnttab_map(unsigned int start_idx, unsigned int end_idx)
 			xatp.domid = DOMID_SELF;
 			xatp.idx = i;
 			xatp.space = XENMAPSPACE_grant_table;
-			xatp.gpfn = (hvm_pv_resume_frames >> PAGE_SHIFT) + i;
+			xatp.gpfn = (xen_hvm_resume_frames >> PAGE_SHIFT) + i;
 			rc = HYPERVISOR_memory_op(XENMEM_add_to_physmap, &xatp);
 			if (rc != 0) {
 				printk(KERN_WARNING
@@ -490,7 +492,7 @@ static int gnttab_map(unsigned int start_idx, unsigned int end_idx)
 
 	BUG_ON(rc || setup.status);
 
-	rc = arch_gnttab_map_shared(frames, nr_gframes, max_nr_grant_frames(),
+	rc = arch_gnttab_map_shared(frames, nr_gframes, gnttab_max_grant_frames(),
 				    &shared);
 	BUG_ON(rc);
 
@@ -503,16 +505,15 @@ int gnttab_resume(void)
 {
 	unsigned int max_nr_gframes;
 
-	max_nr_gframes = max_nr_grant_frames();
+	max_nr_gframes = gnttab_max_grant_frames();
 	if (max_nr_gframes < nr_grant_frames)
 		return -ENOSYS;
 
 	if (xen_pv_domain())
 		return gnttab_map(0, nr_grant_frames - 1);
 
-	if (!hvm_pv_resume_frames) {
-		hvm_pv_resume_frames = alloc_xen_mmio(PAGE_SIZE * max_nr_gframes);
-		shared = ioremap(hvm_pv_resume_frames, PAGE_SIZE * max_nr_gframes);
+	if (!shared) {
+		shared = ioremap(xen_hvm_resume_frames, PAGE_SIZE * max_nr_gframes);
 		if (shared == NULL) {
 			printk(KERN_WARNING
 					"Fail to ioremap gnttab share frames\n");
@@ -539,7 +540,7 @@ static int gnttab_expand(unsigned int req_entries)
 	cur = nr_grant_frames;
 	extra = ((req_entries + (GREFS_PER_GRANT_FRAME-1)) /
 		 GREFS_PER_GRANT_FRAME);
-	if (cur + extra > max_nr_grant_frames())
+	if (cur + extra > gnttab_max_grant_frames())
 		return -ENOSPC;
 
 	rc = gnttab_map(cur, cur + extra - 1);
@@ -597,6 +598,7 @@ int gnttab_init(void)
 	kfree(gnttab_list);
 	return -ENOMEM;
 }
+EXPORT_SYMBOL_GPL(gnttab_init);
 
 static int __devinit __gnttab_init(void)
 {
