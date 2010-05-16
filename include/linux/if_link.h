@@ -82,10 +82,7 @@ enum
 	IFLA_NET_NS_PID,
 	IFLA_IFALIAS,
 	IFLA_NUM_VF,		/* Number of VFs if device is SR-IOV PF */
-	IFLA_VF_MAC,		/* Hardware queue specific attributes */
-	IFLA_VF_VLAN,
-	IFLA_VF_TX_RATE,	/* TX Bandwidth Allocation */
-	IFLA_VFINFO,
+	IFLA_VFINFO_LIST,
 	__IFLA_MAX
 };
 
@@ -196,6 +193,24 @@ struct ifla_vlan_qos_mapping
 };
 
 /* SR-IOV virtual function managment section */
+
+enum {
+	IFLA_VF_INFO_UNSPEC,
+	IFLA_VF_INFO,
+	__IFLA_VF_INFO_MAX,
+};
+
+#define IFLA_VF_INFO_MAX (__IFLA_VF_INFO_MAX - 1)
+
+enum {
+	IFLA_VF_UNSPEC,
+	IFLA_VF_MAC,		/* Hardware queue specific attributes */
+	IFLA_VF_VLAN,
+	IFLA_VF_TX_RATE,	/* TX Bandwidth Allocation */
+	__IFLA_VF_MAX,
+};
+
+#define IFLA_VF_MAX (__IFLA_VF_MAX - 1)
 
 struct ifla_vf_mac {
 	__u32 vf;
