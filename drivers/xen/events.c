@@ -656,7 +656,7 @@ static void __xen_evtchn_do_upcall(void)
 
 		count = __get_cpu_var(xed_nesting_count);
 		__get_cpu_var(xed_nesting_count) = 0;
-	} while(count != 1);
+	} while (count != 1 || vcpu_info->evtchn_upcall_pending);
 
 out:
 
@@ -716,7 +716,10 @@ static int rebind_irq_to_cpu(unsigned irq, unsigned tcpu)
 	struct evtchn_bind_vcpu bind_vcpu;
 	int evtchn = evtchn_from_irq(irq);
 
-	if (!VALID_EVTCHN(evtchn))
+	/* events delivered via platform PCI interrupts are always
+	 * routed to vcpu 0 */
+	if (!VALID_EVTCHN(evtchn) ||
+		(xen_hvm_domain() && !xen_have_vector_callback))
 		return -1;
 
 	/* Send future instances of this interrupt to other vcpu. */
