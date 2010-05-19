@@ -76,22 +76,27 @@ static inline unsigned long idx_to_kaddr(unsigned int idx)
 }
 
 /* extra field used in struct page */
-static inline void netif_set_page_index(struct page *pg, unsigned int index)
+static inline void netif_set_page_ext(struct page *pg, unsigned int group,
+		unsigned int idx)
 {
-	*(unsigned long *)&pg->mapping = index + 1;
+	union page_ext ext = { .e = { .group = group + 1, .idx = idx } };
+
+	BUILD_BUG_ON(sizeof(ext) > sizeof(ext.mapping));
+	pg->mapping = ext.mapping;
 }
 
-static inline int netif_page_index(struct page *pg)
+static inline unsigned int netif_page_group(const struct page *pg)
 {
-	unsigned long idx = (unsigned long)pg->mapping - 1;
+	union page_ext ext = { .mapping = pg->mapping };
 
-	if (!PageForeign(pg))
-		return -1;
+	return ext.e.group - 1;
+}
 
-	if ((idx >= MAX_PENDING_REQS) || (netbk->mmap_pages[idx] != pg))
-		return -1;
+static inline unsigned int netif_page_index(const struct page *pg)
+{
+	union page_ext ext = { .mapping = pg->mapping };
 
-	return idx;
+	return ext.e.idx;
 }
 
 /*
@@ -1392,7 +1397,8 @@ static void netif_page_release(struct page *page, unsigned int order)
 {
 	int idx = netif_page_index(page);
 	BUG_ON(order);
-	BUG_ON(idx < 0);
+	BUG_ON(idx < 0 || idx >= MAX_PENDING_REQS);
+	BUG_ON(netbk->mmap_pages[idx] != page);
 	netif_idx_release(idx);
 }
 
@@ -1537,7 +1543,7 @@ static int __init netback_init(void)
 	for (i = 0; i < MAX_PENDING_REQS; i++) {
 		page = netbk->mmap_pages[i];
 		SetPageForeign(page, netif_page_release);
-		netif_set_page_index(page, i);
+		netif_set_page_ext(page, 0, i);
 		INIT_LIST_HEAD(&netbk->pending_inuse[i].list);
 	}
 

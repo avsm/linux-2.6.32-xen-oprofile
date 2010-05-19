@@ -242,6 +242,21 @@ struct netbk_tx_pending_inuse {
 
 #define MAX_PENDING_REQS 256
 
+/* extra field used in struct page */
+union page_ext {
+	struct {
+#if BITS_PER_LONG < 64
+#define IDX_WIDTH   8
+#define GROUP_WIDTH (BITS_PER_LONG - IDX_WIDTH)
+		unsigned int group:GROUP_WIDTH;
+		unsigned int idx:IDX_WIDTH;
+#else
+		unsigned int group, idx;
+#endif
+	} e;
+	void *mapping;
+};
+
 struct xen_netbk {
 	struct tasklet_struct net_tx_tasklet;
 	struct tasklet_struct net_rx_tasklet;
