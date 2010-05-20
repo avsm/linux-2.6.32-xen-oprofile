@@ -38,6 +38,7 @@
 
 #include <linux/tcp.h>
 #include <linux/udp.h>
+#include <linux/kthread.h>
 
 #include <xen/balloon.h>
 #include <xen/events.h>
@@ -128,12 +129,31 @@ MODULE_PARM_DESC(copy_skb, "Copy data received from netfront without netloop");
 
 int netbk_copy_skb_mode;
 
+static int MODPARM_netback_kthread;
+module_param_named(netback_kthread, MODPARM_netback_kthread, bool, 0);
+MODULE_PARM_DESC(netback_kthread, "Use kernel thread to replace tasklet");
+
+/*
+ * Netback bottom half handler.
+ * dir indicates the data direction.
+ * rx: 1, tx: 0.
+ */
+static inline void xen_netbk_bh_handler(struct xen_netbk *netbk, int dir)
+{
+	if (MODPARM_netback_kthread)
+		wake_up(&netbk->kthread.netbk_action_wq);
+	else if (dir)
+		tasklet_schedule(&netbk->tasklet.net_rx_tasklet);
+	else
+		tasklet_schedule(&netbk->tasklet.net_tx_tasklet);
+}
+
 static inline void maybe_schedule_tx_action(struct xen_netbk *netbk)
 {
 	smp_mb();
 	if ((nr_pending_reqs(netbk) < (MAX_PENDING_REQS/2)) &&
 	    !list_empty(&netbk->net_schedule_list))
-		tasklet_schedule(&netbk->net_tx_tasklet);
+		xen_netbk_bh_handler(netbk, 0);
 }
 
 static struct sk_buff *netbk_copy_skb(struct sk_buff *skb)
@@ -289,7 +309,8 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		}
 	}
 	skb_queue_tail(&netbk->rx_queue, skb);
-	tasklet_schedule(&netbk->net_rx_tasklet);
+
+	xen_netbk_bh_handler(netbk, 1);
 
 	return 0;
 
@@ -605,19 +626,19 @@ static void net_rx_action(unsigned long data)
 	/* More work to do? */
 	if (!skb_queue_empty(&netbk->rx_queue) &&
 			!timer_pending(&netbk->net_timer))
-		tasklet_schedule(&netbk->net_rx_tasklet);
+		xen_netbk_bh_handler(netbk, 1);
 }
 
 static void net_alarm(unsigned long data)
 {
 	struct xen_netbk *netbk = (struct xen_netbk *)data;
-	tasklet_schedule(&netbk->net_rx_tasklet);
+	xen_netbk_bh_handler(netbk, 1);
 }
 
 static void netbk_tx_pending_timeout(unsigned long data)
 {
 	struct xen_netbk *netbk = (struct xen_netbk *)data;
-	tasklet_schedule(&netbk->net_tx_tasklet);
+	xen_netbk_bh_handler(netbk, 0);
 }
 
 struct net_device_stats *netif_be_get_stats(struct net_device *dev)
@@ -1360,7 +1381,7 @@ static void net_tx_submit(struct xen_netbk *netbk)
 			continue;
 		}
 
-		netif_rx(skb);
+		netif_rx_ni(skb);
 		netif->dev->last_rx = jiffies;
 	}
 
@@ -1411,7 +1432,7 @@ static void netif_idx_release(struct xen_netbk *netbk, u16 pending_idx)
 	netbk->dealloc_prod++;
 	spin_unlock_irqrestore(&_lock, flags);
 
-	tasklet_schedule(&netbk->net_tx_tasklet);
+	xen_netbk_bh_handler(netbk, 0);
 }
 
 static void netif_page_release(struct page *page, unsigned int order)
@@ -1545,6 +1566,46 @@ static irqreturn_t netif_be_dbg(int irq, void *dev_id, struct pt_regs *regs)
 }
 #endif
 
+static inline int rx_work_todo(struct xen_netbk *netbk)
+{
+	return !skb_queue_empty(&netbk->rx_queue);
+}
+
+static inline int tx_work_todo(struct xen_netbk *netbk)
+{
+	if (netbk->dealloc_cons != netbk->dealloc_prod)
+		return 1;
+
+	if (((nr_pending_reqs(netbk) + MAX_SKB_FRAGS) < MAX_PENDING_REQS) &&
+			!list_empty(&netbk->net_schedule_list))
+		return 1;
+
+	return 0;
+}
+
+static int netbk_action_thread(void *data)
+{
+	struct xen_netbk *netbk = (struct xen_netbk *)data;
+	while (!kthread_should_stop()) {
+		wait_event_interruptible(netbk->kthread.netbk_action_wq,
+				rx_work_todo(netbk)
+				|| tx_work_todo(netbk)
+				|| kthread_should_stop());
+		cond_resched();
+
+		if (kthread_should_stop())
+			break;
+
+		if (rx_work_todo(netbk))
+			net_rx_action((unsigned long)netbk);
+
+		if (tx_work_todo(netbk))
+			net_tx_action((unsigned long)netbk);
+	}
+
+	return 0;
+}
+
 static int __init netback_init(void)
 {
 	int i;
@@ -1602,10 +1663,34 @@ static int __init netback_init(void)
 		for (i = 0; i < MAX_PENDING_REQS; i++)
 			netbk->pending_ring[i] = i;
 
-		tasklet_init(&netbk->net_tx_tasklet, net_tx_action,
-				(unsigned long)netbk);
-		tasklet_init(&netbk->net_rx_tasklet, net_rx_action,
-				(unsigned long)netbk);
+		if (MODPARM_netback_kthread) {
+			init_waitqueue_head(&netbk->kthread.netbk_action_wq);
+			netbk->kthread.task =
+				kthread_create(netbk_action_thread,
+					       (void *)netbk,
+					       "netback/%u", group);
+
+			if (!IS_ERR(netbk->kthread.task)) {
+				kthread_bind(netbk->kthread.task, group);
+				wake_up_process(netbk->kthread.task);
+			} else {
+				printk(KERN_ALERT
+					"kthread_run() fails at netback\n");
+				free_empty_pages_and_pagevec(netbk->mmap_pages,
+						MAX_PENDING_REQS);
+				del_timer(&netbk->netbk_tx_pending_timer);
+				del_timer(&netbk->net_timer);
+				rc = PTR_ERR(netbk->kthread.task);
+				goto failed_init;
+			}
+		} else {
+			tasklet_init(&netbk->tasklet.net_tx_tasklet,
+				     net_tx_action,
+				     (unsigned long)netbk);
+			tasklet_init(&netbk->tasklet.net_rx_tasklet,
+				     net_rx_action,
+				     (unsigned long)netbk);
+		}
 
 		INIT_LIST_HEAD(&netbk->pending_inuse_head);
 		INIT_LIST_HEAD(&netbk->net_schedule_list);
@@ -1648,6 +1733,8 @@ failed_init:
 				MAX_PENDING_REQS);
 		del_timer(&netbk->netbk_tx_pending_timer);
 		del_timer(&netbk->net_timer);
+		if (MODPARM_netback_kthread)
+			kthread_stop(netbk->kthread.task);
 	}
 	vfree(xen_netbk);
 	return rc;

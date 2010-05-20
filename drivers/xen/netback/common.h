@@ -259,8 +259,17 @@ union page_ext {
 };
 
 struct xen_netbk {
-	struct tasklet_struct net_tx_tasklet;
-	struct tasklet_struct net_rx_tasklet;
+	union {
+		struct {
+			struct tasklet_struct net_tx_tasklet;
+			struct tasklet_struct net_rx_tasklet;
+		} tasklet;
+
+		struct {
+			wait_queue_head_t netbk_action_wq;
+			struct task_struct *task;
+		} kthread;
+	};
 
 	struct sk_buff_head rx_queue;
 	struct sk_buff_head tx_queue;
