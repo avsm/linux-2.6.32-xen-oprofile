@@ -58,6 +58,7 @@
 struct xen_netif {
 	/* Unique identifier for this interface. */
 	domid_t          domid;
+	int              group;
 	unsigned int     handle;
 
 	u8               fe_dev_addr[6];
@@ -280,6 +281,8 @@ struct xen_netbk {
 	/* Protect the net_schedule_list in netif. */
 	spinlock_t net_schedule_list_lock;
 
+	atomic_t netfront_count;
+
 	struct pending_tx_info pending_tx_info[MAX_PENDING_REQS];
 	struct netbk_tx_pending_inuse pending_inuse[MAX_PENDING_REQS];
 	struct gnttab_unmap_grant_ref tx_unmap_ops[MAX_PENDING_REQS];
@@ -297,5 +300,8 @@ struct xen_netbk {
 	u16 notify_list[NET_RX_RING_SIZE];
 	struct netbk_rx_meta meta[NET_RX_RING_SIZE];
 };
+
+extern struct xen_netbk *xen_netbk;
+extern int xen_netbk_group_nr;
 
 #endif /* __NETIF__BACKEND__COMMON_H__ */
