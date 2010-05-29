@@ -162,11 +162,16 @@ fail:
  */
 static int netback_uevent(struct xenbus_device *xdev, struct kobj_uevent_env *env)
 {
-	struct backend_info *be = dev_get_drvdata(&xdev->dev);
-	struct xen_netif *netif = be->netif;
+	struct backend_info *be;
+	struct xen_netif *netif;
 	char *val;
 
 	DPRINTK("netback_uevent");
+
+	be = dev_get_drvdata(&xdev->dev);
+	if (!be)
+		return 0;
+	netif = be->netif;
 
 	val = xenbus_read(XBT_NIL, xdev->nodename, "script", NULL);
 	if (IS_ERR(val)) {
