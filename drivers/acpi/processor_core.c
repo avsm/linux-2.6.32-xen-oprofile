@@ -407,15 +407,6 @@ int acpi_processor_remove_fs(struct acpi_device *device)
 
 	return 0;
 }
-#else
-static inline int acpi_processor_add_fs(struct acpi_device *device)
-{
-	return 0;
-}
-static inline int acpi_processor_remove_fs(struct acpi_device *device)
-{
-	return 0;
-}
 #endif
 
 /* Use the acpiid in MADT to map cpus in case of SMP */

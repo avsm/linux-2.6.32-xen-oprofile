@@ -239,8 +239,20 @@ struct acpi_processor_errata {
 };
 
 extern int acpi_processor_errata(struct acpi_processor *pr);
+#ifdef CONFIG_ACPI_PROCFS
 extern int acpi_processor_add_fs(struct acpi_device *device);
 extern int acpi_processor_remove_fs(struct acpi_device *device);
+#else
+static inline int acpi_processor_add_fs(struct acpi_device *device)
+{
+	return 0;
+}
+
+static inline int acpi_processor_remove_fs(struct acpi_device *device)
+{
+	return 0;
+}
+#endif
 extern int acpi_processor_set_pdc(struct acpi_processor *pr);
 extern int acpi_processor_remove(struct acpi_device *device, int type);
 extern void acpi_processor_notify(struct acpi_device *device, u32 event);
