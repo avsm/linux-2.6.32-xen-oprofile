@@ -58,6 +58,7 @@
 struct xen_netif {
 	/* Unique identifier for this interface. */
 	domid_t          domid;
+	int              group;
 	unsigned int     handle;
 
 	u8               fe_dev_addr[6];
@@ -223,5 +224,93 @@ static inline int netbk_can_sg(struct net_device *dev)
 	struct xen_netif *netif = netdev_priv(dev);
 	return netif->features & NETIF_F_SG;
 }
+
+struct pending_tx_info {
+	struct xen_netif_tx_request req;
+	struct xen_netif *netif;
+};
+typedef unsigned int pending_ring_idx_t;
+
+struct netbk_rx_meta {
+	skb_frag_t frag;
+	int id;
+};
+
+struct netbk_tx_pending_inuse {
+	struct list_head list;
+	unsigned long alloc_time;
+};
+
+#define MAX_PENDING_REQS 256
+
+/* extra field used in struct page */
+union page_ext {
+	struct {
+#if BITS_PER_LONG < 64
+#define IDX_WIDTH   8
+#define GROUP_WIDTH (BITS_PER_LONG - IDX_WIDTH)
+		unsigned int group:GROUP_WIDTH;
+		unsigned int idx:IDX_WIDTH;
+#else
+		unsigned int group, idx;
+#endif
+	} e;
+	void *mapping;
+};
+
+struct xen_netbk {
+	union {
+		struct {
+			struct tasklet_struct net_tx_tasklet;
+			struct tasklet_struct net_rx_tasklet;
+		} tasklet;
+
+		struct {
+			wait_queue_head_t netbk_action_wq;
+			struct task_struct *task;
+		} kthread;
+	};
+
+	struct sk_buff_head rx_queue;
+	struct sk_buff_head tx_queue;
+
+	struct timer_list net_timer;
+	struct timer_list netbk_tx_pending_timer;
+
+	struct page **mmap_pages;
+
+	pending_ring_idx_t pending_prod;
+	pending_ring_idx_t pending_cons;
+	pending_ring_idx_t dealloc_prod;
+	pending_ring_idx_t dealloc_cons;
+
+	struct list_head pending_inuse_head;
+	struct list_head net_schedule_list;
+
+	/* Protect the net_schedule_list in netif. */
+	spinlock_t net_schedule_list_lock;
+
+	atomic_t netfront_count;
+
+	struct pending_tx_info pending_tx_info[MAX_PENDING_REQS];
+	struct netbk_tx_pending_inuse pending_inuse[MAX_PENDING_REQS];
+	struct gnttab_unmap_grant_ref tx_unmap_ops[MAX_PENDING_REQS];
+	struct gnttab_map_grant_ref tx_map_ops[MAX_PENDING_REQS];
+
+	grant_handle_t grant_tx_handle[MAX_PENDING_REQS];
+	u16 pending_ring[MAX_PENDING_REQS];
+	u16 dealloc_ring[MAX_PENDING_REQS];
+
+	struct multicall_entry rx_mcl[NET_RX_RING_SIZE+3];
+	struct mmu_update rx_mmu[NET_RX_RING_SIZE];
+	struct gnttab_transfer grant_trans_op[NET_RX_RING_SIZE];
+	struct gnttab_copy grant_copy_op[NET_RX_RING_SIZE];
+	unsigned char rx_notify[NR_IRQS];
+	u16 notify_list[NET_RX_RING_SIZE];
+	struct netbk_rx_meta meta[NET_RX_RING_SIZE];
+};
+
+extern struct xen_netbk *xen_netbk;
+extern int xen_netbk_group_nr;
 
 #endif /* __NETIF__BACKEND__COMMON_H__ */
