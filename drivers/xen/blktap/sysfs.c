@@ -96,7 +96,6 @@ blktap_sysfs_remove_device(struct device *dev,
 			   struct device_attribute *attr,
 			   const char *buf, size_t size)
 {
-	int err;
 	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	if (!tap->ring.dev)
@@ -105,9 +104,13 @@ blktap_sysfs_remove_device(struct device *dev,
 	if (test_and_set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
 		return -EBUSY;
 
-	err = blktap_control_destroy_device(tap);
+	BTDBG("sending tapdisk close message\n");
+	tap->ring.ring.sring->pad[0] = BLKTAP2_RING_MESSAGE_CLOSE;
+	blktap_ring_kick_user(tap);
+	wait_event_interruptible(tap->wq,
+				 !test_bit(BLKTAP_CONTROL, &tap->dev_inuse));
 
-	return (err ? : size);
+	return 0;
 }
 CLASS_DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
 

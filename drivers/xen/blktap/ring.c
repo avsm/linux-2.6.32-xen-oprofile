@@ -161,24 +161,12 @@ blktap_ring_vm_close(struct vm_area_struct *vma)
 	struct blktap *tap = vma_to_blktap(vma);
 	struct blktap_ring *ring = &tap->ring;
 
-	blktap_device_fail_pending_requests(tap);  /* fail pending requests */
-	blktap_device_restart(tap);                /* fail deferred requests */
-
-	zap_page_range(vma, vma->vm_start, vma->vm_end - vma->vm_start, NULL);
-
-	kfree(ring->foreign_map.map);
-	ring->foreign_map.map = NULL;
-
-	/* Free the ring page. */
-	ClearPageReserved(virt_to_page(ring->ring.sring));
-	free_page((unsigned long)ring->ring.sring);
-
 	BTINFO("unmapping ring %d\n", tap->minor);
-	ring->ring.sring = NULL;
-	ring->vma = NULL;
+	zap_page_range(vma, vma->vm_start, vma->vm_end - vma->vm_start, NULL);
 	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
+	ring->vma = NULL;
 
-	wake_up(&tap->wq);
+	blktap_control_destroy_device(tap);
 }
 
 static struct vm_operations_struct blktap_ring_vm_operations = {
@@ -206,6 +194,9 @@ blktap_ring_open(struct inode *inode, struct file *filp)
 	if (!test_bit(BLKTAP_CONTROL, &tap->dev_inuse))
 		return -ENODEV;
 
+	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
+		return -EBUSY;
+
 	/* Only one process can access ring at a time */
 	if (test_and_set_bit(BLKTAP_RING_FD, &tap->dev_inuse))
 		return -EBUSY;
@@ -224,7 +215,9 @@ blktap_ring_release(struct inode *inode, struct file *filp)
 	BTINFO("freeing device %d\n", tap->minor);
 	clear_bit(BLKTAP_RING_FD, &tap->dev_inuse);
 	filp->private_data = NULL;
-	wake_up(&tap->wq);	
+
+	blktap_control_destroy_device(tap);
+
 	return 0;
 }
 

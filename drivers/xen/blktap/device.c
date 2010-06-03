@@ -65,7 +65,7 @@ blktap_device_release(struct gendisk *gd, fmode_t mode)
 
 	dev->users--;
 	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
-		blktap_device_destroy(tap);
+		blktap_control_destroy_device(tap);
 
 	return 0;
 }
@@ -306,7 +306,6 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 	unsigned long kvaddr;
 
 	usr_idx = request->usr_idx;
-	down_write(&tap->ring.vma->vm_mm->mmap_sem);
 
 	for (i = 0; i < request->nr_pages; i++) {
 		kvaddr = request_to_kaddr(request, i);
@@ -324,13 +323,17 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 		}
 	}
 
-	blktap_device_fast_flush(tap, request);
-	up_write(&tap->ring.vma->vm_mm->mmap_sem);
+	if (blktap_active(tap)) {
+		down_write(&tap->ring.vma->vm_mm->mmap_sem);
+		blktap_device_fast_flush(tap, request);
+		up_write(&tap->ring.vma->vm_mm->mmap_sem);
+	}
 }
 
 /*
  * called if the tapdisk process dies unexpectedly.
  * fail and release any pending requests and disable queue.
+ * may be called from non-tapdisk context.
  */
 void
 blktap_device_fail_pending_requests(struct blktap *tap)
@@ -933,8 +936,11 @@ blktap_device_destroy(struct blktap *tap)
 
 	BTINFO("destroy device %d users %d\n", tap->minor, dev->users);
 
-	if (dev->users)
+	if (dev->users) {
+		blktap_device_fail_pending_requests(tap);
+		blktap_device_restart(tap);
 		return -EBUSY;
+	}
 
 	spin_lock_irq(&dev->lock);
 	/* No more blktap_device_do_request(). */
@@ -951,8 +957,6 @@ blktap_device_destroy(struct blktap *tap)
 	del_gendisk(gd);
 	blk_cleanup_queue(gd->queue);
 	put_disk(gd);
-
-	wake_up(&tap->wq);
 
 	return 0;
 }

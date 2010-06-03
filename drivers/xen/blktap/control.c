@@ -163,46 +163,29 @@ int
 blktap_control_destroy_device(struct blktap *tap)
 {
 	int err;
-	unsigned long inuse;
 
 	if (!tap)
 		return 0;
 
 	set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse);
 
-	for (;;) {
-		inuse = tap->dev_inuse;
-		err   = blktap_device_destroy(tap);
-		if (err)
-			goto wait;
+	err = blktap_device_destroy(tap);
+	if (err)
+		return err;
 
-		inuse = tap->dev_inuse;
-		err   = blktap_ring_destroy(tap);
-		if (err)
-			goto wait;
+	err = blktap_sysfs_destroy(tap);
+	if (err)
+		return err;
 
-		inuse = tap->dev_inuse;
-		err   = blktap_sysfs_destroy(tap);
-		if (err)
-			goto wait;
-
-		break;
-
-	wait:
-		BTDBG("inuse: 0x%lx, dev_inuse: 0x%lx\n",
-		      inuse, tap->dev_inuse);
-		if (wait_event_interruptible(tap->wq, tap->dev_inuse != inuse))
-			break;
-	}
+	err = blktap_ring_destroy(tap);
+	if (err)
+		return err;
 
 	clear_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse);
+	clear_bit(BLKTAP_CONTROL, &tap->dev_inuse);
+	wake_up(&tap->wq);
 
-	if (tap->dev_inuse == (1UL << BLKTAP_CONTROL)) {
-		err = 0;
-		clear_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-	}
-
-	return err;
+	return 0;
 }
 
 static int __init
