@@ -795,11 +795,13 @@ blktap_device_run_queue(struct blktap *tap)
 
 	while ((req = blk_peek_request(rq)) != NULL) {
 		if (!blk_fs_request(req)) {
+			blk_start_request(req);
 			__blk_end_request_cur(req, 0);
 			continue;
 		}
 
 		if (blk_barrier_rq(req)) {
+			blk_start_request(req);
 			__blk_end_request_cur(req, 0);
 			continue;
 		}
@@ -882,7 +884,7 @@ blktap_device_do_request(struct request_queue *rq)
 	return;
 
 fail:
-	while ((req = blk_peek_request(rq))) {
+	while ((req = blk_fetch_request(rq))) {
 		BTERR("device closed: failing secs %llu - %llu\n",
 		      (unsigned long long)blk_rq_pos(req),
 		      (unsigned long long)blk_rq_pos(req) + blk_rq_sectors(req));
