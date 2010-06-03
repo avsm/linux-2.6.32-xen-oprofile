@@ -9,8 +9,6 @@
 #include <xen/blkif.h>
 #include <xen/grant_table.h>
 
-//#define ENABLE_PASSTHROUGH
-
 extern int blktap_debug_level;
 
 #define BTPRINTK(level, tag, force, _f, _a...)				\

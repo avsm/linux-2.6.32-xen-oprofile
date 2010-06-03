@@ -114,50 +114,6 @@ blktap_sysfs_remove_device(struct device *dev,
 }
 CLASS_DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
 
-#ifdef ENABLE_PASSTHROUGH
-static ssize_t
-blktap_sysfs_enable_passthrough(struct device *dev,
-				const char *buf, size_t size)
-{
-	int err;
-	unsigned major, minor;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
-
-	BTINFO("passthrough request enabled\n");
-
-	blktap_sysfs_enter(tap);
-
-	if (!tap->ring.dev ||
-	    test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse)) {
-		err = -ENODEV;
-		goto out;
-	}
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse)) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	if (test_bit(BLKTAP_PASSTHROUGH, &tap->dev_inuse)) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	err = sscanf(buf, "%x:%x", &major, &minor);
-	if (err != 2) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	err = blktap_device_enable_passthrough(tap, major, minor);
-
-out:
-	blktap_sysfs_exit(tap);
-	BTDBG("returning %d\n", (err ? err : size));
-	return (err ? err : size);
-}
-#endif
-
 static ssize_t
 blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, char *buf)
 {

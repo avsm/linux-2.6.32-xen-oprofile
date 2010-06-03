@@ -646,98 +646,6 @@ out:
 	return err;
 }
 
-#ifdef ENABLE_PASSTHROUGH
-#define rq_for_each_bio_safe(_bio, _tmp, _req)				\
-	if ((_req)->bio)						\
-		for (_bio = (_req)->bio;				\
-		     _bio && ((_tmp = _bio->bi_next) || 1);		\
-		     _bio = _tmp)
-
-static void
-blktap_device_forward_request(struct blktap *tap, struct request *req)
-{
-	struct bio *bio, *tmp;
-	struct blktap_device *dev;
-
-	dev = &tap->device;
-
-	rq_for_each_bio_safe(bio, tmp, req) {
-		bio->bi_bdev = dev->bdev;
-		submit_bio(bio->bi_rw, bio);
-	}
-}
-
-static void
-blktap_device_close_bdev(struct blktap *tap)
-{
-	struct blktap_device *dev;
-
-	dev = &tap->device;
-
-	if (dev->bdev)
-		blkdev_put(dev->bdev);
-
-	dev->bdev = NULL;
-	clear_bit(BLKTAP_PASSTHROUGH, &tap->dev_inuse);
-}
-
-static int
-blktap_device_open_bdev(struct blktap *tap, u32 pdev)
-{
-	struct block_device *bdev;
-	struct blktap_device *dev;
-
-	dev = &tap->device;
-
-	bdev = open_by_devnum(pdev, FMODE_WRITE);
-	if (IS_ERR(bdev)) {
-		BTERR("opening device %x:%x failed: %ld\n",
-		      MAJOR(pdev), MINOR(pdev), PTR_ERR(bdev));
-		return PTR_ERR(bdev);
-	}
-
-	if (!bdev->bd_disk) {
-		BTERR("device %x:%x doesn't exist\n",
-		      MAJOR(pdev), MINOR(pdev));
-		blkdev_put(dev->bdev);
-		return -ENOENT;
-	}
-
-	dev->bdev = bdev;
-	set_bit(BLKTAP_PASSTHROUGH, &tap->dev_inuse);
-
-	/* TODO: readjust queue parameters */
-
-	BTINFO("set device %d to passthrough on %x:%x\n",
-	       tap->minor, MAJOR(pdev), MINOR(pdev));
-
-	return 0;
-}
-
-int
-blktap_device_enable_passthrough(struct blktap *tap,
-				 unsigned major, unsigned minor)
-{
-	u32 pdev;
-	struct blktap_device *dev;
-
-	dev  = &tap->device;
-	pdev = MKDEV(major, minor);
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-		return -EINVAL;
-
-	if (dev->bdev) {
-		if (pdev)
-			return -EINVAL;
-		blktap_device_close_bdev(tap);
-		return 0;
-	}
-
-	return blktap_device_open_bdev(tap, pdev);
-}
-#endif
-
 /*
  * called from tapdisk context
  */
@@ -768,14 +676,6 @@ blktap_device_run_queue(struct blktap *tap)
 			end_request(req, 0);
 			continue;
 		}
-
-#ifdef ENABLE_PASSTHROUGH
-		if (test_bit(BLKTAP_PASSTHROUGH, &tap->dev_inuse)) {
-			blkdev_dequeue_request(req);
-			blktap_device_forward_request(tap, req);
-			continue;
-		}
-#endif
 
 		if (RING_FULL(&ring->ring)) {
 		wait:
@@ -926,11 +826,6 @@ blktap_device_destroy(struct blktap *tap)
 	clear_bit(BLKTAP_DEVICE, &tap->dev_inuse);
 	dev->gd = NULL;
 	spin_unlock_irq(&dev->lock);
-
-#ifdef ENABLE_PASSTHROUGH
-	if (dev->bdev)
-		blktap_device_close_bdev(tap);
-#endif
 
 	del_gendisk(gd);
 	blk_cleanup_queue(gd->queue);
