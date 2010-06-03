@@ -923,52 +923,6 @@ blktap_device_configure(struct blktap *tap)
 }
 
 int
-blktap_device_resume(struct blktap *tap)
-{
-	int err;
-
-	if (!test_bit(BLKTAP_DEVICE, &tap->dev_inuse) || !blktap_active(tap))
-		return -ENODEV;
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-		return 0;
-
-	err = blktap_ring_resume(tap);
-	if (err)
-		return err;
-
-	/* device size may have changed */
-	blktap_device_configure(tap);
-
-	BTDBG("restarting device\n");
-	blktap_device_restart(tap);
-
-	return 0;
-}
-
-int
-blktap_device_pause(struct blktap *tap)
-{
-	unsigned long flags;
-	struct blktap_device *dev = &tap->device;
-
-	if (!test_bit(BLKTAP_DEVICE, &tap->dev_inuse) || !blktap_active(tap))
-		return -ENODEV;
-
-	if (test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-		return 0;
-
-	spin_lock_irqsave(&dev->lock, flags);
-
-	blk_stop_queue(dev->gd->queue);
-	set_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse);
-
-	spin_unlock_irqrestore(&dev->lock, flags);
-
-	return blktap_ring_pause(tap);
-}
-
-int
 blktap_device_destroy(struct blktap *tap)
 {
 	struct blktap_device *dev = &tap->device;

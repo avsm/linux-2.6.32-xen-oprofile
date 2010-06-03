@@ -238,11 +238,9 @@ blktap_request_free(struct blktap *tap, struct blktap_request *request)
 	list_add(&request->free_list, &pool.free_list);
 	atomic_dec(&handle->bucket->reqs_in_use);
 	free = atomic_dec_and_test(&pool.reqs_in_use);
+	tap->pending_cnt--;
 
 	spin_unlock_irqrestore(&pool.lock, flags);
-
-	if (--tap->pending_cnt == 0)
-		wake_up_interruptible(&tap->wq);
 
 	if (free)
 		wake_up(&pool.wait_queue);

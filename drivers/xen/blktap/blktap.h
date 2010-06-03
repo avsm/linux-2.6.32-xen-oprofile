@@ -31,8 +31,6 @@ extern int blktap_debug_level;
 #define BLKTAP_RING_FD               2
 #define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
-#define BLKTAP_PAUSE_REQUESTED       6
-#define BLKTAP_PAUSED                7
 #define BLKTAP_SHUTDOWN_REQUESTED    8
 #define BLKTAP_PASSTHROUGH           9
 
@@ -41,15 +39,9 @@ extern int blktap_debug_level;
 #define BLKTAP2_IOCTL_ALLOC_TAP	     200
 #define BLKTAP2_IOCTL_FREE_TAP       201
 #define BLKTAP2_IOCTL_CREATE_DEVICE  202
-#define BLKTAP2_IOCTL_SET_PARAMS     203
-#define BLKTAP2_IOCTL_PAUSE          204
-#define BLKTAP2_IOCTL_REOPEN         205
-#define BLKTAP2_IOCTL_RESUME         206
 
 #define BLKTAP2_MAX_MESSAGE_LEN      256
 
-#define BLKTAP2_RING_MESSAGE_PAUSE   1
-#define BLKTAP2_RING_MESSAGE_RESUME  2
 #define BLKTAP2_RING_MESSAGE_CLOSE   3
 
 #define BLKTAP_REQUEST_FREE          0
@@ -119,8 +111,6 @@ struct blktap_ring {
 	struct vm_foreign_map          foreign_map;
 	unsigned long                  ring_vstart;
 	unsigned long                  user_vstart;
-
-	int                            response;
 
 	wait_queue_head_t              poll_wait;
 
@@ -203,8 +193,6 @@ int blktap_ring_init(int *);
 int blktap_ring_free(void);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
-int blktap_ring_pause(struct blktap *);
-int blktap_ring_resume(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
 
 int blktap_sysfs_init(void);
@@ -216,8 +204,6 @@ int blktap_device_init(int *);
 void blktap_device_free(void);
 int blktap_device_create(struct blktap *);
 int blktap_device_destroy(struct blktap *);
-int blktap_device_pause(struct blktap *);
-int blktap_device_resume(struct blktap *);
 int blktap_device_run_queue(struct blktap *);
 void blktap_device_restart(struct blktap *);
 void blktap_device_finish_request(struct blktap *,

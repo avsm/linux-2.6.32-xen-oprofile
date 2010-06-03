@@ -178,9 +178,6 @@ blktap_ring_vm_close(struct vm_area_struct *vma)
 	ring->vma = NULL;
 	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
 
-	clear_bit(BLKTAP_PAUSED, &tap->dev_inuse);
-	clear_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse);
-
 	wake_up(&tap->wq);
 }
 
@@ -381,70 +378,6 @@ blktap_ring_ioctl(struct inode *inode, struct file *filp,
 
 		tap->params = params;
 		return blktap_device_create(tap);
-
-	case BLKTAP2_IOCTL_SET_PARAMS:
-		if (!arg)
-			return -EINVAL;
-
-		if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-			return -EINVAL;
-
-		if (copy_from_user(&params, (struct blktap_params __user *)arg,
-				   sizeof(params))) {
-			BTERR("failed to get params\n");
-			return -EFAULT;
-		}
-
-		if (blktap_validate_params(tap, &params)) {
-			BTERR("invalid params\n");
-			return -EINVAL;
-		}
-
-		tap->params = params;
-		return 0;
-
-	case BLKTAP2_IOCTL_PAUSE:
-		if (!test_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse))
-			return -EINVAL;
-
-		set_bit(BLKTAP_PAUSED, &tap->dev_inuse);
-		clear_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse);
-
-		blktap_ring_set_message(tap, 0);
-		wake_up_interruptible(&tap->wq);
-
-		return 0;
-
-
-	case BLKTAP2_IOCTL_REOPEN:
-		if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-			return -EINVAL;
-
-		if (!arg)
-			return -EINVAL;
-
-		if (copy_to_user((char __user *)arg,
-				 tap->params.name,
-				 strlen(tap->params.name) + 1))
-			return -EFAULT;
-
-		blktap_ring_set_message(tap, 0);
-		wake_up_interruptible(&tap->wq);
-
-		return 0;
-
-	case BLKTAP2_IOCTL_RESUME:
-		if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-			return -EINVAL;
-
-		tap->ring.response = (int)arg;
-		if (!tap->ring.response)
-			clear_bit(BLKTAP_PAUSED, &tap->dev_inuse);
-
-		blktap_ring_set_message(tap, 0);
-		wake_up_interruptible(&tap->wq);
-
-		return 0;
 	}
 
 	return -ENOIOCTLCMD;
@@ -491,66 +424,6 @@ void
 blktap_ring_kick_user(struct blktap *tap)
 {
 	wake_up_interruptible(&tap->ring.poll_wait);
-}
-
-int
-blktap_ring_resume(struct blktap *tap)
-{
-	int err;
-	struct blktap_ring *ring = &tap->ring;
-
-	if (!blktap_active(tap))
-		return -ENODEV;
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-		return -EINVAL;
-
-	/* set shared flag for resume */
-	ring->response = 0;
-
-	blktap_ring_set_message(tap, BLKTAP2_RING_MESSAGE_RESUME);
-	blktap_ring_kick_user(tap);
-
-	wait_event_interruptible(tap->wq, ring->response ||
-				 !test_bit(BLKTAP_PAUSED, &tap->dev_inuse));
-
-	err = ring->response;
-	ring->response = 0;
-
-	BTDBG("err: %d\n", err);
-
-	if (err)
-		return err;
-
-	if (test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-		return -EAGAIN;
-
-	return 0;
-}
-
-int
-blktap_ring_pause(struct blktap *tap)
-{
-	if (!blktap_active(tap))
-		return -ENODEV;
-
-	if (!test_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse))
-		return -EINVAL;
-
-	BTDBG("draining queue\n");
-	wait_event_interruptible(tap->wq, !tap->pending_cnt);
-	if (tap->pending_cnt)
-		return -EAGAIN;
-
-	blktap_ring_set_message(tap, BLKTAP2_RING_MESSAGE_PAUSE);
-	blktap_ring_kick_user(tap);
-
-	BTDBG("waiting for tapdisk response\n");
-	wait_event_interruptible(tap->wq, test_bit(BLKTAP_PAUSED, &tap->dev_inuse));
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse))
-		return -EAGAIN;
-
-	return 0;
 }
 
 int
