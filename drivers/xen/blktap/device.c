@@ -212,9 +212,6 @@ blktap_device_end_dequeued_request(struct blktap_device *dev,
 	BUG_ON(ret);
 }
 
-/*
- * tap->tap_sem held on entry
- */
 static void
 blktap_device_fast_flush(struct blktap *tap, struct blktap_request *request)
 {
@@ -302,9 +299,6 @@ blktap_device_fast_flush(struct blktap *tap, struct blktap_request *request)
 			       request->nr_pages << PAGE_SHIFT, NULL);
 }
 
-/*
- * tap->tap_sem held on entry
- */
 static void
 blktap_unmap(struct blktap *tap, struct blktap_request *request)
 {
@@ -349,8 +343,6 @@ blktap_device_fail_pending_requests(struct blktap *tap)
 	if (!test_bit(BLKTAP_DEVICE, &tap->dev_inuse))
 		return;
 
-	down_write(&tap->tap_sem);
-
 	dev = &tap->device;
 	for (usr_idx = 0; usr_idx < MAX_PENDING_REQS; usr_idx++) {
 		request = tap->pending_requests[usr_idx];
@@ -368,8 +360,6 @@ blktap_device_fail_pending_requests(struct blktap *tap)
 		blktap_request_free(tap, request);
 	}
 
-	up_write(&tap->tap_sem);
-
 	spin_lock_irq(&dev->lock);
 
 	/* fail any future requests */
@@ -379,9 +369,6 @@ blktap_device_fail_pending_requests(struct blktap *tap)
 	spin_unlock_irq(&dev->lock);
 }
 
-/*
- * tap->tap_sem held on entry
- */
 void
 blktap_device_finish_request(struct blktap *tap,
 			     struct blkif_response *res,
@@ -590,9 +577,6 @@ blktap_device_process_request(struct blktap *tap,
 	err = -1;
 	memset(&table, 0, sizeof(table));
 
-	if (!blktap_active(tap))
-		goto out;
-
 	ring    = &tap->ring;
 	usr_idx = request->usr_idx;
 	blkif_req.id = usr_idx;
@@ -774,24 +758,24 @@ blktap_device_enable_passthrough(struct blktap *tap,
 #endif
 
 /*
- * dev->lock held on entry
+ * called from tapdisk context
  */
-static void
+int
 blktap_device_run_queue(struct blktap *tap)
 {
-	int queued, err;
+	int err, rv;
 	struct request_queue *rq;
 	struct request *req;
 	struct blktap_ring *ring;
 	struct blktap_device *dev;
 	struct blktap_request *request;
 
-	queued = 0;
 	ring   = &tap->ring;
 	dev    = &tap->device;
 	rq     = dev->gd->queue;
 
 	BTDBG("running queue for %d\n", tap->minor);
+	spin_lock_irq(&dev->lock);
 
 	while ((req = elv_next_request(rq)) != NULL) {
 		if (!blk_fs_request(req)) {
@@ -816,7 +800,6 @@ blktap_device_run_queue(struct blktap *tap)
 		wait:
 			/* Avoid pointless unplugs. */
 			blk_stop_queue(rq);
-			blktap_defer(tap);
 			break;
 		}
 
@@ -836,27 +819,26 @@ blktap_device_run_queue(struct blktap *tap)
 		blkdev_dequeue_request(req);
 
 		spin_unlock_irq(&dev->lock);
-		down_read(&tap->tap_sem);
 
 		err = blktap_device_process_request(tap, request, req);
-		if (!err)
-			queued++;
-		else {
+		if (err) {
 			blktap_device_end_dequeued_request(dev, req, -EIO);
 			blktap_request_free(tap, request);
 		}
 
-		up_read(&tap->tap_sem);
 		spin_lock_irq(&dev->lock);
 	}
 
-	if (queued)
-		blktap_ring_kick_user(tap);
+	spin_unlock_irq(&dev->lock);
+
+	rv = ring->ring.req_prod_pvt -
+		ring->ring.sring->req_prod;
+
+	RING_PUSH_REQUESTS(&ring->ring);
+
+	return rv;
 }
 
-/*
- * dev->lock held on entry
- */
 static void
 blktap_device_do_request(struct request_queue *rq)
 {
@@ -872,13 +854,7 @@ blktap_device_do_request(struct request_queue *rq)
 	if (!blktap_active(tap))
 		goto fail;
 
-	if (test_bit(BLKTAP_PAUSED, &tap->dev_inuse) ||
-	    test_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse)) {
-		blktap_defer(tap);
-		return;
-	}
-
-	blktap_device_run_queue(tap);
+	blktap_ring_kick_user(tap);
 	return;
 
 fail:
@@ -896,18 +872,6 @@ blktap_device_restart(struct blktap *tap)
 	struct blktap_device *dev;
 
 	dev = &tap->device;
-
-	if (blktap_active(tap) && RING_FULL(&tap->ring.ring)) {
-		blktap_defer(tap);
-		return;
-	}
-
-	if (test_bit(BLKTAP_PAUSED, &tap->dev_inuse) ||
-	    test_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse)) {
-		blktap_defer(tap);
-		return;
-	}
-
 	spin_lock_irq(&dev->lock);
 
 	/* Re-enable calldowns. */

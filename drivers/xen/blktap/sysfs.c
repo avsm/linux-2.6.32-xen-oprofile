@@ -265,8 +265,6 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 		       "device users: %d\n", tap->params.capacity,
 		       tap->params.sector_size, tap->device.users);
 
-	down_read(&tap->tap_sem);
-
 	tmp += sprintf(tmp, "pending requests: %d\n", tap->pending_cnt);
 	for (i = 0; i < MAX_PENDING_REQS; i++) {
 		struct blktap_request *req = tap->pending_requests[i];
@@ -282,7 +280,6 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 			       req->time.tv_usec);
 	}
 
-	up_read(&tap->tap_sem);
 	ret = (tmp - buf) + 1;
 
 out:

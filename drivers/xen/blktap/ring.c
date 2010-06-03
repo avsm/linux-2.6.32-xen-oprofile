@@ -30,7 +30,7 @@ vma_to_blktap(struct vm_area_struct *vma)
   */
 #define RING_PAGES 1
 
-static int
+static void
 blktap_read_ring(struct blktap *tap)
 {
 	/* This is called to read responses from the ring. */
@@ -40,13 +40,9 @@ blktap_read_ring(struct blktap *tap)
 	struct blktap_ring *ring;
 	struct blktap_request *request;
 
-	down_read(&tap->tap_sem);
-
 	ring = &tap->ring;
-	if (!ring->vma) {
-		up_read(&tap->tap_sem);
-		return 0;
-	}
+	if (!ring->vma)
+		return;
 
 	/* for each outstanding message on the ring  */
 	rp = ring->ring.sring->rsp_prod;
@@ -54,7 +50,6 @@ blktap_read_ring(struct blktap *tap)
 
 	for (rc = ring->ring.rsp_cons; rc != rp; rc++) {
 		memcpy(&res, RING_GET_RESPONSE(&ring->ring, rc), sizeof(res));
-		mb(); /* rsp_cons read by RING_FULL() in do_block_io_op(). */
 		++ring->ring.rsp_cons;
 
 		usr_idx = (int)res.id;
@@ -70,11 +65,9 @@ blktap_read_ring(struct blktap *tap)
 		blktap_device_finish_request(tap, &res, request);
 	}
 
-	up_read(&tap->tap_sem);
 
-	blktap_run_deferred();
-
-	return 0;
+	blktap_device_restart(tap);
+	return;
 }
 
 static int blktap_ring_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
@@ -163,28 +156,13 @@ blktap_ring_clear_pte(struct vm_area_struct *vma,
 }
 
 static void
-blktap_ring_vm_unmap(struct vm_area_struct *vma)
-{
-	struct blktap *tap = vma_to_blktap(vma);
-
-	down_write(&tap->tap_sem);
-	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
-	clear_bit(BLKTAP_PAUSED, &tap->dev_inuse);
-	clear_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse);
-	up_write(&tap->tap_sem);
-}
-
-static void
 blktap_ring_vm_close(struct vm_area_struct *vma)
 {
 	struct blktap *tap = vma_to_blktap(vma);
 	struct blktap_ring *ring = &tap->ring;
 
-	blktap_ring_vm_unmap(vma);                 /* fail future requests */
 	blktap_device_fail_pending_requests(tap);  /* fail pending requests */
 	blktap_device_restart(tap);                /* fail deferred requests */
-
-	down_write(&tap->tap_sem);
 
 	zap_page_range(vma, vma->vm_start, vma->vm_end - vma->vm_start, NULL);
 
@@ -198,16 +176,17 @@ blktap_ring_vm_close(struct vm_area_struct *vma)
 	BTINFO("unmapping ring %d\n", tap->minor);
 	ring->ring.sring = NULL;
 	ring->vma = NULL;
+	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
 
-	up_write(&tap->tap_sem);
+	clear_bit(BLKTAP_PAUSED, &tap->dev_inuse);
+	clear_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse);
 
 	wake_up(&tap->wq);
 }
 
 static struct vm_operations_struct blktap_ring_vm_operations = {
 	.close    = blktap_ring_vm_close,
-	.unmap    = blktap_ring_vm_unmap,
-	.fault   = blktap_ring_fault,
+	.fault    = blktap_ring_fault,
 	.zap_pte  = blktap_ring_clear_pte,
 };
 
@@ -363,10 +342,8 @@ blktap_ring_set_message(struct blktap *tap, int msg)
 {
 	struct blktap_ring *ring = &tap->ring;
 
-	down_read(&tap->tap_sem);
 	if (ring->ring.sring)
 		ring->ring.sring->pad[0] = msg;
-	up_read(&tap->tap_sem);
 }
 
 static int
@@ -381,11 +358,15 @@ blktap_ring_ioctl(struct inode *inode, struct file *filp,
 	switch(cmd) {
 	case BLKTAP2_IOCTL_KICK_FE:
 		/* There are fe messages to process. */
-		return blktap_read_ring(tap);
+		blktap_read_ring(tap);
+		return 0;
 
 	case BLKTAP2_IOCTL_CREATE_DEVICE:
 		if (!arg)
 			return -EINVAL;
+
+		if (!blktap_active(tap))
+			return -ENODEV;
 
 		if (copy_from_user(&params, (struct blktap_params __user *)arg,
 				   sizeof(params))) {
@@ -473,13 +454,26 @@ static unsigned int blktap_ring_poll(struct file *filp, poll_table *wait)
 {
 	struct blktap *tap = filp->private_data;
 	struct blktap_ring *ring = &tap->ring;
+	int work = 0;
+
+	down_read(&current->mm->mmap_sem);
+
+	if (!blktap_active(tap)) {
+		up_read(&current->mm->mmap_sem);
+		force_sig(SIGSEGV, current);
+		return 0;
+	}
 
 	poll_wait(filp, &ring->poll_wait, wait);
-	if (ring->ring.sring->pad[0] != 0 ||
-	    ring->ring.req_prod_pvt != ring->ring.sring->req_prod) {
-		RING_PUSH_REQUESTS(&ring->ring);
+
+	if (test_bit(BLKTAP_DEVICE, &tap->dev_inuse))
+		work = blktap_device_run_queue(tap);
+
+	up_read(&current->mm->mmap_sem);
+
+	if (work ||
+	    ring->ring.sring->pad[0])
 		return POLLIN | POLLRDNORM;
-	}
 
 	return 0;
 }
