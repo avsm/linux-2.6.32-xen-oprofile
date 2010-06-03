@@ -324,6 +324,8 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 	free_page((unsigned long)sring);
 	kfree(map);
 
+	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
+
 	return -ENOMEM;
 }
 
