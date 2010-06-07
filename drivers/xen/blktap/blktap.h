@@ -9,8 +9,6 @@
 #include <xen/blkif.h>
 #include <xen/grant_table.h>
 
-//#define ENABLE_PASSTHROUGH
-
 extern int blktap_debug_level;
 
 #define BTPRINTK(level, tag, force, _f, _a...)				\
@@ -31,26 +29,17 @@ extern int blktap_debug_level;
 #define BLKTAP_RING_FD               2
 #define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
-#define BLKTAP_PAUSE_REQUESTED       6
-#define BLKTAP_PAUSED                7
 #define BLKTAP_SHUTDOWN_REQUESTED    8
 #define BLKTAP_PASSTHROUGH           9
-#define BLKTAP_DEFERRED              10
 
 /* blktap IOCTLs: */
 #define BLKTAP2_IOCTL_KICK_FE        1
 #define BLKTAP2_IOCTL_ALLOC_TAP	     200
 #define BLKTAP2_IOCTL_FREE_TAP       201
 #define BLKTAP2_IOCTL_CREATE_DEVICE  202
-#define BLKTAP2_IOCTL_SET_PARAMS     203
-#define BLKTAP2_IOCTL_PAUSE          204
-#define BLKTAP2_IOCTL_REOPEN         205
-#define BLKTAP2_IOCTL_RESUME         206
 
 #define BLKTAP2_MAX_MESSAGE_LEN      256
 
-#define BLKTAP2_RING_MESSAGE_PAUSE   1
-#define BLKTAP2_RING_MESSAGE_RESUME  2
 #define BLKTAP2_RING_MESSAGE_CLOSE   3
 
 #define BLKTAP_REQUEST_FREE          0
@@ -121,8 +110,6 @@ struct blktap_ring {
 	unsigned long                  ring_vstart;
 	unsigned long                  user_vstart;
 
-	int                            response;
-
 	wait_queue_head_t              poll_wait;
 
 	dev_t                          devno;
@@ -168,8 +155,6 @@ struct blktap {
 
 	struct blktap_params           params;
 
-	struct rw_semaphore            tap_sem;
-
 	struct blktap_ring             ring;
 	struct blktap_device           device;
 
@@ -178,7 +163,6 @@ struct blktap {
 	struct scatterlist             sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
 	wait_queue_head_t              wq;
-	struct list_head               deferred_queue;
 
 	struct blktap_statistics       stats;
 };
@@ -207,8 +191,6 @@ int blktap_ring_init(int *);
 int blktap_ring_free(void);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
-int blktap_ring_pause(struct blktap *);
-int blktap_ring_resume(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
 
 int blktap_sysfs_init(void);
@@ -220,8 +202,7 @@ int blktap_device_init(int *);
 void blktap_device_free(void);
 int blktap_device_create(struct blktap *);
 int blktap_device_destroy(struct blktap *);
-int blktap_device_pause(struct blktap *);
-int blktap_device_resume(struct blktap *);
+int blktap_device_run_queue(struct blktap *);
 void blktap_device_restart(struct blktap *);
 void blktap_device_finish_request(struct blktap *,
 				  struct blkif_response *,
@@ -231,9 +212,6 @@ void blktap_device_fail_pending_requests(struct blktap *);
 int blktap_device_enable_passthrough(struct blktap *,
 				     unsigned, unsigned);
 #endif
-
-void blktap_defer(struct blktap *);
-void blktap_run_deferred(void);
 
 int blktap_request_pool_init(void);
 void blktap_request_pool_free(void);

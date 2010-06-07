@@ -38,12 +38,6 @@ blktap_sysfs_exit(struct blktap *tap)
 }
 
 #define CLASS_DEVICE_ATTR(a,b,c,d) DEVICE_ATTR(a,b,c,d)
-
-static ssize_t blktap_sysfs_pause_device(struct device *, struct device_attribute *, const char *, size_t);
-CLASS_DEVICE_ATTR(pause, S_IWUSR, NULL, blktap_sysfs_pause_device);
-static ssize_t blktap_sysfs_resume_device(struct device *, struct device_attribute *, const char *, size_t);
-CLASS_DEVICE_ATTR(resume, S_IWUSR, NULL, blktap_sysfs_resume_device);
-
 static ssize_t
 blktap_sysfs_set_name(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -57,12 +51,6 @@ blktap_sysfs_set_name(struct device *dev, struct device_attribute *attr, const c
 		err = -ENODEV;
 		goto out;
 	}
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse)) {
-		err = -EPERM;
-		goto out;
-	}
-
 	if (size > BLKTAP2_MAX_MESSAGE_LEN) {
 		err = -ENAMETOOLONG;
 		goto out;
@@ -108,7 +96,6 @@ blktap_sysfs_remove_device(struct device *dev,
 			   struct device_attribute *attr,
 			   const char *buf, size_t size)
 {
-	int err;
 	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
 	if (!tap->ring.dev)
@@ -117,130 +104,15 @@ blktap_sysfs_remove_device(struct device *dev,
 	if (test_and_set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
 		return -EBUSY;
 
-	err = blktap_control_destroy_device(tap);
+	BTDBG("sending tapdisk close message\n");
+	tap->ring.ring.sring->pad[0] = BLKTAP2_RING_MESSAGE_CLOSE;
+	blktap_ring_kick_user(tap);
+	wait_event_interruptible(tap->wq,
+				 !test_bit(BLKTAP_CONTROL, &tap->dev_inuse));
 
-	return (err ? : size);
+	return 0;
 }
 CLASS_DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
-
-static ssize_t
-blktap_sysfs_pause_device(struct device *dev,
-			  struct device_attribute *attr,
-			  const char *buf, size_t size)
-{
-	int err;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
-
-	blktap_sysfs_enter(tap);
-
-	BTDBG("pausing %u:%u: dev_inuse: %lu\n",
-	      MAJOR(tap->ring.devno), MINOR(tap->ring.devno), tap->dev_inuse);
-
-	if (!tap->ring.dev ||
-	    test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse)) {
-		err = -ENODEV;
-		goto out;
-	}
-
-	if (test_bit(BLKTAP_PAUSE_REQUESTED, &tap->dev_inuse)) {
-		err = -EBUSY;
-		goto out;
-	}
-
-	if (test_bit(BLKTAP_PAUSED, &tap->dev_inuse)) {
-		err = 0;
-		goto out;
-	}
-
-	err = blktap_device_pause(tap);
-	if (!err) {
-		device_remove_file(dev, &dev_attr_pause);
-		err = device_create_file(dev, &dev_attr_resume);
-	}
-
-out:
-	blktap_sysfs_exit(tap);
-
-	return (err ? err : size);
-}
-
-static ssize_t
-blktap_sysfs_resume_device(struct device *dev,
-			   struct device_attribute *attr,
-			   const char *buf, size_t size)
-{
-	int err;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
-
-	blktap_sysfs_enter(tap);
-
-	if (!tap->ring.dev ||
-	    test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse)) {
-		err = -ENODEV;
-		goto out;
-	}
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse)) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	err = blktap_device_resume(tap);
-	if (!err) {
-		device_remove_file(dev, &dev_attr_resume);
-		err = device_create_file(dev, &dev_attr_pause);
-	}
-
-out:
-	blktap_sysfs_exit(tap);
-
-	BTDBG("returning %zd\n", (err ? err : size));
-	return (err ? err : size);
-}
-
-#ifdef ENABLE_PASSTHROUGH
-static ssize_t
-blktap_sysfs_enable_passthrough(struct device *dev,
-				const char *buf, size_t size)
-{
-	int err;
-	unsigned major, minor;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
-
-	BTINFO("passthrough request enabled\n");
-
-	blktap_sysfs_enter(tap);
-
-	if (!tap->ring.dev ||
-	    test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse)) {
-		err = -ENODEV;
-		goto out;
-	}
-
-	if (!test_bit(BLKTAP_PAUSED, &tap->dev_inuse)) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	if (test_bit(BLKTAP_PASSTHROUGH, &tap->dev_inuse)) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	err = sscanf(buf, "%x:%x", &major, &minor);
-	if (err != 2) {
-		err = -EINVAL;
-		goto out;
-	}
-
-	err = blktap_device_enable_passthrough(tap, major, minor);
-
-out:
-	blktap_sysfs_exit(tap);
-	BTDBG("returning %d\n", (err ? err : size));
-	return (err ? err : size);
-}
-#endif
 
 static ssize_t
 blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, char *buf)
@@ -265,8 +137,6 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 		       "device users: %d\n", tap->params.capacity,
 		       tap->params.sector_size, tap->device.users);
 
-	down_read(&tap->tap_sem);
-
 	tmp += sprintf(tmp, "pending requests: %d\n", tap->pending_cnt);
 	for (i = 0; i < MAX_PENDING_REQS; i++) {
 		struct blktap_request *req = tap->pending_requests[i];
@@ -282,7 +152,6 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 			       req->time.tv_usec);
 	}
 
-	up_read(&tap->tap_sem);
 	ret = (tmp - buf) + 1;
 
 out:
@@ -319,26 +188,18 @@ blktap_sysfs_create(struct blktap *tap)
 	printk(KERN_CRIT "%s: adding attributes for dev %p\n", __func__, dev);
 	err = device_create_file(dev, &dev_attr_name);
 	if (err)
-		goto out;
+		goto fail;
 	err = device_create_file(dev, &dev_attr_remove);
 	if (err)
-		goto out_unregister_name;
-	err = device_create_file(dev, &dev_attr_pause);
-	if (err)
-		goto out_unregister_remove;
+		goto fail;
 	err = device_create_file(dev, &dev_attr_debug);
 	if (err)
-		goto out_unregister_pause;
+		goto fail;
 
 	return 0;
 
-out_unregister_pause:
-	device_remove_file(dev, &dev_attr_pause);
-out_unregister_remove:
-	device_remove_file(dev, &dev_attr_remove);
-out_unregister_name:
-	device_remove_file(dev, &dev_attr_name);
-out:
+fail:
+	device_unregister(dev);
 	return err;
 }
 

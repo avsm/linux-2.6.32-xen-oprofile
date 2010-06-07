@@ -376,9 +376,11 @@ static long evtchn_ioctl(struct file *file,
 			break;
 		}
 
-		evtchn_unbind_from_user(u, unbind.port);
+		disable_irq(irq_from_evtchn(unbind.port));
 
 		spin_unlock_irq(&port_user_lock);
+
+		evtchn_unbind_from_user(u, unbind.port);
 
 		rc = 0;
 		break;
@@ -485,10 +487,17 @@ static int evtchn_release(struct inode *inode, struct file *filp)
 		if (get_port_user(i) != u)
 			continue;
 
-		evtchn_unbind_from_user(get_port_user(i), i);
+		disable_irq(irq_from_evtchn(i));
 	}
 
 	spin_unlock_irq(&port_user_lock);
+
+	for (i = 0; i < NR_EVENT_CHANNELS; i++) {
+		if (get_port_user(i) != u)
+			continue;
+
+		evtchn_unbind_from_user(get_port_user(i), i);
+	}
 
 	kfree(u->name);
 	kfree(u);
@@ -509,7 +518,7 @@ static const struct file_operations evtchn_fops = {
 
 static struct miscdevice evtchn_miscdev = {
 	.minor        = MISC_DYNAMIC_MINOR,
-	.name         = "evtchn",
+	.name         = "xen/evtchn",
 	.fops         = &evtchn_fops,
 };
 static int __init evtchn_init(void)
