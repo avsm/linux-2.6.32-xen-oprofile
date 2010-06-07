@@ -594,7 +594,7 @@ static const struct file_operations gntdev_fops = {
 
 static struct miscdevice gntdev_miscdev = {
 	.minor        = MISC_DYNAMIC_MINOR,
-	.name         = "gntdev",
+	.name         = "xen/gntdev",
 	.fops         = &gntdev_fops,
 };
 
