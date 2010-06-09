@@ -503,8 +503,16 @@ static int intel_i810_insert_entries(struct agp_memory *mem, off_t pg_start,
 		if (!mem->is_flushed)
 			global_cache_flush();
 		for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
+			phys_addr_t phys = page_to_phys(mem->pages[i]);
+			if (xen_pv_domain()) {
+				phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+						page_to_pfn(mem->pages[i])));
+				/* Fixup: */
+				if (xen_phys != phys)
+					phys = xen_phys;
+			}
 			writel(agp_bridge->driver->mask_memory(agp_bridge,
-					page_to_phys(mem->pages[i]), mask_type),
+					phys, mask_type),
 			       intel_private.registers+I810_PTE_BASE+(j*4));
 		}
 		readl(intel_private.registers+I810_PTE_BASE+((j-1)*4));
@@ -577,6 +585,12 @@ static struct agp_memory *alloc_agpphysmem_i8xx(size_t pg_count, int type)
 	new->num_scratch_pages = pg_count;
 	new->type = AGP_PHYS_MEMORY;
 	new->physical = page_to_phys(new->pages[0]);
+	if (xen_pv_domain()) {
+		phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+					page_to_pfn(new->pages[0])));
+		if (xen_phys != new->physical)
+			new->physical = xen_phys;
+	}
 	return new;
 }
 
@@ -1025,8 +1039,16 @@ static int intel_i830_insert_entries(struct agp_memory *mem, off_t pg_start,
 		global_cache_flush();
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
+		phys_addr_t phys = page_to_phys(mem->pages[i]);
+		if (xen_pv_domain()) {
+			phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+					page_to_pfn(mem->pages[i])));
+			/* Fixup: */
+			if (xen_phys != phys)
+				phys = xen_phys;
+		}
 		writel(agp_bridge->driver->mask_memory(agp_bridge,
-				page_to_phys(mem->pages[i]), mask_type),
+				phys, mask_type),
 		       intel_private.registers+I810_PTE_BASE+(j*4));
 	}
 	readl(intel_private.registers+I810_PTE_BASE+((j-1)*4));
