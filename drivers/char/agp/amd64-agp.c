@@ -18,6 +18,8 @@
 #include <asm/k8.h>
 #include <asm/gart.h>
 #include "agp.h"
+#include <xen/page.h>
+#include <asm/xen/page.h>
 
 /* NVIDIA K8 registers */
 #define NVIDIA_X86_64_0_APBASE		0x10
@@ -78,8 +80,21 @@ static int amd64_insert_memory(struct agp_memory *mem, off_t pg_start, int type)
 	}
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
+		phys_addr_t phys = page_to_phys(mem->pages[i]);
+		if (xen_pv_domain()) {
+			phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+					page_to_pfn(mem->pages[i])));
+			if (phys != xen_phys) {
+				printk(KERN_ERR "Fixing up GART: (0x%lx->0x%lx)." \
+					" CODE UNTESTED!\n",
+					(unsigned long)phys,
+					(unsigned long)xen_phys);
+				WARN_ON_ONCE(phys != xen_phys);
+				phys = xen_phys;
+			}
+		}
 		tmp = agp_bridge->driver->mask_memory(agp_bridge,
-						      page_to_phys(mem->pages[i]),
+						      phys,
 						      mask_type);
 
 		BUG_ON(tmp & 0xffffff0000000ffcULL);
@@ -181,6 +196,20 @@ static int amd_8151_configure(void)
 	unsigned long gatt_bus = virt_to_phys(agp_bridge->gatt_table_real);
 	int i;
 
+	if (xen_pv_domain()) {
+		phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+				virt_to_pfn(agp_bridge->gatt_table_real)));
+		/* Future thoughts: Perhaps use the gatt_table_bus that
+		 * agp_generic_create_gatt_table has setup instead of
+		 * doing the virt_to_phys once more? */
+		if (gatt_bus != xen_phys) {
+			printk(KERN_ERR "Fixing up GATT: (0x%lx->0x%lx)." \
+					" CODE UNTESTED!\n", gatt_bus,
+					(unsigned long)xen_phys);
+			WARN_ON_ONCE(gatt_bus != xen_phys);
+			gatt_bus = xen_phys;
+		}
+	}
 	/* Configure AGP regs in each x86-64 host bridge. */
         for (i = 0; i < num_k8_northbridges; i++) {
 		agp_bridge->gart_bus_addr =
