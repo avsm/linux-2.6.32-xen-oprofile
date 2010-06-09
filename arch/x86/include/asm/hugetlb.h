@@ -44,7 +44,7 @@ static inline pte_t huge_ptep_get(pte_t *ptep)
 static inline void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 				   pte_t *ptep, pte_t pte)
 {
-	set_pmd((pmd_t *)ptep, __pmd(pte_val(pte)));
+	set_pmd((pmd_t *)ptep, native_make_pmd(native_pte_val(pte)));
 }
 
 static inline pte_t huge_ptep_get_and_clear(struct mm_struct *mm,
