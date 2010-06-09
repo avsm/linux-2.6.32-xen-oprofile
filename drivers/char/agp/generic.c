@@ -1004,6 +1004,14 @@ int agp_generic_create_gatt_table(struct agp_bridge_data *bridge)
 		return -ENOMEM;
 	}
 	bridge->gatt_bus_addr = virt_to_phys(bridge->gatt_table_real);
+	/* KRW: virt_to_phys under Xen is not safe. */
+	if (xen_pv_domain()) {
+		/* Use back-door to get the "real" PFN. */
+		phys_addr_t pfn = virt_to_pfn(bridge->gatt_table_real);
+		phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(pfn));
+		if (bridge->gatt_bus_addr != xen_phys)
+			bridge->gatt_bus_addr = xen_phys;
+	}
 
 	/* AK: bogus, should encode addresses > 4GB */
 	for (i = 0; i < num_entries; i++) {
