@@ -42,6 +42,8 @@
 #include <asm/cacheflush.h>
 #include <asm/pgtable.h>
 #include "agp.h"
+#include <xen/page.h>
+#include <asm/xen/page.h>
 
 __u32 *agp_gatt_table;
 int agp_memory_reserved;
@@ -1141,8 +1143,17 @@ int agp_generic_insert_memory(struct agp_memory * mem, off_t pg_start, int type)
 	}
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
+		phys_addr_t phys = page_to_phys(mem->pages[i]);
+
+		/* HACK: Via a back-door we get the bus address. */
+		if (xen_pv_domain()) {
+			phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+					page_to_pfn(mem->pages[i])));
+			if (phys != xen_phys)
+				phys = xen_phys;
+		}
 		writel(bridge->driver->mask_memory(bridge,
-						   page_to_phys(mem->pages[i]),
+						   phys,
 						   mask_type),
 		       bridge->gatt_table+j);
 	}
