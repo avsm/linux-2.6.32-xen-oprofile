@@ -218,7 +218,11 @@ static struct sk_buff *netbk_copy_skb(struct sk_buff *skb)
 		len -= copy;
 	}
 
+#ifdef NET_SKBUFF_DATA_USES_OFFSET
+	offset = 0;
+#else
 	offset = nskb->data - skb->data;
+#endif
 
 	nskb->transport_header = skb->transport_header + offset;
 	nskb->network_header = skb->network_header + offset;
