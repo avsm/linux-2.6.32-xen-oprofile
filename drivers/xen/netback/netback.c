@@ -411,14 +411,6 @@ static void netbk_gop_skb(struct sk_buff *skb,
 	netif->rx.req_cons += nr_frags + extra;
 }
 
-static inline void netbk_free_pages(int nr_frags, struct netbk_rx_meta *meta)
-{
-	int i;
-
-	for (i = 0; i < nr_frags; i++)
-		put_page(meta[i].frag.page);
-}
-
 /* This is a twin to netbk_gop_skb.  Assume that netbk_gop_skb was
    used to set up the operations on the top of
    netrx_pending_operations, which have since been done.  Check that
