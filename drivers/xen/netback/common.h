@@ -84,7 +84,9 @@ struct xen_netif {
 	/* Internal feature information. */
 	u8 can_queue:1;	/* can queue packets for receiver? */
 
-	/* Allow netif_be_start_xmit() to peek ahead in the rx request ring. */
+	/* Allow netif_be_start_xmit() to peek ahead in the rx request
+	 * ring.  This is a prediction of what rx_req_cons will be once
+	 * all queued skbs are put on the ring. */
 	RING_IDX rx_req_cons_peek;
 
 	/* Transmit shaping: allow 'credit_bytes' every 'credit_usec'. */
@@ -233,6 +235,8 @@ typedef unsigned int pending_ring_idx_t;
 
 struct netbk_rx_meta {
 	int id;
+	int size;
+	int gso_size;
 };
 
 struct netbk_tx_pending_inuse {
@@ -241,6 +245,8 @@ struct netbk_tx_pending_inuse {
 };
 
 #define MAX_PENDING_REQS 256
+
+#define MAX_BUFFER_OFFSET PAGE_SIZE
 
 /* extra field used in struct page */
 union page_ext {
@@ -303,7 +309,12 @@ struct xen_netbk {
 	struct multicall_entry rx_mcl[NET_RX_RING_SIZE+3];
 	struct mmu_update rx_mmu[NET_RX_RING_SIZE];
 	struct gnttab_transfer grant_trans_op[NET_RX_RING_SIZE];
-	struct gnttab_copy grant_copy_op[NET_RX_RING_SIZE];
+	/*
+	 * Each head or fragment can be up to 4096 bytes. Given
+	 * MAX_BUFFER_OFFSET of 4096 the worst case is that each
+	 * head/fragment uses 2 copy operation.
+	 */
+	struct gnttab_copy grant_copy_op[2*NET_RX_RING_SIZE];
 	unsigned char rx_notify[NR_IRQS];
 	u16 notify_list[NET_RX_RING_SIZE];
 	struct netbk_rx_meta meta[NET_RX_RING_SIZE];
