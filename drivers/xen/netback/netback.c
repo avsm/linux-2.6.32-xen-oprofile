@@ -1384,16 +1384,6 @@ static void net_tx_submit(struct xen_netbk *netbk)
 		netif_rx_ni(skb);
 		netif->dev->last_rx = jiffies;
 	}
-
-	if (netbk_copy_skb_mode == NETBK_DELAYED_COPY_SKB &&
-	    !list_empty(&netbk->pending_inuse_head)) {
-		struct netbk_tx_pending_inuse *oldest;
-
-		oldest = list_entry(netbk->pending_inuse_head.next,
-				    struct netbk_tx_pending_inuse, list);
-		mod_timer(&netbk->netbk_tx_pending_timer,
-				oldest->alloc_time + HZ);
-	}
 }
 
 /* Called after netfront has transmitted */
@@ -1403,19 +1393,28 @@ static void net_tx_action(unsigned long data)
 	unsigned nr_mops;
 	int ret;
 
-	if (netbk->dealloc_cons != netbk->dealloc_prod)
-		net_tx_action_dealloc(netbk);
+	net_tx_action_dealloc(netbk);
 
 	nr_mops = net_tx_build_mops(netbk);
 
 	if (nr_mops == 0)
-		return;
+		goto out;
 
 	ret = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
 					netbk->tx_map_ops, nr_mops);
 	BUG_ON(ret);
 
 	net_tx_submit(netbk);
+out:
+	if (netbk_copy_skb_mode == NETBK_DELAYED_COPY_SKB &&
+	    !list_empty(&netbk->pending_inuse_head)) {
+		struct netbk_tx_pending_inuse *oldest;
+
+		oldest = list_entry(netbk->pending_inuse_head.next,
+				    struct netbk_tx_pending_inuse, list);
+		mod_timer(&netbk->netbk_tx_pending_timer,
+				oldest->alloc_time + HZ);
+	}
 }
 
 static void netif_idx_release(struct xen_netbk *netbk, u16 pending_idx)
