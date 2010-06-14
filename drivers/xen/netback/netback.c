@@ -1617,8 +1617,7 @@ static int __init netback_init(void)
 		return -ENODEV;
 
 	xen_netbk_group_nr = num_online_cpus();
-	xen_netbk = (struct xen_netbk *)vmalloc(sizeof(struct xen_netbk) *
-					    xen_netbk_group_nr);
+	xen_netbk = vmalloc(sizeof(struct xen_netbk) * xen_netbk_group_nr);
 	if (!xen_netbk) {
 		printk(KERN_ALERT "%s: out of memory\n", __func__);
 		return -ENOMEM;
