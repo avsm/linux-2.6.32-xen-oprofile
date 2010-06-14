@@ -54,8 +54,33 @@
 static unsigned long netbk_queue_length = 32;
 module_param_named(queue_length, netbk_queue_length, ulong, 0644);
 
+static void netbk_add_netif(struct xen_netbk *netbk, int group_nr,
+			   struct xen_netif *netif)
+{
+	int i;
+	int min_netfront_count;
+	int min_group = 0;
+	min_netfront_count = atomic_read(&netbk[0].netfront_count);
+	for (i = 0; i < group_nr; i++) {
+		int netfront_count = atomic_read(&netbk[i].netfront_count);
+		if (netfront_count < min_netfront_count) {
+			min_group = i;
+			min_netfront_count = netfront_count;
+		}
+	}
+
+	netif->group = min_group;
+	atomic_inc(&netbk[netif->group].netfront_count);
+}
+
+static void netbk_remove_netif(struct xen_netbk *netbk, struct xen_netif *netif)
+{
+	atomic_dec(&netbk[netif->group].netfront_count);
+}
+
 static void __netif_up(struct xen_netif *netif)
 {
+	netbk_add_netif(xen_netbk, xen_netbk_group_nr, netif);
 	enable_irq(netif->irq);
 	netif_schedule_work(netif);
 }
@@ -64,6 +89,7 @@ static void __netif_down(struct xen_netif *netif)
 {
 	disable_irq(netif->irq);
 	netif_deschedule_work(netif);
+	netbk_remove_netif(xen_netbk, netif);
 }
 
 static int net_open(struct net_device *dev)
@@ -214,6 +240,7 @@ struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int
 	netif = netdev_priv(dev);
 	memset(netif, 0, sizeof(*netif));
 	netif->domid  = domid;
+	netif->group  = -1;
 	netif->handle = handle;
 	netif->features = NETIF_F_SG;
 	atomic_set(&netif->refcnt, 1);
