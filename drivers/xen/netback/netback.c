@@ -1740,12 +1740,12 @@ static int __init netback_init(void)
 		return -ENODEV;
 
 	xen_netbk_group_nr = num_online_cpus();
-	xen_netbk = (struct xen_netbk *)vmalloc(sizeof(struct xen_netbk) *
-					    xen_netbk_group_nr);
+	xen_netbk = vmalloc(sizeof(struct xen_netbk) * xen_netbk_group_nr);
 	if (!xen_netbk) {
 		printk(KERN_ALERT "%s: out of memory\n", __func__);
 		return -ENOMEM;
 	}
+	memset(xen_netbk, 0, sizeof(struct xen_netbk) * xen_netbk_group_nr);
 
 	/* We can increase reservation by this much in net_rx_action(). */
 //	balloon_update_driver_allowance(NET_RX_RING_SIZE);
