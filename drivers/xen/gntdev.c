@@ -28,7 +28,7 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/sched.h>
-#include <linux/rwsem.h>
+#include <linux/spinlock.h>
 
 #include <xen/xen.h>
 #include <xen/grant_table.h>
@@ -51,7 +51,7 @@ struct gntdev_priv {
 	struct list_head maps;
 	uint32_t used;
 	uint32_t limit;
-	struct rw_semaphore sem;
+	spinlock_t lock;
 	struct mm_struct *mm;
 	struct mmu_notifier mn;
 };
@@ -84,9 +84,9 @@ static void gntdev_print_maps(struct gntdev_priv *priv,
 		       map->index == text_index && text ? text : "");
 }
 
-static struct grant_map *gntdev_add_map(struct gntdev_priv *priv, int count)
+static struct grant_map *gntdev_alloc_map(struct gntdev_priv *priv, int count)
 {
-	struct grant_map *map, *add;
+	struct grant_map *add;
 
 	add = kzalloc(sizeof(struct grant_map), GFP_KERNEL);
 	if (NULL == add)
@@ -107,6 +107,20 @@ static struct grant_map *gntdev_add_map(struct gntdev_priv *priv, int count)
 	if (add->count + priv->used > priv->limit)
 		goto err;
 
+	return add;
+
+err:
+	kfree(add->grants);
+	kfree(add->map_ops);
+	kfree(add->unmap_ops);
+	kfree(add);
+	return NULL;
+}
+
+static void gntdev_add_map(struct gntdev_priv *priv, struct grant_map *add)
+{
+	struct grant_map *map;
+
 	list_for_each_entry(map, &priv->maps, next) {
 		if (add->index + add->count < map->index) {
 			list_add_tail(&add->next, &map->next);
@@ -120,14 +134,6 @@ done:
 	priv->used += add->count;
 	if (debug)
 		gntdev_print_maps(priv, "[new]", add->index);
-	return add;
-
-err:
-	kfree(add->grants);
-	kfree(add->map_ops);
-	kfree(add->unmap_ops);
-	kfree(add);
-	return NULL;
 }
 
 static struct grant_map *gntdev_find_map_index(struct gntdev_priv *priv, int index,
@@ -174,11 +180,17 @@ static int gntdev_del_map(struct grant_map *map)
 
 	map->priv->used -= map->count;
 	list_del(&map->next);
+	return 0;
+}
+
+static void gntdev_free_map(struct grant_map *map)
+{
+	if (!map)
+		return;
 	kfree(map->grants);
 	kfree(map->map_ops);
 	kfree(map->unmap_ops);
 	kfree(map);
-	return 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -277,7 +289,7 @@ static void mn_invl_range_start(struct mmu_notifier *mn,
 	unsigned long mstart, mend;
 	int err;
 
-	down_read(&priv->sem);
+	spin_lock(&priv->lock);
 	list_for_each_entry(map, &priv->maps, next) {
 		if (!map->vma)
 			continue;
@@ -299,7 +311,7 @@ static void mn_invl_range_start(struct mmu_notifier *mn,
 					(mend - mstart) >> PAGE_SHIFT);
 		WARN_ON(err);
 	}
-	up_read(&priv->sem);
+	spin_unlock(&priv->lock);
 }
 
 static void mn_invl_page(struct mmu_notifier *mn,
@@ -316,7 +328,7 @@ static void mn_release(struct mmu_notifier *mn,
 	struct grant_map *map;
 	int err;
 
-	down_read(&priv->sem);
+	spin_lock(&priv->lock);
 	list_for_each_entry(map, &priv->maps, next) {
 		if (!map->vma)
 			continue;
@@ -327,7 +339,7 @@ static void mn_release(struct mmu_notifier *mn,
 		err = unmap_grant_pages(map, 0, map->count);
 		WARN_ON(err);
 	}
-	up_read(&priv->sem);
+	spin_unlock(&priv->lock);
 }
 
 struct mmu_notifier_ops gntdev_mmu_ops = {
@@ -347,7 +359,7 @@ static int gntdev_open(struct inode *inode, struct file *flip)
 		return -ENOMEM;
 
 	INIT_LIST_HEAD(&priv->maps);
-	init_rwsem(&priv->sem);
+	spin_lock_init(&priv->lock);
 	priv->limit = limit;
 
 	priv->mm = get_task_mm(current);
@@ -375,13 +387,16 @@ static int gntdev_release(struct inode *inode, struct file *flip)
 	if (debug)
 		printk("%s: priv %p\n", __FUNCTION__, priv);
 
-	down_write(&priv->sem);
+	spin_lock(&priv->lock);
 	while (!list_empty(&priv->maps)) {
 		map = list_entry(priv->maps.next, struct grant_map, next);
 		err = gntdev_del_map(map);
-		WARN_ON(err);
+		if (WARN_ON(err))
+			gntdev_free_map(map);
+
 	}
-	up_write(&priv->sem);
+	spin_unlock(&priv->lock);
+
 	mmu_notifier_unregister(&priv->mn, priv->mm);
 	kfree(priv);
 	return 0;
@@ -404,27 +419,29 @@ static long gntdev_ioctl_map_grant_ref(struct gntdev_priv *priv,
 	if (unlikely(op.count > priv->limit))
 		return -EINVAL;
 
-	down_write(&priv->sem);
 	err = -ENOMEM;
-	map = gntdev_add_map(priv, op.count);
+	map = gntdev_alloc_map(priv, op.count);
 	if (!map)
-		goto err_unlock;
-
-	err = -ENOMEM;
+		return err;
 	if (copy_from_user(map->grants, &u->refs,
-			   sizeof(map->grants[0]) * op.count) != 0)
-		goto err_free;
-	op.index = map->index << PAGE_SHIFT;
-	if (copy_to_user(u, &op, sizeof(op)) != 0)
-		goto err_free;
-	up_write(&priv->sem);
-	return 0;
+			   sizeof(map->grants[0]) * op.count) != 0) {
+		gntdev_free_map(map);
+		return err;
+	}
 
-err_free:
-	gntdev_del_map(map);
-err_unlock:
-	up_write(&priv->sem);
-	return err;
+	spin_lock(&priv->lock);
+	gntdev_add_map(priv, map);
+	op.index = map->index << PAGE_SHIFT;
+	spin_unlock(&priv->lock);
+
+	if (copy_to_user(u, &op, sizeof(op)) != 0) {
+		spin_lock(&priv->lock);
+		gntdev_del_map(map);
+		spin_unlock(&priv->lock);
+		gntdev_free_map(map);
+		return err;
+	}
+	return 0;
 }
 
 static long gntdev_ioctl_unmap_grant_ref(struct gntdev_priv *priv,
@@ -440,11 +457,13 @@ static long gntdev_ioctl_unmap_grant_ref(struct gntdev_priv *priv,
 		printk("%s: priv %p, del %d+%d\n", __FUNCTION__, priv,
 		       (int)op.index, (int)op.count);
 
-	down_write(&priv->sem);
+	spin_lock(&priv->lock);
 	map = gntdev_find_map_index(priv, op.index >> PAGE_SHIFT, op.count);
 	if (map)
 		err = gntdev_del_map(map);
-	up_write(&priv->sem);
+	spin_unlock(&priv->lock);
+	if (!err)
+		gntdev_free_map(map);
 	return err;
 }
 
@@ -460,16 +479,16 @@ static long gntdev_ioctl_get_offset_for_vaddr(struct gntdev_priv *priv,
 		printk("%s: priv %p, offset for vaddr %lx\n", __FUNCTION__, priv,
 		       (unsigned long)op.vaddr);
 
-	down_read(&priv->sem);
+	spin_lock(&priv->lock);
 	map = gntdev_find_map_vaddr(priv, op.vaddr);
 	if (map == NULL ||
 	    map->vma->vm_start != op.vaddr) {
-		up_read(&priv->sem);
+		spin_unlock(&priv->lock);
 		return -EINVAL;
 	}
 	op.offset = map->index << PAGE_SHIFT;
 	op.count = map->count;
-	up_read(&priv->sem);
+	spin_unlock(&priv->lock);
 
 	if (copy_to_user(u, &op, sizeof(op)) != 0)
 		return -EFAULT;
@@ -488,9 +507,9 @@ static long gntdev_ioctl_set_max_grants(struct gntdev_priv *priv,
 	if (op.count > limit)
 		return -EINVAL;
 
-	down_write(&priv->sem);
+	spin_lock(&priv->lock);
 	priv->limit = op.count;
-	up_write(&priv->sem);
+	spin_unlock(&priv->lock);
 	return 0;
 }
 
@@ -538,7 +557,7 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 		printk("%s: map %d+%d at %lx (pgoff %lx)\n", __FUNCTION__,
 		       index, count, vma->vm_start, vma->vm_pgoff);
 
-	down_read(&priv->sem);
+	spin_lock(&priv->lock);
 	map = gntdev_find_map_index(priv, index, count);
 	if (!map)
 		goto unlock_out;
@@ -580,7 +599,7 @@ static int gntdev_mmap(struct file *flip, struct vm_area_struct *vma)
 	map->is_mapped = 1;
 
 unlock_out:
-	up_read(&priv->sem);
+	spin_unlock(&priv->lock);
 	return err;
 }
 
