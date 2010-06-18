@@ -399,7 +399,7 @@ static int pcifront_claim_resource(struct pci_dev *dev, void *data)
 		r = &dev->resource[i];
 
 		if (!r->parent && r->start && r->flags) {
-			dev_dbg(&pdev->xdev->dev, "claiming resource %s/%d\n",
+			dev_info(&pdev->xdev->dev, "claiming resource %s/%d\n",
 				pci_name(dev), i);
 			if (pci_claim_resource(dev, i)) {
 				dev_err(&pdev->xdev->dev, "Could not claim "
@@ -494,14 +494,15 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 
 	list_add(&bus_entry->list, &pdev->root_buses);
 
+	/* pci_scan_bus_parented skips devices which do not have a have
+	* devfn==0. The pcifront_scan_bus enumerates all devfn. */
+	err = pcifront_scan_bus(pdev, domain, bus, b);
+
 	/* Claim resources before going "live" with our devices */
 	pci_walk_bus(b, pcifront_claim_resource, pdev);
 
 	pci_bus_add_devices(b);
 
-	/* pci_scan_bus_parented skips devices which do not have a have
-	* devfn==0. The pcifront_scan_bus enumerates all devfn. */
-	err = pcifront_scan_bus(pdev, domain, bus, b);
 
 	return err;
 
@@ -537,6 +538,9 @@ int __devinit pcifront_rescan_root(struct pcifront_device *pdev,
 		return pcifront_scan_root(pdev, domain, bus);
 
 	err = pcifront_scan_bus(pdev, domain, bus, b);
+
+	/* Claim resources before going "live" with our devices */
+	pci_walk_bus(b, pcifront_claim_resource, pdev);
 
 	return err;
 }
