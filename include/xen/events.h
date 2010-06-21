@@ -93,4 +93,11 @@ static inline void xen_setup_pirqs(void)
 /* Determine whether to ignore this IRQ if passed to a guest. */
 int xen_ignore_irq(int irq);
 
+/* Xen HVM evtchn vector callback */
+extern void xen_hvm_callback_vector(void);
+extern int xen_have_vector_callback;
+int xen_set_callback_via(uint64_t via);
+void xen_evtchn_do_upcall(struct pt_regs *regs);
+void xen_hvm_evtchn_do_upcall(void);
+
 #endif	/* _XEN_EVENTS_H */
