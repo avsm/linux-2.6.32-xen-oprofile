@@ -93,7 +93,4 @@ static inline void xen_setup_pirqs(void)
 /* Determine whether to ignore this IRQ if passed to a guest. */
 int xen_ignore_irq(int irq);
 
-void xen_evtchn_do_upcall(struct pt_regs *regs);
-void xen_hvm_evtchn_do_upcall(struct pt_regs *regs);
-
 #endif	/* _XEN_EVENTS_H */
