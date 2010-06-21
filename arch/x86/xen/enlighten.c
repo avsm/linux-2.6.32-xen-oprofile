@@ -1386,6 +1386,7 @@ void xen_guest_init(void)
 	}
 	have_vcpu_info_placement = 0;
 	x86_init.irqs.intr_init = xen_init_IRQ;
+	machine_ops = xen_machine_ops;
 }
 
 static int __init parse_unplug(char *arg)
