@@ -306,9 +306,6 @@ struct xen_netbk {
 	u16 pending_ring[MAX_PENDING_REQS];
 	u16 dealloc_ring[MAX_PENDING_REQS];
 
-	struct multicall_entry rx_mcl[NET_RX_RING_SIZE+3];
-	struct mmu_update rx_mmu[NET_RX_RING_SIZE];
-	struct gnttab_transfer grant_trans_op[NET_RX_RING_SIZE];
 	/*
 	 * Each head or fragment can be up to 4096 bytes. Given
 	 * MAX_BUFFER_OFFSET of 4096 the worst case is that each
