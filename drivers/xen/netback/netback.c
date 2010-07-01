@@ -1703,10 +1703,8 @@ static int __init netback_init(void)
 	/* We can increase reservation by this much in net_rx_action(). */
 //	balloon_update_driver_allowance(NET_RX_RING_SIZE);
 
-	/* First pass - do simple "can't fail" setup */
 	for (group = 0; group < xen_netbk_group_nr; group++) {
 		struct xen_netbk *netbk = &xen_netbk[group];
-
 		skb_queue_head_init(&netbk->rx_queue);
 		skb_queue_head_init(&netbk->tx_queue);
 
@@ -1719,6 +1717,16 @@ static int __init netback_init(void)
 		netbk->netbk_tx_pending_timer.function =
 			netbk_tx_pending_timeout;
 
+		netbk->mmap_pages =
+			alloc_empty_pages_and_pagevec(MAX_PENDING_REQS);
+		if (!netbk->mmap_pages) {
+			printk(KERN_ALERT "%s: out of memory\n", __func__);
+			del_timer(&netbk->netbk_tx_pending_timer);
+			del_timer(&netbk->net_timer);
+			rc = -ENOMEM;
+			goto failed_init;
+		}
+
 		for (i = 0; i < MAX_PENDING_REQS; i++) {
 			page = netbk->mmap_pages[i];
 			SetPageForeign(page, netif_page_release);
@@ -1730,26 +1738,6 @@ static int __init netback_init(void)
 		netbk->pending_prod = MAX_PENDING_REQS;
 		for (i = 0; i < MAX_PENDING_REQS; i++)
 			netbk->pending_ring[i] = i;
-
-		INIT_LIST_HEAD(&netbk->pending_inuse_head);
-		INIT_LIST_HEAD(&netbk->net_schedule_list);
-
-		spin_lock_init(&netbk->net_schedule_list_lock);
-
-		atomic_set(&netbk->netfront_count, 0);
-	}
-
-	/* Second pass - do memory allocation and initialize threads/tasklets */
-	for (group = 0; group < xen_netbk_group_nr; group++) {
-		struct xen_netbk *netbk = &xen_netbk[group];
-
-		netbk->mmap_pages =
-			alloc_empty_pages_and_pagevec(MAX_PENDING_REQS);
-		if (!netbk->mmap_pages) {
-			printk(KERN_ALERT "%s: out of memory\n", __func__);
-			rc = -ENOMEM;
-			goto failed_init;
-		}
 
 		if (MODPARM_netback_kthread) {
 			init_waitqueue_head(&netbk->kthread.netbk_action_wq);
@@ -1766,6 +1754,8 @@ static int __init netback_init(void)
 					"kthread_run() fails at netback\n");
 				free_empty_pages_and_pagevec(netbk->mmap_pages,
 						MAX_PENDING_REQS);
+				del_timer(&netbk->netbk_tx_pending_timer);
+				del_timer(&netbk->net_timer);
 				rc = PTR_ERR(netbk->kthread.task);
 				goto failed_init;
 			}
@@ -1777,6 +1767,13 @@ static int __init netback_init(void)
 				     net_rx_action,
 				     (unsigned long)netbk);
 		}
+
+		INIT_LIST_HEAD(&netbk->pending_inuse_head);
+		INIT_LIST_HEAD(&netbk->net_schedule_list);
+
+		spin_lock_init(&netbk->net_schedule_list_lock);
+
+		atomic_set(&netbk->netfront_count, 0);
 	}
 
 	netbk_copy_skb_mode = NETBK_DONT_COPY_SKB;
@@ -1806,16 +1803,13 @@ static int __init netback_init(void)
 	return 0;
 
 failed_init:
-	for (i = 0; i < xen_netbk_group_nr; i++) {
+	for (i = 0; i < group; i++) {
 		struct xen_netbk *netbk = &xen_netbk[i];
-
+		free_empty_pages_and_pagevec(netbk->mmap_pages,
+				MAX_PENDING_REQS);
 		del_timer(&netbk->netbk_tx_pending_timer);
 		del_timer(&netbk->net_timer);
-
-		if (netbk->mmap_pages)
-			free_empty_pages_and_pagevec(netbk->mmap_pages,
-						     MAX_PENDING_REQS);
-		if (MODPARM_netback_kthread && netbk->kthread.task)
+		if (MODPARM_netback_kthread)
 			kthread_stop(netbk->kthread.task);
 	}
 	vfree(xen_netbk);
