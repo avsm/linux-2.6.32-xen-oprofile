@@ -445,10 +445,13 @@ static void netbk_gop_frag_copy(struct xen_netif *netif,
 		copy_gop = npo->copy + npo->copy_prod++;
 		copy_gop->flags = GNTCOPY_dest_gref;
 		if (PageForeign(page)) {
-		struct xen_netbk *netbk = &xen_netbk[group];
-		struct pending_tx_info *src_pend = &netbk->pending_tx_info[idx];
-		copy_gop->source.domid = src_pend->netif->domid;
-		copy_gop->source.u.ref = src_pend->req.gref;
+			struct xen_netbk *netbk = &xen_netbk[group];
+			struct pending_tx_info *src_pend;
+
+			src_pend = &netbk->pending_tx_info[idx];
+
+			copy_gop->source.domid = src_pend->netif->domid;
+			copy_gop->source.u.ref = src_pend->req.gref;
 			copy_gop->flags |= GNTCOPY_source_gref;
 		} else {
 			copy_gop->source.domid = DOMID_SELF;
