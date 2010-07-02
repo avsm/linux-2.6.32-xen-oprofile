@@ -320,12 +320,8 @@ struct pv_mmu_ops {
 
 struct raw_spinlock;
 struct pv_lock_ops {
-	int (*spin_is_locked)(struct raw_spinlock *lock);
-	int (*spin_is_contended)(struct raw_spinlock *lock);
-	void (*spin_lock)(struct raw_spinlock *lock);
-	void (*spin_lock_flags)(struct raw_spinlock *lock, unsigned long flags);
-	int (*spin_trylock)(struct raw_spinlock *lock);
-	void (*spin_unlock)(struct raw_spinlock *lock);
+	bool (*lock_spinning)(struct raw_spinlock *lock, unsigned ticket);
+	void (*unlock_kick)(struct raw_spinlock *lock, unsigned ticket);
 };
 
 /* This contains all the paravirt structures: we get a convenient
