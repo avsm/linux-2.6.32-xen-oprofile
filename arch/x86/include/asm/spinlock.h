@@ -85,7 +85,10 @@ static inline void __ticket_unlock_kick(raw_spinlock_t *lock, __ticket_t next)
 #if (NR_CPUS < 256)
 static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 {
-	unsigned short inc = 1 << TICKET_SHIFT;
+	register union {
+		struct __raw_tickets tickets;
+		unsigned short slock;
+	} inc = { .slock = 1 << TICKET_SHIFT };
 
 	asm volatile (LOCK_PREFIX "xaddw %w0, %1\n"
 		      : "+Q" (inc), "+m" (lock->slock) : : "memory", "cc");
@@ -94,23 +97,12 @@ static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 		unsigned count = SPIN_THRESHOLD;
 
 		do {
-			char locked;
-
-			asm ("1:\t"
-			     "cmpb %h0, %b0\n\t"
-			     "sete %2\n\t"
-			     "je 2f\n\t"
-			     "rep ; nop\n\t"
-			     "movb %1, %b0\n\t"
-			     /* don't need lfence here, because loads are in-order */
-			     "2:"
-			     : "+Q" (inc), "+m" (lock->slock), "=r" (locked)
-			     :
-			     : "cc");
-			if (locked)
+			if (inc.tickets.head == inc.tickets.tail)
 				return;
+			cpu_relax();
+			inc.tickets.head = lock->tickets.head;
 		} while (--count);
-	} while (__raw_lock_spinning(lock, inc >> TICKET_SHIFT));
+	} while (__raw_lock_spinning(lock, inc.tickets.tail));
 }
 
 static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
@@ -146,34 +138,23 @@ static __always_inline void __ticket_spin_unlock(raw_spinlock_t *lock)
 static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 {
 	unsigned inc = 1 << TICKET_SHIFT;
-	unsigned tmp;
+	__ticket_t tmp;
 
 	asm volatile(LOCK_PREFIX "xaddl %0, %1\n\t"
-		     "movzwl %w0, %2\n\t"
-		     "shrl $16, %0\n\t"
-		     : "+r" (inc), "+m" (lock->slock), "=r" (tmp)
+		     : "+r" (inc), "+m" (lock->slock)
 		     : : "memory", "cc");
+
+	tmp = inc;
+	inc >>= TICKET_SHIFT;
 
 	do {
 		unsigned count = SPIN_THRESHOLD;
 
 		do {
-			char locked;
-
-			asm ("1:\t"
-			     "cmpl %0, %2\n\t"
-			     "sete %3\n\t"
-			     "je 2f\n\t"
-			     "rep ; nop\n\t"
-			     "movzwl %1, %2\n\t"
-			     /* don't need lfence here, because loads are in-order */
-			     "2:"
-			     : "+r" (inc), "+m" (lock->slock),
-			       "+&r" (tmp), "=r" (locked)
-			     :
-			     : "cc");
-			if (locked)
+			if ((__ticket_t)inc == tmp)
 				return;
+			cpu_relax();
+			tmp = lock->tickets.head;
 		} while (--count);
 	} while (__raw_lock_spinning(lock, inc));
 }
