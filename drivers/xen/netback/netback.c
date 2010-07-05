@@ -432,6 +432,7 @@ static void netbk_gop_frag_copy(struct xen_netif *netif,
 			/* Overflowed this request, go to the next one */
 			req = RING_GET_REQUEST(&netif->rx, netif->rx.req_cons++);
 			meta = npo->meta + npo->meta_prod++;
+			meta->gso_size = 0;
 			meta->size = 0;
 			meta->id = req->id;
 			npo->copy_off = 0;
@@ -492,9 +493,23 @@ static int netbk_gop_skb(struct sk_buff *skb,
 
 	old_meta_prod = npo->meta_prod;
 
+	/* Set up a GSO prefix descriptor, if necessary */
+	if (skb_shinfo(skb)->gso_size && netif->gso_prefix) {
+		req = RING_GET_REQUEST(&netif->rx, netif->rx.req_cons++);
+		meta = npo->meta + npo->meta_prod++;
+		meta->gso_size = skb_shinfo(skb)->gso_size;
+		meta->size = 0;
+		meta->id = req->id;
+	}
+
 	req = RING_GET_REQUEST(&netif->rx, netif->rx.req_cons++);
 	meta = npo->meta + npo->meta_prod++;
-	meta->gso_size = skb_shinfo(skb)->gso_size;
+
+	if (!netif->gso_prefix)
+		meta->gso_size = skb_shinfo(skb)->gso_size;
+	else
+		meta->gso_size = 0;
+
 	meta->size = 0;
 	meta->id = req->id;
 	npo->copy_off = 0;
@@ -506,7 +521,7 @@ static int netbk_gop_skb(struct sk_buff *skb,
 			    offset_in_page(skb->data), 1);
 
 	/* Leave a gap for the GSO descriptor. */
-	if (skb_shinfo(skb)->gso_size)
+	if (skb_shinfo(skb)->gso_size && !netif->gso_prefix)
 		netif->rx.req_cons++;
 
 	for (i = 0; i < nr_frags; i++) {
@@ -623,6 +638,21 @@ static void net_rx_action(unsigned long data)
 
 		netif = netdev_priv(skb->dev);
 
+		if (netbk->meta[npo.meta_cons].gso_size && netif->gso_prefix) {
+			resp = RING_GET_RESPONSE(&netif->rx,
+						netif->rx.rsp_prod_pvt++);
+
+			resp->flags = NETRXF_gso_prefix | NETRXF_more_data;
+
+			resp->offset = netbk->meta[npo.meta_cons].gso_size;
+			resp->id = netbk->meta[npo.meta_cons].id;
+			resp->status = sco->meta_slots_used;
+
+			npo.meta_cons++;
+			sco->meta_slots_used--;
+		}
+
+
 		netif->stats.tx_bytes += skb->len;
 		netif->stats.tx_packets++;
 
@@ -633,6 +663,7 @@ static void net_rx_action(unsigned long data)
 			flags = 0;
 		else
 			flags = NETRXF_more_data;
+
 		if (skb->ip_summed == CHECKSUM_PARTIAL) /* local packet? */
 			flags |= NETRXF_csum_blank | NETRXF_data_validated;
 		else if (skb->ip_summed == CHECKSUM_UNNECESSARY)
@@ -645,7 +676,7 @@ static void net_rx_action(unsigned long data)
 					netbk->meta[npo.meta_cons].size,
 					flags);
 
-		if (netbk->meta[npo.meta_cons].gso_size) {
+		if (netbk->meta[npo.meta_cons].gso_size && !netif->gso_prefix) {
 			struct xen_netif_extra_info *gso =
 				(struct xen_netif_extra_info *)
 				RING_GET_RESPONSE(&netif->rx,

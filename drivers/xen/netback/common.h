@@ -82,7 +82,8 @@ struct xen_netif {
 	int smart_poll;
 
 	/* Internal feature information. */
-	u8 can_queue:1;	/* can queue packets for receiver? */
+	u8 can_queue:1;	    /* can queue packets for receiver? */
+	u8 gso_prefix:1;    /* use a prefix segment for GSO information */
 
 	/* Allow netif_be_start_xmit() to peek ahead in the rx request
 	 * ring.  This is a prediction of what rx_req_cons will be once

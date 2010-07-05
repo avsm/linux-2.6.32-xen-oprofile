@@ -465,16 +465,25 @@ static int connect_rings(struct backend_info *be)
 			be->netif->dev->mtu = ETH_DATA_LEN;
 	}
 
-	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4", "%d",
-			 &val) < 0)
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4",
+			"%d", &val) < 0)
 		val = 0;
 	if (val) {
 		be->netif->features |= NETIF_F_TSO;
 		be->netif->dev->features |= NETIF_F_TSO;
 	}
 
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4-prefix",
+			"%d", &val) < 0)
+		val = 0;
+	if (val) {
+		be->netif->features |= NETIF_F_TSO;
+		be->netif->dev->features |= NETIF_F_TSO;
+		be->netif->gso_prefix = 1;
+	}
+
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-no-csum-offload",
-			 "%d", &val) < 0)
+			"%d", &val) < 0)
 		val = 0;
 	if (val) {
 		be->netif->features &= ~NETIF_F_IP_CSUM;
@@ -482,7 +491,7 @@ static int connect_rings(struct backend_info *be)
 	}
 
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-smart-poll",
-			 "%d", &val) < 0)
+			"%d", &val) < 0)
 		val = 0;
 	if (val)
 		be->netif->smart_poll = 1;
