@@ -21,6 +21,9 @@ typedef struct raw_spinlock {
 			__ticket_t head, tail;
 		} tickets;
 	};
+#ifdef CONFIG_PARAVIRT_SPINLOCKS
+	__ticket_t waiting;
+#endif
 } raw_spinlock_t;
 
 #define __RAW_SPIN_LOCK_UNLOCKED	{ { .slock = 0 } }

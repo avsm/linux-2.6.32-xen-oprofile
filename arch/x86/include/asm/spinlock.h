@@ -52,6 +52,39 @@ static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
 {
 }
 
+static inline void __ticket_add_waiting(raw_spinlock_t *lock)
+{
+}
+
+static inline void __ticket_sub_waiting(raw_spinlock_t *lock)
+{
+}
+
+static inline bool __ticket_lock_waiters(const raw_spinlock_t *lock)
+{
+	return false;
+}
+#else
+static inline void __ticket_add_waiting(raw_spinlock_t *lock)
+{
+	if (sizeof(lock->waiting) == sizeof(u8))
+		asm (LOCK_PREFIX "addb $1, %0" : "+m" (lock->waiting) : : "memory");
+	else
+		asm (LOCK_PREFIX "addw $1, %0" : "+m" (lock->waiting) : : "memory");
+}
+
+static inline void __ticket_sub_waiting(raw_spinlock_t *lock)
+{
+	if (sizeof(lock->waiting) == sizeof(u8))
+		asm (LOCK_PREFIX "subb $1, %0" : "+m" (lock->waiting) : : "memory");
+	else
+		asm (LOCK_PREFIX "subw $1, %0" : "+m" (lock->waiting) : : "memory");
+}
+
+static inline bool __ticket_lock_waiters(const raw_spinlock_t *lock)
+{
+	return lock->waiting != 0;
+}
 #endif	/* CONFIG_PARAVIRT_SPINLOCKS */
 
 /*
@@ -78,8 +111,17 @@ static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
  */
 static inline void __ticket_unlock_kick(raw_spinlock_t *lock, __ticket_t next)
 {
-	if (lock->tickets.tail != next)
+	if (unlikely(__ticket_lock_waiters(lock)))
 		__raw_unlock_kick(lock, next);
+}
+
+static inline bool __ticket_lock_spinning(raw_spinlock_t *lock, __ticket_t tail)
+{
+	bool ret;
+	__ticket_add_waiting(lock);
+	ret = __raw_lock_spinning(lock, tail);
+	__ticket_sub_waiting(lock);
+	return ret;
 }
 
 #if (NR_CPUS < 256)
@@ -102,7 +144,7 @@ static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 			cpu_relax();
 			inc.tickets.head = lock->tickets.head;
 		} while (--count);
-	} while (__raw_lock_spinning(lock, inc.tickets.tail));
+	} while (__ticket_lock_spinning(lock, inc.tickets.tail));
 }
 
 static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
@@ -156,7 +198,7 @@ static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 			cpu_relax();
 			tmp = lock->tickets.head;
 		} while (--count);
-	} while (__raw_lock_spinning(lock, inc));
+	} while (__ticket_lock_spinning(lock, inc));
 }
 
 static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
