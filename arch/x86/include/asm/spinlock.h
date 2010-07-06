@@ -38,6 +38,55 @@
 # define UNLOCK_LOCK_PREFIX
 #endif
 
+/* How long a lock should spin before we consider blocking */
+#define SPIN_THRESHOLD	(1 << 11)
+
+#ifndef CONFIG_PARAVIRT_SPINLOCKS
+
+static inline bool __raw_lock_spinning(struct raw_spinlock *lock, unsigned ticket)
+{
+	return true;		/* keep spinning */
+}
+
+static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
+{
+}
+
+static inline void __ticket_add_waiting(raw_spinlock_t *lock)
+{
+}
+
+static inline void __ticket_sub_waiting(raw_spinlock_t *lock)
+{
+}
+
+static inline bool __ticket_lock_waiters(const raw_spinlock_t *lock)
+{
+	return false;
+}
+#else
+static inline void __ticket_add_waiting(raw_spinlock_t *lock)
+{
+	if (sizeof(lock->waiting) == sizeof(u8))
+		asm (LOCK_PREFIX "addb $1, %0" : "+m" (lock->waiting) : : "memory");
+	else
+		asm (LOCK_PREFIX "addw $1, %0" : "+m" (lock->waiting) : : "memory");
+}
+
+static inline void __ticket_sub_waiting(raw_spinlock_t *lock)
+{
+	if (sizeof(lock->waiting) == sizeof(u8))
+		asm (LOCK_PREFIX "subb $1, %0" : "+m" (lock->waiting) : : "memory");
+	else
+		asm (LOCK_PREFIX "subw $1, %0" : "+m" (lock->waiting) : : "memory");
+}
+
+static inline bool __ticket_lock_waiters(const raw_spinlock_t *lock)
+{
+	return lock->waiting != 0;
+}
+#endif	/* CONFIG_PARAVIRT_SPINLOCKS */
+
 /*
  * Ticket locks are conceptually two parts, one indicating the current head of
  * the queue, and the other indicating the current tail. The lock is acquired
@@ -55,31 +104,52 @@
  * save some instructions and make the code more elegant. There really isn't
  * much between them in performance though, especially as locks are out of line.
  */
-#if (NR_CPUS < 256)
-#define TICKET_SHIFT 8
 
+/* 
+ * If a spinlock has someone waiting on it, then kick the appropriate
+ * waiting cpu.
+ */
+static inline void __ticket_unlock_kick(raw_spinlock_t *lock, __ticket_t next)
+{
+	if (unlikely(__ticket_lock_waiters(lock)))
+		__raw_unlock_kick(lock, next);
+}
+
+static inline bool __ticket_lock_spinning(raw_spinlock_t *lock, __ticket_t tail)
+{
+	bool ret;
+	__ticket_add_waiting(lock);
+	ret = __raw_lock_spinning(lock, tail);
+	__ticket_sub_waiting(lock);
+	return ret;
+}
+
+#if (NR_CPUS < 256)
 static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 {
-	short inc = 0x0100;
+	register union {
+		struct __raw_tickets tickets;
+		unsigned short slock;
+	} inc = { .slock = 1 << TICKET_SHIFT };
 
-	asm volatile (
-		LOCK_PREFIX "xaddw %w0, %1\n"
-		"1:\t"
-		"cmpb %h0, %b0\n\t"
-		"je 2f\n\t"
-		"rep ; nop\n\t"
-		"movb %1, %b0\n\t"
-		/* don't need lfence here, because loads are in-order */
-		"jmp 1b\n"
-		"2:"
-		: "+Q" (inc), "+m" (lock->slock)
-		:
-		: "memory", "cc");
+	asm volatile (LOCK_PREFIX "xaddw %w0, %1\n"
+		      : "+Q" (inc), "+m" (lock->slock) : : "memory", "cc");
+
+	do   {	
+		unsigned count = SPIN_THRESHOLD;
+
+		do {
+			if (inc.tickets.head == inc.tickets.tail)
+				return;
+			cpu_relax();
+			inc.tickets.head = lock->tickets.head;
+		} while (--count);
+	} while (__ticket_lock_spinning(lock, inc.tickets.tail));
 }
 
 static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
 {
-	int tmp, new;
+	unsigned int tmp, new;
 
 	asm volatile("movzwl %2, %0\n\t"
 		     "cmpb %h0,%b0\n\t"
@@ -98,39 +168,43 @@ static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
 
 static __always_inline void __ticket_spin_unlock(raw_spinlock_t *lock)
 {
+	__ticket_t next = lock->tickets.head + 1;
 	asm volatile(UNLOCK_LOCK_PREFIX "incb %0"
 		     : "+m" (lock->slock)
 		     :
 		     : "memory", "cc");
+
+	__ticket_unlock_kick(lock, next);
 }
 #else
-#define TICKET_SHIFT 16
-
 static __always_inline void __ticket_spin_lock(raw_spinlock_t *lock)
 {
-	int inc = 0x00010000;
-	int tmp;
+	unsigned inc = 1 << TICKET_SHIFT;
+	__ticket_t tmp;
 
-	asm volatile(LOCK_PREFIX "xaddl %0, %1\n"
-		     "movzwl %w0, %2\n\t"
-		     "shrl $16, %0\n\t"
-		     "1:\t"
-		     "cmpl %0, %2\n\t"
-		     "je 2f\n\t"
-		     "rep ; nop\n\t"
-		     "movzwl %1, %2\n\t"
-		     /* don't need lfence here, because loads are in-order */
-		     "jmp 1b\n"
-		     "2:"
-		     : "+r" (inc), "+m" (lock->slock), "=&r" (tmp)
-		     :
-		     : "memory", "cc");
+	asm volatile(LOCK_PREFIX "xaddl %0, %1\n\t"
+		     : "+r" (inc), "+m" (lock->slock)
+		     : : "memory", "cc");
+
+	tmp = inc;
+	inc >>= TICKET_SHIFT;
+
+	do {
+		unsigned count = SPIN_THRESHOLD;
+
+		do {
+			if ((__ticket_t)inc == tmp)
+				return;
+			cpu_relax();
+			tmp = lock->tickets.head;
+		} while (--count);
+	} while (__ticket_lock_spinning(lock, inc));
 }
 
 static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
 {
-	int tmp;
-	int new;
+	unsigned tmp;
+	unsigned new;
 
 	asm volatile("movl %2,%0\n\t"
 		     "movl %0,%1\n\t"
@@ -151,28 +225,29 @@ static __always_inline int __ticket_spin_trylock(raw_spinlock_t *lock)
 
 static __always_inline void __ticket_spin_unlock(raw_spinlock_t *lock)
 {
+	__ticket_t next = lock->tickets.head + 1;
 	asm volatile(UNLOCK_LOCK_PREFIX "incw %0"
 		     : "+m" (lock->slock)
 		     :
 		     : "memory", "cc");
+
+	__ticket_unlock_kick(lock, next);
 }
 #endif
 
 static inline int __ticket_spin_is_locked(raw_spinlock_t *lock)
 {
-	int tmp = ACCESS_ONCE(lock->slock);
+	struct __raw_tickets tmp = lock->tickets;
 
-	return !!(((tmp >> TICKET_SHIFT) ^ tmp) & ((1 << TICKET_SHIFT) - 1));
+	return !!(tmp.tail ^ tmp.head);
 }
 
 static inline int __ticket_spin_is_contended(raw_spinlock_t *lock)
 {
-	int tmp = ACCESS_ONCE(lock->slock);
+	struct __raw_tickets tmp = lock->tickets;
 
-	return (((tmp >> TICKET_SHIFT) - tmp) & ((1 << TICKET_SHIFT) - 1)) > 1;
+	return ((tmp.tail - tmp.head) & TICKET_MASK) > 1;
 }
-
-#ifndef CONFIG_PARAVIRT_SPINLOCKS
 
 static inline int __raw_spin_is_locked(raw_spinlock_t *lock)
 {
@@ -205,8 +280,6 @@ static __always_inline void __raw_spin_lock_flags(raw_spinlock_t *lock,
 {
 	__raw_spin_lock(lock);
 }
-
-#endif	/* CONFIG_PARAVIRT_SPINLOCKS */
 
 static inline void __raw_spin_unlock_wait(raw_spinlock_t *lock)
 {

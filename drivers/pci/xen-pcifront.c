@@ -399,13 +399,50 @@ static int pcifront_claim_resource(struct pci_dev *dev, void *data)
 		r = &dev->resource[i];
 
 		if (!r->parent && r->start && r->flags) {
-			dev_dbg(&pdev->xdev->dev, "claiming resource %s/%d\n",
+			dev_info(&pdev->xdev->dev, "claiming resource %s/%d\n",
 				pci_name(dev), i);
 			if (pci_claim_resource(dev, i)) {
 				dev_err(&pdev->xdev->dev, "Could not claim "
 					"resource %s/%d! Device offline. Try "
 					"giving less than 4GB to domain.\n",
 					pci_name(dev), i);
+			}
+		}
+	}
+
+	return 0;
+}
+
+int __devinit pcifront_scan_bus(struct pcifront_device *pdev,
+				unsigned int domain, unsigned int bus,
+				struct pci_bus *b)
+{
+	struct pci_dev *d;
+	unsigned int devfn;
+	int err;
+
+	/* Scan the bus for functions and add.
+	 * We omit handling of PCI bridge attachment because pciback prevents
+	 * bridges from being exported.
+	 */
+	for (devfn = 0; devfn < 0x100; devfn++) {
+		d = pci_get_slot(b, devfn);
+		if (d) {
+			/* Device is already known. */
+			pci_dev_put(d);
+			continue;
+		}
+
+		d = pci_scan_single_device(b, devfn);
+		if (d) {
+			dev_info(&pdev->xdev->dev, "New device on "
+				 "%04x:%02x:%02x.%02x found.\n", domain, bus,
+				 PCI_SLOT(devfn), PCI_FUNC(devfn));
+			err = pci_bus_add_device(d);
+			if (err) {
+				dev_err(&pdev->xdev->dev, "Failed to add "
+				" device to bus.\n");
+				return err;
 			}
 		}
 	}
@@ -457,12 +494,17 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 
 	list_add(&bus_entry->list, &pdev->root_buses);
 
+	/* pci_scan_bus_parented skips devices which do not have a have
+	* devfn==0. The pcifront_scan_bus enumerates all devfn. */
+	err = pcifront_scan_bus(pdev, domain, bus, b);
+
 	/* Claim resources before going "live" with our devices */
 	pci_walk_bus(b, pcifront_claim_resource, pdev);
 
 	pci_bus_add_devices(b);
 
-	return 0;
+
+	return err;
 
 err_out:
 	kfree(bus_entry);
@@ -474,10 +516,8 @@ err_out:
 int __devinit pcifront_rescan_root(struct pcifront_device *pdev,
 				   unsigned int domain, unsigned int bus)
 {
-	struct pci_bus *b;
-	struct pci_dev *d;
-	unsigned int devfn;
 	int err;
+	struct pci_bus *b;
 
 #ifndef CONFIG_PCI_DOMAINS
 	if (domain != 0) {
@@ -497,33 +537,12 @@ int __devinit pcifront_rescan_root(struct pcifront_device *pdev,
 		/* If the bus is unknown, create it. */
 		return pcifront_scan_root(pdev, domain, bus);
 
-	/* Rescan the bus for newly attached functions and add.
-	 * We omit handling of PCI bridge attachment because pciback prevents
-	 * bridges from being exported.
-	 */
-	for (devfn = 0; devfn < 0x100; devfn++) {
-		d = pci_get_slot(b, devfn);
-		if (d) {
-			/* Device is already known. */
-			pci_dev_put(d);
-			continue;
-		}
+	err = pcifront_scan_bus(pdev, domain, bus, b);
 
-		d = pci_scan_single_device(b, devfn);
-		if (d) {
-			dev_info(&pdev->xdev->dev, "New device on "
-				 "%04x:%02x:%02x.%02x found.\n", domain, bus,
-				 PCI_SLOT(devfn), PCI_FUNC(devfn));
-			err = pci_bus_add_device(d);
-			if (err) {
-				dev_err(&pdev->xdev->dev, "Failed to add "
-				" device to bus.\n");
-				return err;
-			}
-		}
-	}
+	/* Claim resources before going "live" with our devices */
+	pci_walk_bus(b, pcifront_claim_resource, pdev);
 
-	return 0;
+	return err;
 }
 
 static void free_root_bus_devs(struct pci_bus *bus)

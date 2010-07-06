@@ -27,9 +27,8 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 
-#include <xen/grant_table.h>
 #include <xen/platform_pci.h>
-#include <xen/interface/platform_pci.h>
+#include <xen/grant_table.h>
 #include <xen/xenbus.h>
 #include <xen/events.h>
 #include <xen/hvm.h>
@@ -45,7 +44,6 @@ static unsigned long platform_mmio;
 static unsigned long platform_mmio_alloc;
 static unsigned long platform_mmiolen;
 static uint64_t callback_via;
-struct pci_dev *xen_platform_pdev;
 
 unsigned long alloc_xen_mmio(unsigned long len)
 {
@@ -79,36 +77,28 @@ static uint64_t get_callback_via(struct pci_dev *pdev)
 
 static irqreturn_t do_hvm_evtchn_intr(int irq, void *dev_id)
 {
-	xen_hvm_evtchn_do_upcall(get_irq_regs());
+	xen_hvm_evtchn_do_upcall();
 	return IRQ_HANDLED;
 }
 
 static int xen_allocate_irq(struct pci_dev *pdev)
 {
-	__set_irq_handler(pdev->irq, handle_edge_irq, 0, NULL);
 	return request_irq(pdev->irq, do_hvm_evtchn_intr,
 			IRQF_DISABLED | IRQF_NOBALANCING | IRQF_TRIGGER_RISING,
 			"xen-platform-pci", pdev);
 }
 
-void platform_pci_disable_irq(void)
+static int platform_pci_resume(struct pci_dev *pdev)
 {
-	printk(KERN_DEBUG "platform_pci_disable_irq\n");
-	disable_irq(xen_platform_pdev->irq);
-}
-
-void platform_pci_enable_irq(void)
-{
-	printk(KERN_DEBUG "platform_pci_enable_irq\n");
-	enable_irq(xen_platform_pdev->irq);
-}
-
-void platform_pci_resume(void)
-{
-	if (xen_set_callback_via(callback_via)) {
-		printk("platform_pci_resume failure!\n");
-		return;
+	int err;
+	if (xen_have_vector_callback)
+		return 0;
+	err = xen_set_callback_via(callback_via);
+	if (err) {
+		dev_err(&pdev->dev, "platform_pci_resume failure!\n");
+		return err;
 	}
+	return 0;
 }
 
 static int __devinit platform_pci_init(struct pci_dev *pdev,
@@ -117,7 +107,7 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 	int i, ret;
 	long ioaddr, iolen;
 	long mmio_addr, mmio_len;
-	xen_platform_pdev = pdev;
+	unsigned int max_nr_gframes;
 
 	i = pci_enable_device(pdev);
 	if (i)
@@ -164,16 +154,16 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 			goto out;
 		}
 	}
+
+	max_nr_gframes = gnttab_max_grant_frames();
+	xen_hvm_resume_frames = alloc_xen_mmio(PAGE_SIZE * max_nr_gframes);
 	ret = gnttab_init();
 	if (ret)
 		goto out;
-	ret = xenbus_probe_init();
-	if (ret)
-		goto out;
+	xenbus_probe(NULL);
 	ret = xen_setup_shutdown_event();
 	if (ret)
 		goto out;
-
 
 out:
 	if (ret) {
@@ -185,66 +175,29 @@ out:
 	return ret;
 }
 
-#define XEN_PLATFORM_VENDOR_ID 0x5853
-#define XEN_PLATFORM_DEVICE_ID 0x0001
 static struct pci_device_id platform_pci_tbl[] __devinitdata = {
-	{XEN_PLATFORM_VENDOR_ID, XEN_PLATFORM_DEVICE_ID,
-	 PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
+	{PCI_VENDOR_ID_XEN, PCI_DEVICE_ID_XEN_PLATFORM,
+		PCI_ANY_ID, PCI_ANY_ID, 0, 0, 0},
 	{0,}
 };
 
 MODULE_DEVICE_TABLE(pci, platform_pci_tbl);
 
 static struct pci_driver platform_driver = {
-	name:     DRV_NAME,
-	probe :    platform_pci_init,
-	id_table : platform_pci_tbl,
+	.name =           DRV_NAME,
+	.probe =          platform_pci_init,
+	.id_table =       platform_pci_tbl,
+#ifdef CONFIG_PM
+	.resume_early =   platform_pci_resume,
+#endif
 };
-
-static int check_platform_magic(void)
-{
-	short magic;
-	char protocol, *err;
-
-	magic = inw(XEN_IOPORT_MAGIC);
-
-	if (magic != XEN_IOPORT_MAGIC_VAL) {
-		err = "unrecognised magic value";
-		goto no_dev;
-	}
-
-	protocol = inb(XEN_IOPORT_PROTOVER);
-
-	printk(KERN_DEBUG DRV_NAME "I/O protocol version %d\n", protocol);
-
-	switch (protocol) {
-	case 1:
-		outw(XEN_IOPORT_LINUX_PRODNUM, XEN_IOPORT_PRODNUM);
-		outl(XEN_IOPORT_LINUX_DRVVER, XEN_IOPORT_DRVVER);
-		if (inw(XEN_IOPORT_MAGIC) != XEN_IOPORT_MAGIC_VAL) {
-			printk(KERN_ERR DRV_NAME "blacklisted by host\n");
-			return -ENODEV;
-		}
-		break;
-	default:
-		err = "unknown I/O protocol version";
-		goto no_dev;
-	}
-
-	return 0;
-
- no_dev:
-	printk(KERN_WARNING DRV_NAME  "failed backend handshake: %s\n", err);
-	return -ENODEV;
-}
 
 static int __init platform_pci_module_init(void)
 {
 	int rc;
 
-	rc = check_platform_magic();
-	if (rc < 0)
-		return rc;
+	if (!xen_platform_pci_enabled)
+		return -ENODEV;
 
 	rc = pci_register_driver(&platform_driver);
 	if (rc) {
@@ -252,7 +205,6 @@ static int __init platform_pci_module_init(void)
 		       ": No platform pci device model found\n");
 		return rc;
 	}
-
 	return 0;
 }
 

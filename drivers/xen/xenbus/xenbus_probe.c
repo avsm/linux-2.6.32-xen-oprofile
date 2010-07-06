@@ -667,26 +667,32 @@ void xenbus_probe(struct work_struct *unused)
 	/* Notify others that xenstore is up */
 	blocking_notifier_call_chain(&xenstore_chain, 0, NULL);
 }
+EXPORT_SYMBOL_GPL(xenbus_probe);
 
-static int __init __xenbus_probe_init(void)
+static int __init xenbus_probe_initcall(void)
 {
-	/* Delay initialization in the PV on HVM case */
-	if (xen_hvm_domain())
-		return 0;
-
-	if (!xen_pv_domain())
+	if (!xen_domain())
 		return -ENODEV;
 
-	return xenbus_probe_init();
+	if (xen_initial_domain() || xen_hvm_domain())
+		return 0;
+
+	xenbus_probe(NULL);
+	return 0;
 }
 
-int xenbus_probe_init(void)
+device_initcall(xenbus_probe_initcall);
+
+static int __init xenbus_init(void)
 {
 	int err = 0;
 	unsigned long page = 0;
 
 	DPRINTK("");
 
+	err = -ENODEV;
+	if (!xen_domain())
+		return err;
 
 	/*
 	 * Domain0 doesn't have a store_evtchn or store_mfn yet.
@@ -720,8 +726,15 @@ int xenbus_probe_init(void)
 	} else {
 		xenstored_ready = 1;
 		if (xen_hvm_domain()) {
-			xen_store_evtchn = hvm_get_parameter(HVM_PARAM_STORE_EVTCHN);
-			xen_store_mfn = hvm_get_parameter(HVM_PARAM_STORE_PFN);
+			uint64_t v = 0;
+			err = hvm_get_parameter(HVM_PARAM_STORE_EVTCHN, &v);
+			if (err)
+				goto out_error;
+			xen_store_evtchn = (int)v;
+			err = hvm_get_parameter(HVM_PARAM_STORE_PFN, &v);
+			if (err)
+				goto out_error;
+			xen_store_mfn = (unsigned long)v;
 			xen_store_interface = ioremap(xen_store_mfn << PAGE_SHIFT, PAGE_SIZE);
 		} else {
 			xen_store_evtchn = xen_start_info->store_evtchn;
@@ -737,9 +750,6 @@ int xenbus_probe_init(void)
 		       "XENBUS: Error initializing xenstore comms: %i\n", err);
 		goto out_error;
 	}
-
-	if (!xen_initial_domain())
-		xenbus_probe(NULL);
 
 #ifdef CONFIG_XEN_COMPAT_XENFS
 	/*
@@ -758,6 +768,6 @@ int xenbus_probe_init(void)
 	return err;
 }
 
-postcore_initcall(__xenbus_probe_init);
+postcore_initcall(xenbus_init);
 
 MODULE_LICENSE("GPL");

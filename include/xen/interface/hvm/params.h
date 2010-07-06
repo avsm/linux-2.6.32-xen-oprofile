@@ -38,10 +38,6 @@
  */
 #define HVM_PARAM_CALLBACK_IRQ 0
 
-/*
- * These are not used by Xen. They are here for convenience of HVM-guest
- * xenbus implementations.
- */
 #define HVM_PARAM_STORE_PFN    1
 #define HVM_PARAM_STORE_EVTCHN 2
 
@@ -50,19 +46,6 @@
 #define HVM_PARAM_IOREQ_PFN    5
 
 #define HVM_PARAM_BUFIOREQ_PFN 6
-
-#ifdef __ia64__
-
-#define HVM_PARAM_NVRAM_FD     7
-#define HVM_PARAM_VHPT_SIZE    8
-#define HVM_PARAM_BUFPIOREQ_PFN        9
-
-#elif defined(__i386__) || defined(__x86_64__)
-
-/* Expose Viridian interfaces to this HVM guest? */
-#define HVM_PARAM_VIRIDIAN     9
-
-#endif
 
 /*
  * Set mode for virtual timers (currently x86 only):

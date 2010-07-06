@@ -61,6 +61,7 @@
 
 #include <xen/page.h>
 #include <xen/interface/xen.h>
+#include <xen/interface/hvm/hvm_op.h>
 #include <xen/interface/version.h>
 #include <xen/interface/memory.h>
 #include <xen/hvc-console.h>
@@ -2468,6 +2469,38 @@ out:
 	return err;
 }
 EXPORT_SYMBOL_GPL(xen_remap_domain_mfn_range);
+
+static void xen_hvm_exit_mmap(struct mm_struct *mm)
+{
+	struct xen_hvm_pagetable_dying a;
+	int rc;
+
+	a.domid = DOMID_SELF;
+	a.gpa = __pa(mm->pgd);
+	rc = HYPERVISOR_hvm_op(HVMOP_pagetable_dying, &a);
+	WARN_ON(rc < 0);
+}
+
+static int is_pagetable_dying_supported(void)
+{
+	struct xen_hvm_pagetable_dying a;
+	int rc = 0;
+
+	a.domid = DOMID_SELF;
+	a.gpa = 0x00;
+	rc = HYPERVISOR_hvm_op(HVMOP_pagetable_dying, &a);
+	if (rc == -EINVAL) {
+		printk(KERN_INFO "HVMOP_pagetable_dying not supported\n");
+		return 0;
+	}
+	return 1;
+}
+
+void __init xen_hvm_init_mmu_ops(void)
+{
+	if (is_pagetable_dying_supported())
+		pv_mmu_ops.exit_mmap = xen_hvm_exit_mmap;
+}
 
 #ifdef CONFIG_XEN_DEBUG_FS
 

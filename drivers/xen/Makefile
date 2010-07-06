@@ -16,7 +16,7 @@ obj-$(CONFIG_XEN_BLKDEV_TAP)            += blktap/
 obj-$(CONFIG_XEN_NETDEV_BACKEND)	+= netback/
 obj-$(CONFIG_XENFS)			+= xenfs/
 obj-$(CONFIG_XEN_SYS_HYPERVISOR)	+= sys-hypervisor.o
-obj-$(CONFIG_XEN_PLATFORM_PCI)		+= platform-pci.o
+obj-$(CONFIG_XEN_PLATFORM_PCI)	+= platform-pci.o
 obj-$(CONFIG_XEN_MCE)		+= mce.o
 
 obj-$(CONFIG_XEN_S3)           += acpi.o

@@ -17,6 +17,7 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/xen/hypervisor.h>
+#include <xen/platform_pci.h>
 #include <xen/xenbus.h>
 #include <xen/events.h>
 #include <xen/page.h>
@@ -252,33 +253,6 @@ static int frontend_probe_and_watch(struct notifier_block *notifier,
 	return NOTIFY_DONE;
 }
 
-static int dev_suspend(struct device *dev, void *data)
-{
-	return xenbus_dev_suspend(dev, PMSG_SUSPEND);
-}
-
-static int dev_resume(struct device *dev, void *data)
-{
-	return xenbus_dev_resume(dev);
-}
-
-void xenbus_suspend(void)
-{
-	DPRINTK("");
-
-	bus_for_each_dev(&xenbus_frontend.bus, NULL, NULL, dev_suspend);
-	xs_suspend();
-}
-EXPORT_SYMBOL_GPL(xenbus_suspend);
-
-void xenbus_resume(void)
-{
-	DPRINTK("");
-
-	xs_resume();
-	bus_for_each_dev(&xenbus_frontend.bus, NULL, NULL, dev_resume);
-}
-EXPORT_SYMBOL_GPL(xenbus_resume);
 
 static int __init xenbus_probe_frontend_init(void)
 {
@@ -303,6 +277,9 @@ subsys_initcall(xenbus_probe_frontend_init);
 #ifndef MODULE
 static int __init boot_wait_for_devices(void)
 {
+	if (xen_hvm_domain() && !xen_platform_pci_enabled)
+		return -ENODEV;
+
 	ready_to_wait_for_devices = 1;
 	wait_for_devices(NULL);
 	return 0;
