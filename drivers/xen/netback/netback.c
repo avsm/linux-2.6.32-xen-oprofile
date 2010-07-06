@@ -368,15 +368,9 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 }
 
 struct netrx_pending_operations {
-	unsigned trans_prod, trans_cons;
-	unsigned mmu_prod, mmu_mcl;
-	unsigned mcl_prod, mcl_cons;
 	unsigned copy_prod, copy_cons;
 	unsigned meta_prod, meta_cons;
-	struct mmu_update *mmu;
-	struct gnttab_transfer *trans;
 	struct gnttab_copy *copy;
-	struct multicall_entry *mcl;
 	struct netbk_rx_meta *meta;
 	int copy_off;
 	grant_ref_t copy_gref;
@@ -577,7 +571,6 @@ static void net_rx_action(unsigned long data)
 	s8 status;
 	u16 irq, flags;
 	struct xen_netif_rx_response *resp;
-	struct multicall_entry *mcl;
 	struct sk_buff_head rxq;
 	struct sk_buff *skb;
 	int notify_nr = 0;
@@ -588,10 +581,7 @@ static void net_rx_action(unsigned long data)
 	struct skb_cb_overlay *sco;
 
 	struct netrx_pending_operations npo = {
-		.mmu   = netbk->rx_mmu,
-		.trans = netbk->grant_trans_op,
 		.copy  = netbk->grant_copy_op,
-		.mcl   = netbk->rx_mcl,
 		.meta  = netbk->meta,
 	};
 
@@ -617,50 +607,13 @@ static void net_rx_action(unsigned long data)
 
 	BUG_ON(npo.meta_prod > ARRAY_SIZE(netbk->meta));
 
-	npo.mmu_mcl = npo.mcl_prod;
-	if (npo.mcl_prod) {
-		BUG_ON(xen_feature(XENFEAT_auto_translated_physmap));
-		BUG_ON(npo.mmu_prod > ARRAY_SIZE(netbk->rx_mmu));
-		mcl = npo.mcl + npo.mcl_prod++;
-
-		BUG_ON(mcl[-1].op != __HYPERVISOR_update_va_mapping);
-		mcl[-1].args[MULTI_UVMFLAGS_INDEX] = UVMF_TLB_FLUSH|UVMF_ALL;
-
-		mcl->op = __HYPERVISOR_mmu_update;
-		mcl->args[0] = (unsigned long)netbk->rx_mmu;
-		mcl->args[1] = npo.mmu_prod;
-		mcl->args[2] = 0;
-		mcl->args[3] = DOMID_SELF;
-	}
-
-	if (npo.trans_prod) {
-		BUG_ON(npo.trans_prod > ARRAY_SIZE(netbk->grant_trans_op));
-		mcl = npo.mcl + npo.mcl_prod++;
-		mcl->op = __HYPERVISOR_grant_table_op;
-		mcl->args[0] = GNTTABOP_transfer;
-		mcl->args[1] = (unsigned long)netbk->grant_trans_op;
-		mcl->args[2] = npo.trans_prod;
-	}
-
-	if (npo.copy_prod) {
-		BUG_ON(npo.copy_prod > ARRAY_SIZE(netbk->grant_copy_op));
-		mcl = npo.mcl + npo.mcl_prod++;
-		mcl->op = __HYPERVISOR_grant_table_op;
-		mcl->args[0] = GNTTABOP_copy;
-		mcl->args[1] = (unsigned long)netbk->grant_copy_op;
-		mcl->args[2] = npo.copy_prod;
-	}
-
-	/* Nothing to do? */
-	if (!npo.mcl_prod)
+	if (!npo.copy_prod)
 		return;
 
-	BUG_ON(npo.mcl_prod > ARRAY_SIZE(netbk->rx_mcl));
-
-	ret = HYPERVISOR_multicall(npo.mcl, npo.mcl_prod);
+	BUG_ON(npo.copy_prod > ARRAY_SIZE(netbk->grant_copy_op));
+	ret = HYPERVISOR_grant_table_op(GNTTABOP_copy, &netbk->grant_copy_op,
+					npo.copy_prod);
 	BUG_ON(ret != 0);
-	/* The mmu_machphys_update() must not fail. */
-	BUG_ON(npo.mmu_mcl && npo.mcl[npo.mmu_mcl].result != 0);
 
 	while ((skb = __skb_dequeue(&rxq)) != NULL) {
 		sco = (struct skb_cb_overlay *)skb->cb;
