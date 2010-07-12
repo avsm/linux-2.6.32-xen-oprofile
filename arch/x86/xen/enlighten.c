@@ -933,19 +933,6 @@ static const struct pv_init_ops xen_init_ops __initdata = {
 	.post_allocator_init = xen_post_allocator_init,
 };
 
-static const struct pv_time_ops xen_time_ops __initdata = {
-	.time_init = xen_time_init,
-
-	.set_wallclock = xen_set_wallclock,
-	.get_wallclock = xen_get_wallclock,
-	.get_tsc_khz = xen_tsc_khz,
-#ifdef CONFIG_XEN_SCHED_CLOCK
-	.sched_clock = xen_sched_clock,
-#else
-	.sched_clock = xen_clocksource_read,
-#endif
-};
-
 static const struct pv_cpu_ops xen_cpu_ops __initdata = {
 	.cpuid = xen_cpuid,
 
@@ -1085,10 +1072,11 @@ asmlinkage void __init xen_start_kernel(void)
 	/* Install Xen paravirt ops */
 	pv_info = xen_info;
 	pv_init_ops = xen_init_ops;
-	pv_time_ops = xen_time_ops;
 	pv_cpu_ops = xen_cpu_ops;
 	pv_apic_ops = xen_apic_ops;
 	pv_mmu_ops = xen_mmu_ops;
+
+	xen_init_time_ops();
 
 	/*
 	 * Prevent page tables from being allocated in highmem, even

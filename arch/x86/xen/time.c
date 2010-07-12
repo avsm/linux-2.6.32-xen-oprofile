@@ -195,7 +195,7 @@ unsigned long long xen_sched_clock(void)
 #endif
 
 /* Get the TSC speed from Xen */
-unsigned long xen_tsc_khz(void)
+static unsigned long xen_tsc_khz(void)
 {
 	struct pvclock_vcpu_time_info *info =
 		&HYPERVISOR_shared_info->vcpu_info[0].time;
@@ -230,7 +230,7 @@ static void xen_read_wallclock(struct timespec *ts)
 	put_cpu_var(xen_vcpu);
 }
 
-unsigned long xen_get_wallclock(void)
+static unsigned long xen_get_wallclock(void)
 {
 	struct timespec ts;
 
@@ -238,7 +238,7 @@ unsigned long xen_get_wallclock(void)
 	return ts.tv_sec;
 }
 
-int xen_set_wallclock(unsigned long now)
+static int xen_set_wallclock(unsigned long now)
 {
 	/* do nothing for domU */
 	return -1;
@@ -473,7 +473,7 @@ void xen_timer_resume(void)
 	}
 }
 
-__init void xen_time_init(void)
+static __init void xen_time_init(void)
 {
 	int cpu = smp_processor_id();
 
@@ -497,3 +497,22 @@ __init void xen_time_init(void)
 	xen_setup_timer(cpu);
 	xen_setup_cpu_clockevents();
 }
+
+static const struct pv_time_ops xen_time_ops __initdata = {
+	.time_init = xen_time_init,
+
+	.set_wallclock = xen_set_wallclock,
+	.get_wallclock = xen_get_wallclock,
+	.get_tsc_khz = xen_tsc_khz,
+#ifdef CONFIG_XEN_SCHED_CLOCK
+	.sched_clock = xen_sched_clock,
+#else
+	.sched_clock = xen_clocksource_read,
+#endif
+};
+
+__init void xen_init_time_ops(void)
+{
+	pv_time_ops = xen_time_ops;
+}
+
