@@ -154,6 +154,7 @@ static void do_stolen_accounting(void)
 	account_idle_ticks(ticks);
 }
 
+#ifdef CONFIG_XEN_SCHED_CLOCK
 /*
  * Xen sched_clock implementation.  Returns the number of unstolen
  * nanoseconds, which is nanoseconds the VCPU spent in RUNNING+BLOCKED
@@ -191,7 +192,7 @@ unsigned long long xen_sched_clock(void)
 
 	return ret;
 }
-
+#endif
 
 /* Get the TSC speed from Xen */
 unsigned long xen_tsc_khz(void)
