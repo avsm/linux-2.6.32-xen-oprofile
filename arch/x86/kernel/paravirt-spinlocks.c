@@ -7,17 +7,21 @@
 
 #include <asm/paravirt.h>
 
-#ifdef CONFIG_SMP
-static bool paravirt_lock_spinning(struct raw_spinlock *lock, unsigned ticket)
+static inline void
+default_spin_lock_flags(raw_spinlock_t *lock, unsigned long flags)
 {
-	return true;		/* keep spinning */
+	__raw_spin_lock(lock);
 }
-#endif
 
 struct pv_lock_ops pv_lock_ops = {
 #ifdef CONFIG_SMP
-	.lock_spinning = paravirt_lock_spinning,
-	.unlock_kick = paravirt_nop,
+	.spin_is_locked = __ticket_spin_is_locked,
+	.spin_is_contended = __ticket_spin_is_contended,
+
+	.spin_lock = __ticket_spin_lock,
+	.spin_lock_flags = default_spin_lock_flags,
+	.spin_trylock = __ticket_spin_trylock,
+	.spin_unlock = __ticket_spin_unlock,
 #endif
 };
 EXPORT_SYMBOL(pv_lock_ops);

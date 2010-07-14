@@ -738,14 +738,36 @@ static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PARAVIRT_SPINLOCKS)
 
-static inline bool __raw_lock_spinning(struct raw_spinlock *lock, unsigned ticket)
+static inline int __raw_spin_is_locked(struct raw_spinlock *lock)
 {
-	return PVOP_CALL2(int, pv_lock_ops.lock_spinning, lock, ticket);
+	return PVOP_CALL1(int, pv_lock_ops.spin_is_locked, lock);
 }
 
-static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
+static inline int __raw_spin_is_contended(struct raw_spinlock *lock)
 {
-	PVOP_VCALL2(pv_lock_ops.unlock_kick, lock, ticket);
+	return PVOP_CALL1(int, pv_lock_ops.spin_is_contended, lock);
+}
+#define __raw_spin_is_contended	__raw_spin_is_contended
+
+static __always_inline void __raw_spin_lock(struct raw_spinlock *lock)
+{
+	PVOP_VCALL1(pv_lock_ops.spin_lock, lock);
+}
+
+static __always_inline void __raw_spin_lock_flags(struct raw_spinlock *lock,
+						  unsigned long flags)
+{
+	PVOP_VCALL2(pv_lock_ops.spin_lock_flags, lock, flags);
+}
+
+static __always_inline int __raw_spin_trylock(struct raw_spinlock *lock)
+{
+	return PVOP_CALL1(int, pv_lock_ops.spin_trylock, lock);
+}
+
+static __always_inline void __raw_spin_unlock(struct raw_spinlock *lock)
+{
+	PVOP_VCALL1(pv_lock_ops.spin_unlock, lock);
 }
 
 #endif
