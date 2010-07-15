@@ -1495,15 +1495,28 @@ extern struct paravirt_patch_site __parainstructions[],
 #define PV_RESTORE_REGS "popl %edx; popl %ecx;"
 
 /* save and restore all caller-save registers, except return value */
-#define PV_SAVE_ALL_CALLER_REGS		"pushl %ecx;"
-#define PV_RESTORE_ALL_CALLER_REGS	"popl  %ecx;"
+#define __PV_SAVE_ALL_CALLER_REGS	"pushl %ecx;"
+#define __PV_RESTORE_ALL_CALLER_REGS	"popl  %ecx;"
+
+#ifdef CONFIG_FRAME_POINTER
+#define PV_SAVE_ALL_CALLER_REGS			\
+	"push %ebp;"				\
+	"mov %esp, %ebp;"			\
+	__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS		\
+	__PV_RESTORE_ALL_CALLER_REGS		\
+	"leave;"
+#else
+#define PV_SAVE_ALL_CALLER_REGS		__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS	__PV_RESTORE_ALL_CALLER_REGS
+#endif
 
 #define PV_FLAGS_ARG "0"
 #define PV_EXTRA_CLOBBERS
 #define PV_VEXTRA_CLOBBERS
 #else
 /* save and restore all caller-save registers, except return value */
-#define PV_SAVE_ALL_CALLER_REGS						\
+#define __PV_SAVE_ALL_CALLER_REGS					\
 	"push %rcx;"							\
 	"push %rdx;"							\
 	"push %rsi;"							\
@@ -1512,7 +1525,7 @@ extern struct paravirt_patch_site __parainstructions[],
 	"push %r9;"							\
 	"push %r10;"							\
 	"push %r11;"
-#define PV_RESTORE_ALL_CALLER_REGS					\
+#define __PV_RESTORE_ALL_CALLER_REGS					\
 	"pop %r11;"							\
 	"pop %r10;"							\
 	"pop %r9;"							\
@@ -1521,6 +1534,19 @@ extern struct paravirt_patch_site __parainstructions[],
 	"pop %rsi;"							\
 	"pop %rdx;"							\
 	"pop %rcx;"
+
+#ifdef CONFIG_FRAME_POINTER
+#define PV_SAVE_ALL_CALLER_REGS			\
+	"push %rbp;"				\
+	"mov %rsp, %rbp;"			\
+	__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS		\
+	__PV_RESTORE_ALL_CALLER_REGS		\
+	"leaveq;"
+#else
+#define PV_SAVE_ALL_CALLER_REGS		__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS	__PV_RESTORE_ALL_CALLER_REGS
+#endif
 
 /* We save some registers, but all of them, that's too much. We clobber all
  * caller saved registers but the argument parameter */
