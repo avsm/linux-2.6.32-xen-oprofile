@@ -1088,8 +1088,6 @@ ENTRY(xen_failsafe_callback)
 .previous
 ENDPROC(xen_failsafe_callback)
 
-BUILD_INTERRUPT(xen_hvm_callback_vector, XEN_HVM_EVTCHN_CALLBACK)
-
 #endif	/* CONFIG_XEN */
 
 #ifdef CONFIG_FUNCTION_TRACER

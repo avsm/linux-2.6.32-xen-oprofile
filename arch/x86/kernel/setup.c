@@ -103,7 +103,6 @@
 
 #include <asm/paravirt.h>
 #include <asm/hypervisor.h>
-#include <asm/xen/hypervisor.h>
 
 #include <asm/percpu.h>
 #include <asm/topology.h>
@@ -1019,7 +1018,6 @@ void __init setup_arch(char **cmdline_p)
 	probe_nr_irqs_gsi();
 
 	kvm_guest_init();
-	xen_hvm_guest_init();
 
 	e820_reserve_resources();
 	e820_mark_nosave_regions(max_low_pfn);

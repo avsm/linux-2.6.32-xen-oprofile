@@ -58,7 +58,6 @@ struct gnttab_free_callback {
 };
 
 void gnttab_reset_grant_page(struct page *page);
-int gnttab_init(void);
 
 int gnttab_suspend(void);
 int gnttab_resume(void);
@@ -153,9 +152,6 @@ int arch_gnttab_map_shared(unsigned long *frames, unsigned long nr_gframes,
 			   struct grant_entry **__shared);
 void arch_gnttab_unmap_shared(struct grant_entry *shared,
 			      unsigned long nr_gframes);
-
-extern unsigned long xen_hvm_resume_frames;
-unsigned int gnttab_max_grant_frames(void);
 
 #define gnttab_map_vaddr(map) ((void *)(map.host_virt_addr))
 
