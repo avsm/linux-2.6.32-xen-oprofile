@@ -21,6 +21,7 @@ obj-$(CONFIG_XEN_MCE)		+= mce.o
 obj-$(CONFIG_XEN_S3)           += acpi.o
 obj-$(CONFIG_ACPI_PROCESSOR_XEN) += acpi_processor.o
 obj-$(CONFIG_ACPI_HOTPLUG_MEMORY)  += xen_acpi_memhotplug.o
+obj-$(CONFIG_XEN_PLATFORM_PCI)	+= platform-pci.o
 
 xen-evtchn-y				:= evtchn.o
 xen-gntdev-y				:= gntdev.o
