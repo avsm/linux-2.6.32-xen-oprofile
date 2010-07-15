@@ -412,6 +412,7 @@ static void connect(struct backend_info *be)
 
 static int connect_rings(struct backend_info *be)
 {
+	struct xen_netif *netif = be->netif;
 	struct xenbus_device *dev = be->dev;
 	unsigned long tx_ring_ref, rx_ring_ref;
 	unsigned int evtchn, rx_copy;
@@ -445,52 +446,47 @@ static int connect_rings(struct backend_info *be)
 	if (!rx_copy)
 		return -EOPNOTSUPP;
 
-	if (be->netif->dev->tx_queue_len != 0) {
+	if (netif->dev->tx_queue_len != 0) {
 		if (xenbus_scanf(XBT_NIL, dev->otherend,
 				 "feature-rx-notify", "%d", &val) < 0)
 			val = 0;
 		if (val)
-			be->netif->can_queue = 1;
+			netif->can_queue = 1;
 		else
 			/* Must be non-zero for pfifo_fast to work. */
-			be->netif->dev->tx_queue_len = 1;
+			netif->dev->tx_queue_len = 1;
 	}
 
-	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-sg", "%d", &val) < 0)
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-sg",
+			 "%d", &val) < 0)
 		val = 0;
-	if (!val) {
-		be->netif->features &= ~NETIF_F_SG;
-		be->netif->dev->features &= ~NETIF_F_SG;
-		if (be->netif->dev->mtu > ETH_DATA_LEN)
-			be->netif->dev->mtu = ETH_DATA_LEN;
-	}
+	netif->can_sg = !!val;
 
-	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4", "%d",
-			 &val) < 0)
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4",
+			 "%d", &val) < 0)
 		val = 0;
-	if (val) {
-		be->netif->features |= NETIF_F_TSO;
-		be->netif->dev->features |= NETIF_F_TSO;
-	}
+	netif->gso = !!val;
+
+	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-gso-tcpv4-prefix",
+			 "%d", &val) < 0)
+		val = 0;
+	netif->gso_prefix = !!val;
 
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-no-csum-offload",
 			 "%d", &val) < 0)
 		val = 0;
-	if (val) {
-		be->netif->features &= ~NETIF_F_IP_CSUM;
-		be->netif->dev->features &= ~NETIF_F_IP_CSUM;
-	}
+	netif->csum = !val;
 
 	if (xenbus_scanf(XBT_NIL, dev->otherend, "feature-smart-poll",
 			 "%d", &val) < 0)
 		val = 0;
-	if (val)
-		be->netif->smart_poll = 1;
-	else
-		be->netif->smart_poll = 0;
+	netif->smart_poll = !!val;
+
+	/* Set dev->features */
+	netif_set_features(netif);
 
 	/* Map the shared frame, irq etc. */
-	err = netif_map(be->netif, tx_ring_ref, rx_ring_ref, evtchn);
+	err = netif_map(netif, tx_ring_ref, rx_ring_ref, evtchn);
 	if (err) {
 		xenbus_dev_fatal(dev, err,
 				 "mapping shared-frames %lu/%lu port %u",
