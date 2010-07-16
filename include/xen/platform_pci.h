@@ -44,6 +44,6 @@ static inline int xen_must_unplug_disks(void) {
 #endif
 }
 
-extern bool xen_platform_pci_enabled;
+extern int xen_platform_pci_unplug;
 
 #endif /* _XEN_PLATFORM_PCI_H */

@@ -622,7 +622,7 @@ int gnttab_resume(void)
 		shared = ioremap(xen_hvm_resume_frames, PAGE_SIZE * max_nr_gframes);
 		if (shared == NULL) {
 			printk(KERN_WARNING
-					"Fail to ioremap gnttab share frames\n");
+					"Failed to ioremap gnttab share frames!");
 			return -ENOMEM;
 		}
 	}

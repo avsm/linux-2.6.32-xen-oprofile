@@ -1298,9 +1298,6 @@ void __setup_vector_irq(int cpu)
 	/* Mark the inuse vectors */
 	for_each_irq_desc(irq, desc) {
 		cfg = desc->chip_data;
-		if (!cfg)
-			continue;
-
 		if (!cpumask_test_cpu(cpu, cfg->domain))
 			continue;
 		vector = cfg->vector;
@@ -1754,8 +1751,6 @@ __apicdebuginit(void) print_IO_APIC(void)
 		struct irq_pin_list *entry;
 
 		cfg = desc->chip_data;
-		if (!cfg)
-			continue;
 		entry = cfg->irq_2_pin;
 		if (!entry)
 			continue;
@@ -3505,7 +3500,7 @@ int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
 
-	if (xen_domain())
+	if (xen_pv_domain())
 		return xen_pci_setup_msi_irqs(dev, nvec, type);
 
 	node = dev_to_node(&dev->dev);

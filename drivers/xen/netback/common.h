@@ -76,13 +76,18 @@ struct xen_netif {
 	struct vm_struct *tx_comms_area;
 	struct vm_struct *rx_comms_area;
 
-	/* Set of features that can be turned on in dev->features. */
-	int features;
+	/* Flags that must not be set in dev->features */
+	int features_disabled;
 
-	int smart_poll;
+	/* Frontend feature information. */
+	u8 can_sg:1;
+	u8 gso:1;
+	u8 gso_prefix:1;
+	u8 csum:1;
+	u8 smart_poll:1;
 
 	/* Internal feature information. */
-	u8 can_queue:1;	/* can queue packets for receiver? */
+	u8 can_queue:1;	    /* can queue packets for receiver? */
 
 	/* Allow netif_be_start_xmit() to peek ahead in the rx request
 	 * ring.  This is a prediction of what rx_req_cons will be once
@@ -188,6 +193,7 @@ void netif_accel_init(void);
 
 void netif_disconnect(struct xen_netif *netif);
 
+void netif_set_features(struct xen_netif *netif);
 struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int handle);
 int netif_map(struct xen_netif *netif, unsigned long tx_ring_ref,
 	      unsigned long rx_ring_ref, unsigned int evtchn);
@@ -224,7 +230,7 @@ static inline int netbk_can_queue(struct net_device *dev)
 static inline int netbk_can_sg(struct net_device *dev)
 {
 	struct xen_netif *netif = netdev_priv(dev);
-	return netif->features & NETIF_F_SG;
+	return netif->can_sg;
 }
 
 struct pending_tx_info {

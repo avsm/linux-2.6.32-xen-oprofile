@@ -23,7 +23,7 @@ int xen_register_pirq(u32 gsi, int triggering)
 	int shareable = 0;
 	char *name;
 
-	if (!xen_domain())
+	if (!xen_pv_domain())
 		return -1;
 
 	if (triggering == ACPI_EDGE_SENSITIVE) {
@@ -61,7 +61,7 @@ int xen_register_gsi(u32 gsi, int triggering, int polarity)
 	int rc, irq;
 	struct physdev_setup_gsi setup_gsi;
 
-	if (!xen_domain())
+	if (!xen_pv_domain())
 		return -1;
 
 	printk(KERN_DEBUG "xen: registering gsi %u triggering %d polarity %d\n",

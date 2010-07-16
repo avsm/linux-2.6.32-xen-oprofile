@@ -21,9 +21,9 @@
  *
  */
 
-#include <asm/io.h>
 
 #include <linux/interrupt.h>
+#include <linux/io.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 
@@ -122,19 +122,21 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 	if (mmio_addr == 0 || ioaddr == 0) {
 		dev_err(&pdev->dev, "no resources found\n");
 		ret = -ENOENT;
+		goto pci_out;
 	}
 
 	if (request_mem_region(mmio_addr, mmio_len, DRV_NAME) == NULL) {
 		dev_err(&pdev->dev, "MEM I/O resource 0x%lx @ 0x%lx busy\n",
 		       mmio_addr, mmio_len);
 		ret = -EBUSY;
+		goto pci_out;
 	}
 
 	if (request_region(ioaddr, iolen, DRV_NAME) == NULL) {
 		dev_err(&pdev->dev, "I/O resource 0x%lx @ 0x%lx busy\n",
 		       iolen, ioaddr);
 		ret = -EBUSY;
-		goto out;
+		goto mem_out;
 	}
 
 	platform_mmio = mmio_addr;
@@ -143,14 +145,14 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 	if (!xen_have_vector_callback) {
 		ret = xen_allocate_irq(pdev);
 		if (ret) {
-			printk(KERN_WARNING "request_irq failed err=%d\n", ret);
+			dev_warn(&pdev->dev, "request_irq failed err=%d\n", ret);
 			goto out;
 		}
 		callback_via = get_callback_via(pdev);
 		ret = xen_set_callback_via(callback_via);
 		if (ret) {
-			printk(KERN_WARNING
-					"Unable to set the evtchn callback err=%d\n", ret);
+			dev_warn(&pdev->dev, "Unable to set the evtchn callback "
+					 "err=%d\n", ret);
 			goto out;
 		}
 	}
@@ -164,14 +166,14 @@ static int __devinit platform_pci_init(struct pci_dev *pdev,
 	ret = xen_setup_shutdown_event();
 	if (ret)
 		goto out;
+	return 0;
 
 out:
-	if (ret) {
-		release_mem_region(mmio_addr, mmio_len);
-		release_region(ioaddr, iolen);
-		pci_disable_device(pdev);
-	}
-
+	release_region(ioaddr, iolen);
+mem_out:
+	release_mem_region(mmio_addr, mmio_len);
+pci_out:
+	pci_disable_device(pdev);
 	return ret;
 }
 
@@ -194,18 +196,12 @@ static struct pci_driver platform_driver = {
 
 static int __init platform_pci_module_init(void)
 {
-	int rc;
-
-	if (!xen_platform_pci_enabled)
+	/* no unplug has been done, IGNORE hasn't been specified: just
+	 * return now */
+	if (!xen_platform_pci_unplug)
 		return -ENODEV;
 
-	rc = pci_register_driver(&platform_driver);
-	if (rc) {
-		printk(KERN_INFO DRV_NAME
-		       ": No platform pci device model found\n");
-		return rc;
-	}
-	return 0;
+	return pci_register_driver(&platform_driver);
 }
 
 module_init(platform_pci_module_init);

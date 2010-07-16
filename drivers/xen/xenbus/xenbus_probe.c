@@ -55,6 +55,7 @@
 #include <xen/events.h>
 #include <xen/page.h>
 
+#include <xen/platform_pci.h>
 #include <xen/hvm.h>
 
 #include "xenbus_comms.h"
@@ -645,10 +646,7 @@ int register_xenstore_notifier(struct notifier_block *nb)
 {
 	int ret = 0;
 
-	if (xenstored_ready > 0)
-		ret = nb->notifier_call(nb, 0, NULL);
-	else
-		blocking_notifier_chain_register(&xenstore_chain, nb);
+	blocking_notifier_chain_register(&xenstore_chain, nb);
 
 	return ret;
 }

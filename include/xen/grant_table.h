@@ -58,8 +58,8 @@ struct gnttab_free_callback {
 };
 
 void gnttab_reset_grant_page(struct page *page);
-int gnttab_init(void);
 
+int gnttab_init(void);
 int gnttab_suspend(void);
 int gnttab_resume(void);
 

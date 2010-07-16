@@ -2478,7 +2478,7 @@ static void xen_hvm_exit_mmap(struct mm_struct *mm)
 	a.domid = DOMID_SELF;
 	a.gpa = __pa(mm->pgd);
 	rc = HYPERVISOR_hvm_op(HVMOP_pagetable_dying, &a);
-	WARN_ON(rc < 0);
+	WARN_ON_ONCE(rc < 0);
 }
 
 static int is_pagetable_dying_supported(void)
@@ -2489,8 +2489,8 @@ static int is_pagetable_dying_supported(void)
 	a.domid = DOMID_SELF;
 	a.gpa = 0x00;
 	rc = HYPERVISOR_hvm_op(HVMOP_pagetable_dying, &a);
-	if (rc == -EINVAL) {
-		printk(KERN_INFO "HVMOP_pagetable_dying not supported\n");
+	if (rc < 0) {
+		printk(KERN_DEBUG "HVMOP_pagetable_dying not supported\n");
 		return 0;
 	}
 	return 1;

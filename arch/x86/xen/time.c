@@ -155,6 +155,7 @@ static void do_stolen_accounting(void)
 	account_idle_ticks(ticks);
 }
 
+#ifdef CONFIG_XEN_SCHED_CLOCK
 /*
  * Xen sched_clock implementation.  Returns the number of unstolen
  * nanoseconds, which is nanoseconds the VCPU spent in RUNNING+BLOCKED
@@ -192,7 +193,7 @@ static unsigned long long xen_sched_clock(void)
 
 	return ret;
 }
-
+#endif
 
 /* Get the TSC speed from Xen */
 static unsigned long xen_tsc_khz(void)
@@ -457,6 +458,8 @@ void xen_setup_timer(int cpu)
 
 	evt->cpumask = cpumask_of(cpu);
 	evt->irq = irq;
+
+	xen_setup_runstate_info(cpu);
 }
 
 void xen_teardown_timer(int cpu)
@@ -487,10 +490,6 @@ void xen_timer_resume(void)
 	}
 }
 
-static const struct pv_time_ops xen_time_ops __initdata = {
-	.sched_clock = xen_sched_clock,
-};
-
 static __init void xen_time_init(void)
 {
 	int cpu = smp_processor_id();
@@ -515,6 +514,14 @@ static __init void xen_time_init(void)
 	xen_setup_timer(cpu);
 	xen_setup_cpu_clockevents();
 }
+
+static const struct pv_time_ops xen_time_ops __initdata = {
+#ifdef CONFIG_XEN_SCHED_CLOCK
+       .sched_clock = xen_sched_clock,
+#else
+       .sched_clock = xen_clocksource_read,
+#endif
+};
 
 __init void xen_init_time_ops(void)
 {
@@ -550,12 +557,10 @@ __init void xen_hvm_init_time_ops(void)
 	}
 
 	pv_time_ops = xen_time_ops;
-	x86_init.timers.timer_init = xen_time_init;
-	x86_init.timers.setup_percpu_clockev = x86_init_noop;
+	x86_init.timers.setup_percpu_clockev = xen_time_init;
 	x86_cpuinit.setup_percpu_clockev = xen_hvm_setup_cpu_clockevents;
 
 	x86_platform.calibrate_tsc = xen_tsc_khz;
 	x86_platform.get_wallclock = xen_get_wallclock;
 	x86_platform.set_wallclock = xen_set_wallclock;
 }
-

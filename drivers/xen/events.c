@@ -42,6 +42,7 @@
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/pci.h>
 
+#include <xen/xen.h>
 #include <xen/hvm.h>
 #include <xen/xen-ops.h>
 #include <xen/events.h>
@@ -375,6 +376,7 @@ static int find_unbound_irq(void)
 	int irq;
 	struct irq_desc *desc;
 	int start = get_nr_hw_irqs();
+	void *chip_data;
 
 	if (start == nr_irqs)
 		goto no_irqs;
@@ -400,7 +402,10 @@ static int find_unbound_irq(void)
 	if (WARN_ON(desc == NULL))
 		return -1;
 
+	/* save and restore chip_data */
+	chip_data = desc->chip_data;
 	dynamic_irq_init(irq);
+	desc->chip_data = chip_data;
 
 	return irq;
 
@@ -1026,7 +1031,7 @@ static DEFINE_PER_CPU(unsigned, xed_nesting_count);
  * a bitset of words which contain pending event bits.  The second
  * level is a bitset of pending events themselves.
  */
-static void __xen_evtchn_do_upcall(void)
+static void __xen_evtchn_do_upcall(struct pt_regs *regs)
 {
 	int cpu = get_cpu();
 	struct shared_info *s = HYPERVISOR_shared_info;
@@ -1083,7 +1088,7 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 	exit_idle();
 	irq_enter();
 
-	__xen_evtchn_do_upcall();
+	__xen_evtchn_do_upcall(regs);
 
 	irq_exit();
 	set_irq_regs(old_regs);
@@ -1091,7 +1096,8 @@ void xen_evtchn_do_upcall(struct pt_regs *regs)
 
 void xen_hvm_evtchn_do_upcall(void)
 {
-	__xen_evtchn_do_upcall();
+	struct pt_regs *regs = get_irq_regs();
+	__xen_evtchn_do_upcall(regs);
 }
 EXPORT_SYMBOL_GPL(xen_hvm_evtchn_do_upcall);
 
@@ -1416,7 +1422,7 @@ void smp_xen_hvm_callback_vector(struct pt_regs *regs)
 
 	irq_enter();
 
-	__xen_evtchn_do_upcall();
+	__xen_evtchn_do_upcall(regs);
 
 	irq_exit();
 

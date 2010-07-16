@@ -738,14 +738,36 @@ static inline void __set_fixmap(unsigned /* enum fixed_addresses */ idx,
 
 #if defined(CONFIG_SMP) && defined(CONFIG_PARAVIRT_SPINLOCKS)
 
-static inline bool __raw_lock_spinning(struct raw_spinlock *lock, unsigned ticket)
+static inline int __raw_spin_is_locked(struct raw_spinlock *lock)
 {
-	return PVOP_CALL2(int, pv_lock_ops.lock_spinning, lock, ticket);
+	return PVOP_CALL1(int, pv_lock_ops.spin_is_locked, lock);
 }
 
-static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
+static inline int __raw_spin_is_contended(struct raw_spinlock *lock)
 {
-	PVOP_VCALL2(pv_lock_ops.unlock_kick, lock, ticket);
+	return PVOP_CALL1(int, pv_lock_ops.spin_is_contended, lock);
+}
+#define __raw_spin_is_contended	__raw_spin_is_contended
+
+static __always_inline void __raw_spin_lock(struct raw_spinlock *lock)
+{
+	PVOP_VCALL1(pv_lock_ops.spin_lock, lock);
+}
+
+static __always_inline void __raw_spin_lock_flags(struct raw_spinlock *lock,
+						  unsigned long flags)
+{
+	PVOP_VCALL2(pv_lock_ops.spin_lock_flags, lock, flags);
+}
+
+static __always_inline int __raw_spin_trylock(struct raw_spinlock *lock)
+{
+	return PVOP_CALL1(int, pv_lock_ops.spin_trylock, lock);
+}
+
+static __always_inline void __raw_spin_unlock(struct raw_spinlock *lock)
+{
+	PVOP_VCALL1(pv_lock_ops.spin_unlock, lock);
 }
 
 #endif
@@ -755,15 +777,28 @@ static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
 #define PV_RESTORE_REGS "popl %edx; popl %ecx;"
 
 /* save and restore all caller-save registers, except return value */
-#define PV_SAVE_ALL_CALLER_REGS		"pushl %ecx;"
-#define PV_RESTORE_ALL_CALLER_REGS	"popl  %ecx;"
+#define __PV_SAVE_ALL_CALLER_REGS	"pushl %ecx;"
+#define __PV_RESTORE_ALL_CALLER_REGS	"popl  %ecx;"
+
+#ifdef CONFIG_FRAME_POINTER
+#define PV_SAVE_ALL_CALLER_REGS			\
+	"push %ebp;"				\
+	"mov %esp, %ebp;"			\
+	__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS		\
+	__PV_RESTORE_ALL_CALLER_REGS		\
+	"leave;"
+#else
+#define PV_SAVE_ALL_CALLER_REGS		__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS	__PV_RESTORE_ALL_CALLER_REGS
+#endif
 
 #define PV_FLAGS_ARG "0"
 #define PV_EXTRA_CLOBBERS
 #define PV_VEXTRA_CLOBBERS
 #else
 /* save and restore all caller-save registers, except return value */
-#define PV_SAVE_ALL_CALLER_REGS						\
+#define __PV_SAVE_ALL_CALLER_REGS					\
 	"push %rcx;"							\
 	"push %rdx;"							\
 	"push %rsi;"							\
@@ -772,7 +807,7 @@ static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
 	"push %r9;"							\
 	"push %r10;"							\
 	"push %r11;"
-#define PV_RESTORE_ALL_CALLER_REGS					\
+#define __PV_RESTORE_ALL_CALLER_REGS					\
 	"pop %r11;"							\
 	"pop %r10;"							\
 	"pop %r9;"							\
@@ -781,6 +816,19 @@ static inline void __raw_unlock_kick(struct raw_spinlock *lock, unsigned ticket)
 	"pop %rsi;"							\
 	"pop %rdx;"							\
 	"pop %rcx;"
+
+#ifdef CONFIG_FRAME_POINTER
+#define PV_SAVE_ALL_CALLER_REGS			\
+	"push %rbp;"				\
+	"mov %rsp, %rbp;"			\
+	__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS		\
+	__PV_RESTORE_ALL_CALLER_REGS		\
+	"leaveq;"
+#else
+#define PV_SAVE_ALL_CALLER_REGS		__PV_SAVE_ALL_CALLER_REGS
+#define PV_RESTORE_ALL_CALLER_REGS	__PV_RESTORE_ALL_CALLER_REGS
+#endif
 
 /* We save some registers, but all of them, that's too much. We clobber all
  * caller saved registers but the argument parameter */

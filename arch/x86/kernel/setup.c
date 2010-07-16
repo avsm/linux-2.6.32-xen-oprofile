@@ -70,6 +70,7 @@
 #include <linux/tboot.h>
 
 #include <video/edid.h>
+#include <xen/xen.h>
 
 #include <asm/mtrr.h>
 #include <asm/apic.h>
@@ -103,7 +104,6 @@
 
 #include <asm/paravirt.h>
 #include <asm/hypervisor.h>
-#include <asm/xen/hypervisor.h>
 
 #include <asm/percpu.h>
 #include <asm/topology.h>
