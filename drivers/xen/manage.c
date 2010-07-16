@@ -7,19 +7,16 @@
 #include <linux/sysrq.h>
 #include <linux/stop_machine.h>
 #include <linux/freezer.h>
-#include <linux/pci.h>
-#include <linux/cpumask.h>
 
+#include <xen/xen.h>
 #include <xen/xenbus.h>
 #include <xen/grant_table.h>
 #include <xen/events.h>
 #include <xen/hvc-console.h>
 #include <xen/xen-ops.h>
-#include <xen/platform_pci.h>
 
 #include <asm/xen/hypercall.h>
 #include <asm/xen/page.h>
-#include <asm/xen/hypervisor.h>
 
 enum shutdown_state {
 	SHUTDOWN_INVALID = -1,
@@ -45,12 +42,12 @@ static int xen_hvm_suspend(void *data)
 
 	*cancelled = HYPERVISOR_sched_op(SCHEDOP_shutdown, &r);
 
-	xen_guest_init();
+	xen_hvm_post_suspend(*cancelled);
 	gnttab_resume();
 
 	if (!*cancelled) {
 		xen_irq_resume();
-		platform_pci_resume();
+		xen_timer_resume();
 	}
 
 	return 0;
@@ -96,62 +93,6 @@ static int xen_suspend(void *data)
 	return 0;
 }
 
-static void do_hvm_suspend(void)
-{
-	int err;
-	int cancelled = 1;
-
-	shutting_down = SHUTDOWN_SUSPEND;
-
-	err = stop_machine_create();
-	if (err) {
-		printk(KERN_ERR "xen suspend: failed to setup stop_machine %d\n", err);
-		goto out;
-	}
-
-#ifdef CONFIG_PREEMPT
-	/* If the kernel is preemptible, we need to freeze all the processes
-	   to prevent them from being in the middle of a pagetable update
-	   during suspend. */
-	err = freeze_processes();
-	if (err) {
-		printk(KERN_ERR "xen suspend: freeze failed %d\n", err);
-		goto out_destroy_sm;
-	}
-#endif
-
-	printk(KERN_DEBUG "suspending xenstore... ");
-	xenbus_suspend();
-	printk(KERN_DEBUG "xenstore suspended\n");
-	platform_pci_disable_irq();
-	
-	err = stop_machine(xen_hvm_suspend, &cancelled, cpumask_of(0));
-	if (err) {
-		printk(KERN_ERR "failed to start xen_suspend: %d\n", err);
-		cancelled = 1;
-	}
-
-	platform_pci_enable_irq();
-
-	if (!cancelled) {
-		xen_arch_resume();
-		xenbus_resume();
-	} else
-		xs_suspend_cancel();
-
-	/* Make sure timer events get retriggered on all CPUs */
-	clock_was_set();
-
-out_destroy_sm:
-	stop_machine_destroy();
-
-out:
-#ifdef CONFIG_PREEMPT
-	thaw_processes();
-#endif
-	shutting_down = SHUTDOWN_INVALID;
-}
-
 static void do_suspend(void)
 {
 	int err;
@@ -191,7 +132,10 @@ static void do_suspend(void)
 		goto out_resume;
 	}
 
-	err = stop_machine(xen_suspend, &cancelled, cpumask_of(0));
+	if (xen_hvm_domain())
+		err = stop_machine(xen_hvm_suspend, &cancelled, cpumask_of(0));
+	else
+		err = stop_machine(xen_suspend, &cancelled, cpumask_of(0));
 
 	dpm_resume_noirq(PMSG_RESUME);
 
@@ -264,10 +208,7 @@ static void shutdown_handler(struct xenbus_watch *watch,
 		ctrl_alt_del();
 #ifdef CONFIG_PM_SLEEP
 	} else if (strcmp(str, "suspend") == 0) {
-		if (xen_hvm_domain())
-			do_hvm_suspend();
-		else
-			do_suspend();
+		do_suspend();
 #endif
 	} else {
 		printk(KERN_INFO "Ignoring shutdown request: %s\n", str);
@@ -364,5 +305,6 @@ int xen_setup_shutdown_event(void)
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(xen_setup_shutdown_event);
 
 subsys_initcall(__setup_shutdown_event);

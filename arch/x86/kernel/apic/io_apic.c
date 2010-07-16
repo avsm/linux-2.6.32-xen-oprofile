@@ -3500,7 +3500,7 @@ int arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
 
-	if (xen_domain())
+	if (xen_pv_domain())
 		return xen_pci_setup_msi_irqs(dev, nvec, type);
 
 	node = dev_to_node(&dev->dev);

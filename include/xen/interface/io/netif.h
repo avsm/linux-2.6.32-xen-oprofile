@@ -131,6 +131,10 @@ struct xen_netif_rx_request {
 #define _NETRXF_extra_info     (3)
 #define  NETRXF_extra_info     (1U<<_NETRXF_extra_info)
 
+/* GSO Prefix descriptor. */
+#define _NETRXF_gso_prefix     (4)
+#define  NETRXF_gso_prefix     (1U<<_NETRXF_gso_prefix)
+
 struct xen_netif_rx_response {
     uint16_t id;
     uint16_t offset;       /* Offset in page of start of received packet  */
