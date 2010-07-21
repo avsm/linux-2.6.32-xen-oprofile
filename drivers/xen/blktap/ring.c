@@ -335,7 +335,7 @@ blktap_ring_set_message(struct blktap *tap, int msg)
 	struct blktap_ring *ring = &tap->ring;
 
 	if (ring->ring.sring)
-		ring->ring.sring->pad[0] = msg;
+		ring->ring.sring->private.tapif_user.msg = msg;
 }
 
 static int
@@ -400,7 +400,7 @@ static unsigned int blktap_ring_poll(struct file *filp, poll_table *wait)
 	up_read(&current->mm->mmap_sem);
 
 	if (work ||
-	    ring->ring.sring->pad[0])
+	    ring->ring.sring->private.tapif_user.msg)
 		return POLLIN | POLLRDNORM;
 
 	return 0;
