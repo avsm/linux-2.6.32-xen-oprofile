@@ -716,11 +716,10 @@ static void net_rx_action(unsigned long data)
 		 * netfront_smartpoll_active indicates whether
 		 * netfront timer is active.
 		 */
-		if ((netif->smart_poll == 1)) {
-			if (!(netif->rx.sring->netfront_smartpoll_active)) {
-				notify_remote_via_irq(irq);
-				netif->rx.sring->netfront_smartpoll_active = 1;
-			}
+		if ((netif->smart_poll == 1) &&
+		    !(netif->rx.sring->private.netif.smartpoll_active)) {
+			notify_remote_via_irq(irq);
+			netif->rx.sring->private.netif.smartpoll_active = 1;
 		}
 
 		netif_put(netif);
@@ -1599,9 +1598,9 @@ static void make_tx_response(struct xen_netif *netif,
 	 * is active.
 	 */
 	if ((netif->smart_poll == 1)) {
-		if (!(netif->rx.sring->netfront_smartpoll_active)) {
+		if (!(netif->rx.sring->private.netif.smartpoll_active)) {
 			notify_remote_via_irq(netif->irq);
-			netif->rx.sring->netfront_smartpoll_active = 1;
+			netif->rx.sring->private.netif.smartpoll_active = 1;
 		}
 	} else if (notify)
 		notify_remote_via_irq(netif->irq);
