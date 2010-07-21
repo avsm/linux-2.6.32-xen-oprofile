@@ -1354,13 +1354,13 @@ static enum hrtimer_restart smart_poll_function(struct hrtimer *timer)
 	if (np->smart_poll.counter %
 			(np->smart_poll.smart_poll_freq / 10) == 0) {
 		if (!np->smart_poll.active) {
-			np->rx.sring->netfront_smartpoll_active = 0;
+			np->rx.sring->private.netif.smartpoll_active = 0;
 			goto end;
 		}
 		np->smart_poll.active = 0;
 	}
 
-	if (np->rx.sring->netfront_smartpoll_active)
+	if (np->rx.sring->private.netif.smartpoll_active)
 		hrtimer_start(timer,
 			ktime_set(0, NANO_SECOND/psmart_poll->smart_poll_freq),
 			HRTIMER_MODE_REL);
