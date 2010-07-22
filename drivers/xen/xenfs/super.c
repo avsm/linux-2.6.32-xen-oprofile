@@ -138,7 +138,7 @@ static struct file_system_type xenfs_type = {
 static int __init xenfs_init(void)
 {
 	int err;
-	if (!xen_pv_domain()) {
+	if (!xen_domain()) {
 		printk(KERN_INFO "xenfs: not registering filesystem on non-xen platform\n");
 		return 0;
 	}
@@ -160,7 +160,7 @@ static int __init xenfs_init(void)
 
 static void __exit xenfs_exit(void)
 {
-	if (xen_pv_domain())
+	if (xen_domain())
 		unregister_filesystem(&xenfs_type);
 }
 
