@@ -473,6 +473,7 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 	}
 	pcifront_init_sd(sd, domain, bus, pdev);
 
+	spin_lock(&pdev->dev_lock);
 	b = pci_scan_bus_parented(&pdev->xdev->dev, bus,
 				  &pcifront_bus_ops, sd);
 	if (!b) {
@@ -497,12 +498,14 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 	/* Create SysFS and notify udev of the devices. Aka: "going live" */
 	pci_bus_add_devices(b);
 
+	spin_unlock(&pdev->dev_lock);
 
 	return err;
 
 err_out:
 	kfree(bus_entry);
 	kfree(sd);
+	spin_unlock(&pdev->dev_lock);
 
 	return err;
 }
@@ -839,7 +842,6 @@ static int __devinit pcifront_try_connect(struct pcifront_device *pdev)
 	char str[64];
 	unsigned int domain, bus;
 
-	spin_lock(&pdev->dev_lock);
 
 	/* Only connect once */
 	if (xenbus_read_driver_state(pdev->xdev->nodename) !=
@@ -895,11 +897,8 @@ static int __devinit pcifront_try_connect(struct pcifront_device *pdev)
 	}
 
 	err = xenbus_switch_state(pdev->xdev, XenbusStateConnected);
-	if (err)
-		goto out;
 
 out:
-	spin_unlock(&pdev->dev_lock);
 	return err;
 }
 
@@ -908,7 +907,6 @@ static int pcifront_try_disconnect(struct pcifront_device *pdev)
 	int err = 0;
 	enum xenbus_state prev_state;
 
-	spin_lock(&pdev->dev_lock);
 
 	prev_state = xenbus_read_driver_state(pdev->xdev->nodename);
 
@@ -916,14 +914,15 @@ static int pcifront_try_disconnect(struct pcifront_device *pdev)
 		goto out;
 
 	if (prev_state == XenbusStateConnected) {
+		spin_lock(&pdev->dev_lock);
 		pcifront_free_roots(pdev);
 		pcifront_disconnect(pdev);
+		spin_unlock(&pdev->dev_lock);
 	}
 
 	err = xenbus_switch_state(pdev->xdev, XenbusStateClosed);
 
 out:
-	spin_unlock(&pdev->dev_lock);
 
 	return err;
 }
@@ -934,8 +933,6 @@ static int __devinit pcifront_attach_devices(struct pcifront_device *pdev)
 	int i, num_roots, len;
 	unsigned int domain, bus;
 	char str[64];
-
-	spin_lock(&pdev->dev_lock);
 
 	if (xenbus_read_driver_state(pdev->xdev->nodename) !=
 	    XenbusStateReconfiguring)
@@ -985,7 +982,6 @@ static int __devinit pcifront_attach_devices(struct pcifront_device *pdev)
 	xenbus_switch_state(pdev->xdev, XenbusStateConnected);
 
 out:
-	spin_unlock(&pdev->dev_lock);
 	return err;
 }
 
@@ -997,8 +993,6 @@ static int pcifront_detach_devices(struct pcifront_device *pdev)
 	struct pci_bus *pci_bus;
 	struct pci_dev *pci_dev;
 	char str[64];
-
-	spin_lock(&pdev->dev_lock);
 
 	if (xenbus_read_driver_state(pdev->xdev->nodename) !=
 	    XenbusStateConnected)
@@ -1070,7 +1064,6 @@ static int pcifront_detach_devices(struct pcifront_device *pdev)
 	err = xenbus_switch_state(pdev->xdev, XenbusStateReconfiguring);
 
 out:
-	spin_unlock(&pdev->dev_lock);
 	return err;
 }
 
