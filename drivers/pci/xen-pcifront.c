@@ -434,17 +434,10 @@ int __devinit pcifront_scan_bus(struct pcifront_device *pdev,
 		}
 
 		d = pci_scan_single_device(b, devfn);
-		if (d) {
+		if (d)
 			dev_info(&pdev->xdev->dev, "New device on "
 				 "%04x:%02x:%02x.%02x found.\n", domain, bus,
 				 PCI_SLOT(devfn), PCI_FUNC(devfn));
-			err = pci_bus_add_device(d);
-			if (err) {
-				dev_err(&pdev->xdev->dev, "Failed to add "
-				" device to bus.\n");
-				return err;
-			}
-		}
 	}
 
 	return 0;
@@ -501,6 +494,7 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 	/* Claim resources before going "live" with our devices */
 	pci_walk_bus(b, pcifront_claim_resource, pdev);
 
+	/* Create SysFS and notify udev of the devices. Aka: "going live" */
 	pci_bus_add_devices(b);
 
 
@@ -541,6 +535,9 @@ int __devinit pcifront_rescan_root(struct pcifront_device *pdev,
 
 	/* Claim resources before going "live" with our devices */
 	pci_walk_bus(b, pcifront_claim_resource, pdev);
+
+	/* Create SysFS and notify udev of the devices. Aka: "going live" */
+	pci_bus_add_devices(b);
 
 	return err;
 }
