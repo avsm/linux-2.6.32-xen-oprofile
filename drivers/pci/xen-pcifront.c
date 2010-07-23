@@ -42,7 +42,6 @@ struct pci_bus_entry {
 struct pcifront_device {
 	struct xenbus_device *xdev;
 	struct list_head root_buses;
-	spinlock_t dev_lock;
 
 	int evtchn;
 	int gnt_ref;
@@ -473,7 +472,6 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 	}
 	pcifront_init_sd(sd, domain, bus, pdev);
 
-	spin_lock(&pdev->dev_lock);
 	b = pci_scan_bus_parented(&pdev->xdev->dev, bus,
 				  &pcifront_bus_ops, sd);
 	if (!b) {
@@ -498,14 +496,11 @@ int __devinit pcifront_scan_root(struct pcifront_device *pdev,
 	/* Create SysFS and notify udev of the devices. Aka: "going live" */
 	pci_bus_add_devices(b);
 
-	spin_unlock(&pdev->dev_lock);
-
 	return err;
 
 err_out:
 	kfree(bus_entry);
 	kfree(sd);
-	spin_unlock(&pdev->dev_lock);
 
 	return err;
 }
@@ -731,7 +726,6 @@ static struct pcifront_device *alloc_pdev(struct xenbus_device *xdev)
 
 	INIT_LIST_HEAD(&pdev->root_buses);
 
-	spin_lock_init(&pdev->dev_lock);
 	spin_lock_init(&pdev->sh_info_lock);
 
 	pdev->evtchn = INVALID_EVTCHN;
@@ -914,10 +908,8 @@ static int pcifront_try_disconnect(struct pcifront_device *pdev)
 		goto out;
 
 	if (prev_state == XenbusStateConnected) {
-		spin_lock(&pdev->dev_lock);
 		pcifront_free_roots(pdev);
 		pcifront_disconnect(pdev);
-		spin_unlock(&pdev->dev_lock);
 	}
 
 	err = xenbus_switch_state(pdev->xdev, XenbusStateClosed);
