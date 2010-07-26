@@ -94,6 +94,14 @@ struct shared_info *HYPERVISOR_shared_info = (void *)&xen_dummy_shared_info;
  */
 static int have_vcpu_info_placement = 1;
 
+static void clamp_max_cpus(void)
+{
+#ifdef CONFIG_SMP
+	if (setup_max_cpus > MAX_VIRT_CPUS)
+		setup_max_cpus = MAX_VIRT_CPUS;
+#endif
+}
+
 static void xen_vcpu_setup(int cpu)
 {
 	struct vcpu_register_vcpu_info info;
@@ -106,8 +114,8 @@ static void xen_vcpu_setup(int cpu)
 		per_cpu(xen_vcpu,cpu) = &HYPERVISOR_shared_info->vcpu_info[cpu];
 
 	if (!have_vcpu_info_placement) {
-		if (cpu >= MAX_VIRT_CPUS && setup_max_cpus > MAX_VIRT_CPUS)
-			setup_max_cpus = MAX_VIRT_CPUS;
+		if (cpu >= MAX_VIRT_CPUS)
+			clamp_max_cpus();
 		return;
 	}
 
@@ -126,8 +134,7 @@ static void xen_vcpu_setup(int cpu)
 	if (err) {
 		printk(KERN_DEBUG "register_vcpu_info failed: err=%d\n", err);
 		have_vcpu_info_placement = 0;
-		if (setup_max_cpus > MAX_VIRT_CPUS)
-			setup_max_cpus = MAX_VIRT_CPUS;
+		clamp_max_cpus();
 	} else {
 		/* This cpu is using the registered vcpu info, even if
 		   later ones fail to. */
