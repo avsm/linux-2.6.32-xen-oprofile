@@ -38,7 +38,7 @@ static inline void __set_64bit(unsigned long long *ptr,
 		     "movl 4(%1), %%edx\n\t"
 		     LOCK_PREFIX "cmpxchg8b %0\n\t"
 		     "jnz 1b"
-		     : "=m"(*ptr),
+		     : "=m"(*ptr)
 		     : "D" (ptr),
 		       "b"(low),
 		       "c"(high)
@@ -241,7 +241,7 @@ static inline unsigned long long __cmpxchg64_local(volatile void *ptr,
 {
 	unsigned long long prev;
 	asm volatile("cmpxchg8b %1"
-		     : "=A"(prev), "+m"(*__xg(ptr)),
+		     : "=A"(prev), "+m"(*__xg(ptr))
 		     : "b"((unsigned long)new),
 		       "c"((unsigned long)(new >> 32)),
 		       "0"(old)
