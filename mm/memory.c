@@ -1806,7 +1806,7 @@ int remap_pfn_range(struct vm_area_struct *vma, unsigned long addr,
 
 	vma->vm_flags |= VM_IO | VM_RESERVED | VM_PFNMAP;
 
-#if CONFIG_XEN
+#ifdef CONFIG_XEN
 	vma->vm_mm->context.has_foreign_mappings = 1;
 #endif
 
@@ -1925,7 +1925,7 @@ int apply_to_page_range(struct mm_struct *mm, unsigned long addr,
 {
 	pgd_t *pgd;
 	unsigned long next;
-	unsigned long start = addr, end = addr + size;
+	unsigned long end = addr + size;
 	int err;
 
 	BUG_ON(addr >= end);
