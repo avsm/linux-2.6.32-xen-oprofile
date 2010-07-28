@@ -118,6 +118,10 @@ static DEFINE_SPINLOCK(minor_lock);
 
 #define DEV_NAME	"xvd"	/* name in /dev */
 
+/* all the Xen major numbers we currently support are identical to Linux
+ * major numbers */
+static inline int xen_translate_major(int major) { return major; }
+
 static int get_id_from_freelist(struct blkfront_info *info)
 {
 	unsigned long free = info->shadow_free;
@@ -452,8 +456,9 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	int nr_minors = 1;
 	int err = -ENODEV;
 	unsigned int offset;
-	int minor;
+	int minor = 0, major = XENVBD_MAJOR;
 	int nr_parts;
+	char *name = DEV_NAME;
 
 	BUG_ON(info->gd != NULL);
 	BUG_ON(info->rq != NULL);
@@ -465,11 +470,62 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	}
 
 	if (!VDEV_IS_EXTENDED(info->vdevice)) {
+		major = BLKIF_MAJOR(info->vdevice);
 		minor = BLKIF_MINOR(info->vdevice);
 		nr_parts = PARTS_PER_DISK;
+		switch (major) {
+		case XEN_IDE0_MAJOR:
+			major = xen_translate_major(major);
+			offset = (minor / 64);
+			name = "hd";
+			break;
+		case XEN_IDE1_MAJOR:
+			major = xen_translate_major(major);
+			offset = (minor / 64) + 2;
+			name = "hd";
+			break;
+		case XEN_SCSI_DISK0_MAJOR:
+			major = xen_translate_major(major);
+			offset = minor / nr_parts;
+			name = "sd";
+			break;
+		case XEN_SCSI_DISK1_MAJOR:
+		case XEN_SCSI_DISK2_MAJOR:
+		case XEN_SCSI_DISK3_MAJOR:
+		case XEN_SCSI_DISK4_MAJOR:
+		case XEN_SCSI_DISK5_MAJOR:
+		case XEN_SCSI_DISK6_MAJOR:
+		case XEN_SCSI_DISK7_MAJOR:
+			offset = (minor / nr_parts) +
+				(major - XEN_SCSI_DISK1_MAJOR + 1) * 16;
+			major = xen_translate_major(major);
+			name = "sd";
+			break;
+		case XEN_SCSI_DISK8_MAJOR:
+		case XEN_SCSI_DISK9_MAJOR:
+		case XEN_SCSI_DISK10_MAJOR:
+		case XEN_SCSI_DISK11_MAJOR:
+		case XEN_SCSI_DISK12_MAJOR:
+		case XEN_SCSI_DISK13_MAJOR:
+		case XEN_SCSI_DISK14_MAJOR:
+		case XEN_SCSI_DISK15_MAJOR:
+			offset = (minor / nr_parts) +
+				(major - XEN_SCSI_DISK8_MAJOR + 8) * 16;
+			major = xen_translate_major(major);
+			name = "sd";
+			break;
+		case XENVBD_MAJOR:
+			offset = minor / nr_parts;
+			break;
+		default:
+			printk(KERN_WARNING "blkfront: your disk configuration is "
+					"incorrect, please use an xvd device instead\n");
+			return -ENODEV;
+		}
 	} else {
 		minor = BLKIF_MINOR_EXT(info->vdevice);
 		nr_parts = PARTS_PER_EXT_DISK;
+		offset = minor / nr_parts;
 	}
 
 	if ((minor % nr_parts) == 0)
@@ -484,27 +540,25 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	if (gd == NULL)
 		goto release;
 
-	offset = minor / nr_parts;
-
 	if (nr_minors > 1) {
 		if (offset < 26)
-			sprintf(gd->disk_name, "%s%c", DEV_NAME, 'a' + offset);
+			sprintf(gd->disk_name, "%s%c", name, 'a' + offset);
 		else
-			sprintf(gd->disk_name, "%s%c%c", DEV_NAME,
-				'a' + ((offset / 26)-1), 'a' + (offset % 26));
+			sprintf(gd->disk_name, "%s%c%c", name,
+					'a' + ((offset / 26)-1), 'a' + (offset % 26));
 	} else {
 		if (offset < 26)
-			sprintf(gd->disk_name, "%s%c%d", DEV_NAME,
+			sprintf(gd->disk_name, "%s%c%d", name,
 				'a' + offset,
 				minor & (nr_parts - 1));
 		else
-			sprintf(gd->disk_name, "%s%c%c%d", DEV_NAME,
+			sprintf(gd->disk_name, "%s%c%c%d", name,
 				'a' + ((offset / 26) - 1),
 				'a' + (offset % 26),
 				minor & (nr_parts - 1));
 	}
 
-	gd->major = XENVBD_MAJOR;
+	gd->major = major;
 	gd->first_minor = minor;
 	gd->fops = &xlvbd_block_fops;
 	gd->private_data = info;
