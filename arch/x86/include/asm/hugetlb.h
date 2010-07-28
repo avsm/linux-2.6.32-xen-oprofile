@@ -44,7 +44,11 @@ static inline pte_t huge_ptep_get(pte_t *ptep)
 static inline void set_huge_pte_at(struct mm_struct *mm, unsigned long addr,
 				   pte_t *ptep, pte_t pte)
 {
+#if PAGETABLE_LEVELS >= 3
 	set_pmd((pmd_t *)ptep, native_make_pmd(native_pte_val(pte)));
+#else
+	set_pgd((pgd_t *)ptep, native_make_pgd(native_pte_val(pte)));
+#endif
 }
 
 static inline pte_t huge_ptep_get_and_clear(struct mm_struct *mm,

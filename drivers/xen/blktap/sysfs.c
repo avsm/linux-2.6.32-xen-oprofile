@@ -97,6 +97,7 @@ blktap_sysfs_remove_device(struct device *dev,
 			   const char *buf, size_t size)
 {
 	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
+	struct blktap_ring *ring = &tap->ring;
 
 	if (!tap->ring.dev)
 		return size;
@@ -105,7 +106,7 @@ blktap_sysfs_remove_device(struct device *dev,
 		return -EBUSY;
 
 	BTDBG("sending tapdisk close message\n");
-	tap->ring.ring.sring->pad[0] = BLKTAP2_RING_MESSAGE_CLOSE;
+	ring->ring.sring->private.tapif_user.msg = BLKTAP2_RING_MESSAGE_CLOSE;
 	blktap_ring_kick_user(tap);
 	wait_event_interruptible(tap->wq,
 				 !test_bit(BLKTAP_CONTROL, &tap->dev_inuse));
