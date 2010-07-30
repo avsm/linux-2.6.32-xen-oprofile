@@ -1803,7 +1803,6 @@ static int __init netback_init(void)
 
 			if (!IS_ERR(netbk->kthread.task)) {
 				kthread_bind(netbk->kthread.task, group);
-				wake_up_process(netbk->kthread.task);
 			} else {
 				printk(KERN_ALERT
 					"kthread_run() fails at netback\n");
@@ -1829,6 +1828,9 @@ static int __init netback_init(void)
 		spin_lock_init(&netbk->net_schedule_list_lock);
 
 		atomic_set(&netbk->netfront_count, 0);
+
+		if (MODPARM_netback_kthread)
+			wake_up_process(netbk->kthread.task);
 	}
 
 	netbk_copy_skb_mode = NETBK_DONT_COPY_SKB;
