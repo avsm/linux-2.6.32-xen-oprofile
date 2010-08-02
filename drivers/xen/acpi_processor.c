@@ -227,7 +227,7 @@ static int xen_cx_notifier(struct acpi_processor *pr, int action)
 		data->reg.space_id = reg->space_id;
 		data->reg.bit_width = reg->bit_width;
 		data->reg.bit_offset = reg->bit_offset;
-		data->reg.access_size = reg->reserved;
+		data->reg.access_size = reg->access_size;
 		data->reg.address = reg->address;
 
 		/* Get dependency relationships, _CSD is not supported yet */
