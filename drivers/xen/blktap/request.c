@@ -244,6 +244,8 @@ blktap_request_free(struct blktap *tap, struct blktap_request *request)
 
 	if (free)
 		wake_up(&pool.wait_queue);
+
+	blktap_ring_kick_all();
 }
 
 void

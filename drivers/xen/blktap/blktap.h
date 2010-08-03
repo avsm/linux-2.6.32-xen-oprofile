@@ -178,6 +178,7 @@ void blktap_ring_exit(void);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
+void blktap_ring_kick_all(void);
 
 int blktap_sysfs_init(void);
 void blktap_sysfs_exit(void);
