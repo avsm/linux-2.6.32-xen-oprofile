@@ -35,11 +35,11 @@ static void
 blktap_read_ring(struct blktap *tap)
 {
 	/* This is called to read responses from the ring. */
-	int usr_idx;
 	RING_IDX rc, rp;
 	struct blkif_response res;
 	struct blktap_ring *ring;
 	struct blktap_request *request;
+	int usr_idx, error;
 
 	ring = &tap->ring;
 	if (!ring->vma)
@@ -53,22 +53,27 @@ blktap_read_ring(struct blktap *tap)
 		memcpy(&res, RING_GET_RESPONSE(&ring->ring, rc), sizeof(res));
 		++ring->ring.rsp_cons;
 
-		usr_idx = (int)res.id;
-		if (usr_idx >= MAX_PENDING_REQS ||
-		    !tap->pending_requests[usr_idx]) {
-			BTWARN("Request %d/%d invalid [%x], tapdisk %d%p\n",
-			       rc, rp, usr_idx, ring->task->pid, ring->vma);
-			continue;
-		}
+		usr_idx = res.id;
+		if (usr_idx < 0 || usr_idx >= MAX_PENDING_REQS)
+			goto invalid;
 
 		request = tap->pending_requests[usr_idx];
+		if (!request)
+			goto invalid;
+
+		if (res.operation != request->operation)
+			goto invalid;
+
 		BTDBG("request %p response #%d id %x\n", request, rc, usr_idx);
-		blktap_device_finish_request(tap, &res, request);
+
+		error = res.status == BLKIF_RSP_OKAY ? 0 : -EIO;
+		blktap_device_end_request(tap, request, error);
+		continue;
+
+	invalid:
+		BTWARN("Request %d/%d invalid [%x], tapdisk %d%p\n",
+		       rc, rp, usr_idx, ring->task->pid, ring->vma);
 	}
-
-
-	blktap_device_restart(tap);
-	return;
 }
 
 static int blktap_ring_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
@@ -157,17 +162,35 @@ blktap_ring_clear_pte(struct vm_area_struct *vma,
 }
 
 static void
+blktap_ring_fail_pending(struct blktap *tap)
+{
+	struct blktap_request *request;
+	int usr_idx;
+
+	for (usr_idx = 0; usr_idx < MAX_PENDING_REQS; usr_idx++) {
+		request = tap->pending_requests[usr_idx];
+		if (!request)
+			continue;
+
+		blktap_device_end_request(tap, request, -EIO);
+	}
+}
+
+static void
 blktap_ring_vm_close(struct vm_area_struct *vma)
 {
 	struct blktap *tap = vma_to_blktap(vma);
 	struct blktap_ring *ring = &tap->ring;
 
-	BTINFO("unmapping ring %d\n", tap->minor);
+	blktap_ring_fail_pending(tap);
+
 	zap_page_range(vma, vma->vm_start, vma->vm_end - vma->vm_start, NULL);
 	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
+
 	ring->vma = NULL;
 
-	blktap_control_destroy_device(tap);
+	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
+		blktap_control_destroy_tap(tap);
 }
 
 static struct vm_operations_struct blktap_ring_vm_operations = {
@@ -190,9 +213,6 @@ blktap_ring_open(struct inode *inode, struct file *filp)
 	if (!tap)
 		return -ENXIO;
 
-	if (!test_bit(BLKTAP_CONTROL, &tap->dev_inuse))
-		return -ENODEV;
-
 	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
 		return -ENXIO;
 
@@ -210,9 +230,12 @@ blktap_ring_release(struct inode *inode, struct file *filp)
 {
 	struct blktap *tap = filp->private_data;
 
-	blktap_control_destroy_device(tap);
+	blktap_device_destroy_sync(tap);
 
 	tap->ring.task = NULL;
+
+	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
+		blktap_control_destroy_tap(tap);
 
 	return 0;
 }
@@ -322,26 +345,21 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 	return -ENOMEM;
 }
 
-static inline void
-blktap_ring_set_message(struct blktap *tap, int msg)
-{
-	struct blktap_ring *ring = &tap->ring;
-
-	if (ring->ring.sring)
-		ring->ring.sring->private.tapif_user.msg = msg;
-}
-
 static int
 blktap_ring_ioctl(struct inode *inode, struct file *filp,
 		  unsigned int cmd, unsigned long arg)
 {
 	struct blktap *tap = filp->private_data;
+	struct blktap_ring *ring = &tap->ring;
 
 	BTDBG("%d: cmd: %u, arg: %lu\n", tap->minor, cmd, arg);
 
+	if (!ring->vma || ring->vma->vm_mm != current->mm)
+		return -EACCES;
+
 	switch(cmd) {
 	case BLKTAP2_IOCTL_KICK_FE:
-		/* There are fe messages to process. */
+
 		blktap_read_ring(tap);
 		return 0;
 
@@ -352,16 +370,15 @@ blktap_ring_ioctl(struct inode *inode, struct file *filp,
 		if (!arg)
 			return -EINVAL;
 
-		if (!blktap_active(tap))
-			return -EACCES;
-
-		if (copy_from_user(&params, ptr, sizeof(params))) {
-			BTERR("failed to get params\n");
+		if (copy_from_user(&params, ptr, sizeof(params)))
 			return -EFAULT;
-		}
 
 		return blktap_device_create(tap, &params);
 	}
+
+	case BLKTAP2_IOCTL_REMOVE_DEVICE:
+
+		return blktap_device_destroy(tap);
 	}
 
 	return -ENOIOCTLCMD;
@@ -389,7 +406,8 @@ static unsigned int blktap_ring_poll(struct file *filp, poll_table *wait)
 	up_read(&current->mm->mmap_sem);
 
 	if (work ||
-	    ring->ring.sring->private.tapif_user.msg)
+	    ring->ring.sring->private.tapif_user.msg ||
+	    test_and_clear_bit(BLKTAP_DEVICE_CLOSED, &tap->dev_inuse))
 		return POLLIN | POLLRDNORM;
 
 	return 0;
@@ -415,15 +433,10 @@ blktap_ring_destroy(struct blktap *tap)
 {
 	struct blktap_ring *ring = &tap->ring;
 
-	if (!ring->task &&
-	    !test_bit(BLKTAP_RING_VMA, &tap->dev_inuse))
-		return 0;
+	if (ring->task || ring->vma)
+		return -EBUSY;
 
-	BTDBG("sending tapdisk close message\n");
-	blktap_ring_set_message(tap, BLKTAP2_RING_MESSAGE_CLOSE);
-	blktap_ring_kick_user(tap);
-
-	return -EAGAIN;
+	return 0;
 }
 
 int

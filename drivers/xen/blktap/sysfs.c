@@ -48,8 +48,7 @@ blktap_sysfs_set_name(struct device *dev, struct device_attribute *attr, const c
 
 	blktap_sysfs_enter(tap);
 
-	if (!tap->ring.dev ||
-	    test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse)) {
+	if (!tap->ring.dev) {
 		err = -ENODEV;
 		goto out;
 	}
@@ -93,27 +92,44 @@ blktap_sysfs_get_name(struct device *dev, struct device_attribute *attr, char *b
 CLASS_DEVICE_ATTR(name, S_IRUSR | S_IWUSR,
 		  blktap_sysfs_get_name, blktap_sysfs_set_name);
 
+static void
+blktap_sysfs_remove_work(struct work_struct *work)
+{
+	struct blktap *tap
+		= container_of(work, struct blktap, remove_work);
+	blktap_control_destroy_tap(tap);
+}
+
 static ssize_t
 blktap_sysfs_remove_device(struct device *dev,
 			   struct device_attribute *attr,
 			   const char *buf, size_t size)
 {
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
-	struct blktap_ring *ring = &tap->ring;
+	struct blktap *tap;
+	int err;
 
-	if (!tap->ring.dev)
+	tap = dev_get_drvdata(dev);
+	if (!tap)
 		return size;
 
 	if (test_and_set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
-		return -EBUSY;
+		goto wait;
 
-	BTDBG("sending tapdisk close message\n");
-	ring->ring.sring->private.tapif_user.msg = BLKTAP2_RING_MESSAGE_CLOSE;
-	blktap_ring_kick_user(tap);
-	wait_event_interruptible(tap->wq,
-				 !test_bit(BLKTAP_CONTROL, &tap->dev_inuse));
+	if (blktap_active(tap)) {
+		blkif_sring_t *sring = tap->ring.ring.sring;
+		sring->private.tapif_user.msg = BLKTAP2_RING_MESSAGE_CLOSE;
+		blktap_ring_kick_user(tap);
+	} else {
+		INIT_WORK(&tap->remove_work, blktap_sysfs_remove_work);
+		schedule_work(&tap->remove_work);
+	}
+wait:
+	err = wait_event_interruptible(tap->remove_wait,
+				       !dev_get_drvdata(dev));
+	if (err)
+		return err;
 
-	return 0;
+	return size;
 }
 CLASS_DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
 
@@ -202,6 +218,7 @@ blktap_sysfs_create(struct blktap *tap)
 	ring = &tap->ring;
 	mutex_init(&ring->sysfs_mutex);
 	atomic_set(&ring->sysfs_refcnt, 0);
+	init_waitqueue_head(&tap->remove_wait);
 
 	dev = device_create(class, NULL, ring->devno,
 			    tap, "blktap%d", tap->minor);
@@ -223,27 +240,22 @@ blktap_sysfs_create(struct blktap *tap)
 	return err;
 }
 
-int
+void
 blktap_sysfs_destroy(struct blktap *tap)
 {
-	struct blktap_ring *ring;
+	struct blktap_ring *ring = &tap->ring;
 	struct device *dev;
 
-	printk(KERN_CRIT "%s\n", __func__);
+	dev = ring->dev;
 
-	ring = &tap->ring;
-	dev  = ring->dev;
-	if (!class || !dev)
-		return 0;
+	if (!dev)
+		return;
 
+	dev_set_drvdata(dev, NULL);
+	wake_up(&tap->remove_wait);
+
+	device_unregister(dev);
 	ring->dev = NULL;
-	if (wait_event_interruptible(sysfs_wq,
-				     !atomic_read(&tap->ring.sysfs_refcnt)))
-		return -EAGAIN;
-
-	device_schedule_callback(dev, device_unregister);
-
-	return 0;
 }
 
 static ssize_t

@@ -22,8 +22,6 @@ blktap_control_get_minor(void)
 		return NULL;
 
 	memset(tap, 0, sizeof(*tap));
-	set_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-	init_waitqueue_head(&tap->wq);
 	atomic_set(&tap->refcnt, 0);
 	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
@@ -97,25 +95,23 @@ blktap_control_create_tap(void)
 	return tap;
 
 fail_ring:
-	blktap_sysfs_destroy(tap);
+	blktap_ring_destroy(tap);
 fail_tap:
 	blktap_control_put_minor(tap);
 
 	return NULL;
 }
 
-static int
+int
 blktap_control_destroy_tap(struct blktap *tap)
 {
 	int err;
 
-	err = blktap_sysfs_destroy(tap);
-	if (err)
-		return err;
-
 	err = blktap_ring_destroy(tap);
 	if (err)
 		return err;
+
+	blktap_sysfs_destroy(tap);
 
 	blktap_control_put_minor(tap);
 
@@ -159,8 +155,7 @@ blktap_control_ioctl(struct inode *inode, struct file *filp,
 		if (!tap)
 			return -ENODEV;
 
-		blktap_control_destroy_tap(tap);
-		return 0;
+		return blktap_control_destroy_tap(tap);
 	}
 	}
 
@@ -177,35 +172,6 @@ static struct miscdevice blktap_misc = {
 	.name     = "blktap-control",
 	.fops     = &blktap_control_file_operations,
 };
-
-int
-blktap_control_destroy_device(struct blktap *tap)
-{
-	int err;
-
-	if (!tap)
-		return 0;
-
-	set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse);
-
-	err = blktap_device_destroy(tap);
-	if (err)
-		return err;
-
-	err = blktap_sysfs_destroy(tap);
-	if (err)
-		return err;
-
-	err = blktap_ring_destroy(tap);
-	if (err)
-		return err;
-
-	clear_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse);
-	clear_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-	wake_up(&tap->wq);
-
-	return 0;
-}
 
 static int __init
 blktap_control_init(void)

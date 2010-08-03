@@ -30,14 +30,16 @@ extern int blktap_device_major;
 #define BLKTAP_CONTROL               1
 #define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
+#define BLKTAP_DEVICE_CLOSED         5
 #define BLKTAP_SHUTDOWN_REQUESTED    8
 #define BLKTAP_PASSTHROUGH           9
 
 /* blktap IOCTLs: */
 #define BLKTAP2_IOCTL_KICK_FE        1
-#define BLKTAP2_IOCTL_ALLOC_TAP	     200
+#define BLKTAP2_IOCTL_ALLOC_TAP      200
 #define BLKTAP2_IOCTL_FREE_TAP       201
 #define BLKTAP2_IOCTL_CREATE_DEVICE  202
+#define BLKTAP2_IOCTL_REMOVE_DEVICE  207
 
 #define BLKTAP2_MAX_MESSAGE_LEN      256
 
@@ -95,7 +97,6 @@ struct blktap_params {
 };
 
 struct blktap_device {
-	int                            users;
 	spinlock_t                     lock;
 	struct gendisk                *gd;
 
@@ -137,7 +138,7 @@ struct blktap_statistics {
 };
 
 struct blktap_request {
-	uint64_t                       id;
+	struct request                *rq;
 	uint16_t                       usr_idx;
 
 	uint8_t                        status;
@@ -162,7 +163,8 @@ struct blktap {
 	struct blktap_request         *pending_requests[MAX_PENDING_REQS];
 	struct scatterlist             sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
-	wait_queue_head_t              wq;
+	wait_queue_head_t              remove_wait;
+	struct work_struct             remove_work;
 	char                           name[BLKTAP2_MAX_MESSAGE_LEN];
 
 	struct blktap_statistics       stats;
@@ -178,7 +180,7 @@ blktap_active(struct blktap *tap)
 	return test_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
 }
 
-int blktap_control_destroy_device(struct blktap *);
+int blktap_control_destroy_tap(struct blktap *);
 
 int blktap_ring_init(void);
 void blktap_ring_exit(void);
@@ -189,18 +191,15 @@ void blktap_ring_kick_user(struct blktap *);
 int blktap_sysfs_init(void);
 void blktap_sysfs_free(void);
 int blktap_sysfs_create(struct blktap *);
-int blktap_sysfs_destroy(struct blktap *);
+void blktap_sysfs_destroy(struct blktap *);
 
 int blktap_device_init(void);
 void blktap_device_exit(void);
 int blktap_device_create(struct blktap *, struct blktap_params *);
 int blktap_device_destroy(struct blktap *);
+void blktap_device_destroy_sync(struct blktap *);
 int blktap_device_run_queue(struct blktap *);
-void blktap_device_restart(struct blktap *);
-void blktap_device_finish_request(struct blktap *,
-				  struct blkif_response *,
-				  struct blktap_request *);
-void blktap_device_fail_pending_requests(struct blktap *);
+void blktap_device_end_request(struct blktap *, struct blktap_request *, int);
 #ifdef ENABLE_PASSTHROUGH
 int blktap_device_enable_passthrough(struct blktap *,
 				     unsigned, unsigned);
