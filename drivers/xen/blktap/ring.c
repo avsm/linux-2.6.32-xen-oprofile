@@ -342,7 +342,6 @@ static int
 blktap_ring_ioctl(struct inode *inode, struct file *filp,
 		  unsigned int cmd, unsigned long arg)
 {
-	struct blktap_params params;
 	struct blktap *tap = filp->private_data;
 
 	BTDBG("%d: cmd: %u, arg: %lu\n", tap->minor, cmd, arg);
@@ -353,26 +352,23 @@ blktap_ring_ioctl(struct inode *inode, struct file *filp,
 		blktap_read_ring(tap);
 		return 0;
 
-	case BLKTAP2_IOCTL_CREATE_DEVICE:
+	case BLKTAP2_IOCTL_CREATE_DEVICE: {
+		struct blktap_params params;
+		void __user *ptr = (void *)arg;
+
 		if (!arg)
 			return -EINVAL;
 
 		if (!blktap_active(tap))
-			return -ENODEV;
+			return -EACCES;
 
-		if (copy_from_user(&params, (struct blktap_params __user *)arg,
-				   sizeof(params))) {
+		if (copy_from_user(&params, ptr, sizeof(params))) {
 			BTERR("failed to get params\n");
 			return -EFAULT;
 		}
 
-		if (blktap_validate_params(tap, &params)) {
-			BTERR("invalid params\n");
-			return -EINVAL;
-		}
-
-		tap->params = params;
-		return blktap_device_create(tap);
+		return blktap_device_create(tap, &params);
+	}
 	}
 
 	return -ENOIOCTLCMD;

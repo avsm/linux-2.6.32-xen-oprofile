@@ -153,8 +153,6 @@ struct blktap {
 	atomic_t                       refcnt;
 	unsigned long                  dev_inuse;
 
-	struct blktap_params           params;
-
 	struct blktap_ring             ring;
 	struct blktap_device           device;
 
@@ -163,6 +161,7 @@ struct blktap {
 	struct scatterlist             sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
 	wait_queue_head_t              wq;
+	char                           name[BLKTAP2_MAX_MESSAGE_LEN];
 
 	struct blktap_statistics       stats;
 };
@@ -173,16 +172,6 @@ static inline int
 blktap_active(struct blktap *tap)
 {
 	return test_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
-}
-
-static inline int
-blktap_validate_params(struct blktap *tap, struct blktap_params *params)
-{
-	/* TODO: sanity check */
-	params->name[sizeof(params->name) - 1] = '\0';
-	BTINFO("%s: capacity: %llu, sector-size: %lu\n",
-	       params->name, params->capacity, params->sector_size);
-	return 0;
 }
 
 int blktap_control_destroy_device(struct blktap *);
@@ -200,7 +189,7 @@ int blktap_sysfs_destroy(struct blktap *);
 
 int blktap_device_init(int *);
 void blktap_device_free(void);
-int blktap_device_create(struct blktap *);
+int blktap_device_create(struct blktap *, struct blktap_params *);
 int blktap_device_destroy(struct blktap *);
 int blktap_device_run_queue(struct blktap *);
 void blktap_device_restart(struct blktap *);

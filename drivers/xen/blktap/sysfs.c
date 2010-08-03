@@ -2,6 +2,8 @@
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/sched.h>
+#include <linux/genhd.h>
+#include <linux/blkdev.h>
 
 #include "blktap.h"
 
@@ -61,7 +63,7 @@ blktap_sysfs_set_name(struct device *dev, struct device_attribute *attr, const c
 		goto out;
 	}
 
-	snprintf(tap->params.name, sizeof(tap->params.name) - 1, "%s", buf);
+	snprintf(tap->name, sizeof(tap->name) - 1, "%s", buf);
 	err = size;
 
 out:
@@ -79,8 +81,8 @@ blktap_sysfs_get_name(struct device *dev, struct device_attribute *attr, char *b
 
 	if (!tap->ring.dev)
 		size = -ENODEV;
-	else if (tap->params.name[0])
-		size = sprintf(buf, "%s\n", tap->params.name);
+	else if (tap->name[0])
+		size = sprintf(buf, "%s\n", tap->name);
 	else
 		size = sprintf(buf, "%d\n", tap->minor);
 
@@ -131,12 +133,18 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 	}
 
 	tmp += sprintf(tmp, "%s (%u:%u), refcnt: %d, dev_inuse: 0x%08lx\n",
-		       tap->params.name, MAJOR(tap->ring.devno),
+		       tap->name, MAJOR(tap->ring.devno),
 		       MINOR(tap->ring.devno), atomic_read(&tap->refcnt),
 		       tap->dev_inuse);
-	tmp += sprintf(tmp, "capacity: 0x%llx, sector size: 0x%lx, "
-		       "device users: %d\n", tap->params.capacity,
-		       tap->params.sector_size, tap->device.users);
+
+	if (tap->device.gd) {
+		struct gendisk *gd = tap->device.gd;
+		struct block_device *bdev = bdget_disk(gd, 0);
+		tmp += sprintf(tmp, "capacity: 0x%llx, sector size: %#x, "
+			       "device users: %d\n", get_capacity(gd),
+			       gd->queue->hardsect_size, bdev->bd_openers);
+		bdput(bdev);
+	}
 
 	tmp += sprintf(tmp, "pending requests: %d\n", tap->pending_cnt);
 	for (i = 0; i < MAX_PENDING_REQS; i++) {
@@ -263,10 +271,7 @@ blktap_sysfs_show_devices(struct class *class, char *buf)
 		if (!test_bit(BLKTAP_DEVICE, &tap->dev_inuse))
 			continue;
 
-		ret += sprintf(buf + ret, "%d ", tap->minor);
-		ret += snprintf(buf + ret, sizeof(tap->params.name) - 1,
-				tap->params.name);
-		ret += sprintf(buf + ret, "\n");
+		ret += sprintf(buf + ret, "%d %s\n", tap->minor, tap->name);
 	}
 
 	return ret;
