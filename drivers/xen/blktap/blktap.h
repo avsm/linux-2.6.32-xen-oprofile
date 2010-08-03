@@ -117,8 +117,6 @@ struct blktap_ring {
 
 	dev_t                          devno;
 	struct device                 *dev;
-	atomic_t                       sysfs_refcnt;
-	struct mutex                   sysfs_mutex;
 };
 
 struct blktap_statistics {
@@ -182,7 +180,7 @@ int blktap_ring_destroy(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
 
 int blktap_sysfs_init(void);
-void blktap_sysfs_free(void);
+void blktap_sysfs_exit(void);
 int blktap_sysfs_create(struct blktap *);
 void blktap_sysfs_destroy(struct blktap *);
 

@@ -10,87 +10,46 @@
 int blktap_debug_level = 1;
 
 static struct class *class;
-static DECLARE_WAIT_QUEUE_HEAD(sysfs_wq);
 
-static inline void
-blktap_sysfs_get(struct blktap *tap)
-{
-	atomic_inc(&tap->ring.sysfs_refcnt);
-}
-
-static inline void
-blktap_sysfs_put(struct blktap *tap)
-{
-	if (atomic_dec_and_test(&tap->ring.sysfs_refcnt))
-		wake_up(&sysfs_wq);
-}
-
-static inline void
-blktap_sysfs_enter(struct blktap *tap)
-{
-	blktap_sysfs_get(tap);               /* pin sysfs device */
-	mutex_lock(&tap->ring.sysfs_mutex);  /* serialize sysfs operations */
-}
-
-static inline void
-blktap_sysfs_exit(struct blktap *tap)
-{
-	mutex_unlock(&tap->ring.sysfs_mutex);
-	blktap_sysfs_put(tap);
-}
-
-#define CLASS_DEVICE_ATTR(a,b,c,d) DEVICE_ATTR(a,b,c,d)
 static ssize_t
 blktap_sysfs_set_name(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
 {
-	int err;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
+	struct blktap *tap;
 
-	blktap_sysfs_enter(tap);
+	tap = dev_get_drvdata(dev);
+	if (!tap)
+		return 0;
 
-	if (!tap->ring.dev) {
-		err = -ENODEV;
-		goto out;
-	}
-	if (size > BLKTAP2_MAX_MESSAGE_LEN) {
-		err = -ENAMETOOLONG;
-		goto out;
-	}
+	if (size >= BLKTAP2_MAX_MESSAGE_LEN)
+		return -ENAMETOOLONG;
 
-	if (strnlen(buf, BLKTAP2_MAX_MESSAGE_LEN) >= BLKTAP2_MAX_MESSAGE_LEN) {
-		err = -EINVAL;
-		goto out;
-	}
+	if (strnlen(buf, size) != size)
+		return -EINVAL;
 
-	snprintf(tap->name, sizeof(tap->name) - 1, "%s", buf);
-	err = size;
+	strcpy(tap->name, buf);
 
-out:
-	blktap_sysfs_exit(tap);	
-	return err;
+	return size;
 }
 
 static ssize_t
 blktap_sysfs_get_name(struct device *dev, struct device_attribute *attr, char *buf)
 {
+	struct blktap *tap;
 	ssize_t size;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
 
-	blktap_sysfs_enter(tap);
+	tap = dev_get_drvdata(dev);
+	if (!tap)
+		return 0;
 
-	if (!tap->ring.dev)
-		size = -ENODEV;
-	else if (tap->name[0])
+	if (tap->name[0])
 		size = sprintf(buf, "%s\n", tap->name);
 	else
 		size = sprintf(buf, "%d\n", tap->minor);
 
-	blktap_sysfs_exit(tap);
-
 	return size;
 }
-CLASS_DEVICE_ATTR(name, S_IRUSR | S_IWUSR,
-		  blktap_sysfs_get_name, blktap_sysfs_set_name);
+static DEVICE_ATTR(name, S_IRUGO|S_IWUSR,
+		   blktap_sysfs_get_name, blktap_sysfs_set_name);
 
 static void
 blktap_sysfs_remove_work(struct work_struct *work)
@@ -131,22 +90,18 @@ wait:
 
 	return size;
 }
-CLASS_DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
+static DEVICE_ATTR(remove, S_IWUSR, NULL, blktap_sysfs_remove_device);
 
 static ssize_t
 blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	char *tmp;
-	int i, ret;
-	struct blktap *tap = (struct blktap *)dev_get_drvdata(dev);
+	struct blktap *tap;
+	char *tmp = buf;
+	int i;
 
-	tmp = buf;
-	blktap_sysfs_get(tap);
-
-	if (!tap->ring.dev) {
-		ret = sprintf(tmp, "no device\n");
-		goto out;
-	}
+	tap = dev_get_drvdata(dev);
+	if (!tap)
+		return 0;
 
 	tmp += sprintf(tmp, "%s (%u:%u), refcnt: %d, dev_inuse: 0x%08lx\n",
 		       tap->name, MAJOR(tap->ring.devno),
@@ -178,15 +133,9 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 			       req->time.tv_usec);
 	}
 
-	ret = (tmp - buf) + 1;
-
-out:
-	blktap_sysfs_put(tap);
-	BTDBG("%s\n", buf);
-
-	return ret;
+	return (tmp - buf) + 1;
 }
-CLASS_DEVICE_ATTR(debug, S_IRUSR, blktap_sysfs_debug_device, NULL);
+static DEVICE_ATTR(debug, S_IRUGO, blktap_sysfs_debug_device, NULL);
 
 static ssize_t
 blktap_sysfs_show_task(struct device *dev, struct device_attribute *attr, char *buf)
@@ -203,21 +152,15 @@ blktap_sysfs_show_task(struct device *dev, struct device_attribute *attr, char *
 
 	return rv;
 }
-DEVICE_ATTR(task, S_IRUSR, blktap_sysfs_show_task, NULL);
+static DEVICE_ATTR(task, S_IRUGO, blktap_sysfs_show_task, NULL);
 
 int
 blktap_sysfs_create(struct blktap *tap)
 {
-	struct blktap_ring *ring;
+	struct blktap_ring *ring = &tap->ring;
 	struct device *dev;
 	int err = 0;
 
-	if (!class)
-		return -ENODEV;
-
-	ring = &tap->ring;
-	mutex_init(&ring->sysfs_mutex);
-	atomic_set(&ring->sysfs_refcnt, 0);
 	init_waitqueue_head(&tap->remove_wait);
 
 	dev = device_create(class, NULL, ring->devno,
@@ -276,8 +219,8 @@ blktap_sysfs_set_verbosity(struct class *class, const char *buf, size_t size)
 
 	return -EINVAL;
 }
-CLASS_ATTR(verbosity, S_IRUSR | S_IWUSR,
-	   blktap_sysfs_show_verbosity, blktap_sysfs_set_verbosity);
+static CLASS_ATTR(verbosity, S_IRUGO|S_IWUSR,
+		  blktap_sysfs_show_verbosity, blktap_sysfs_set_verbosity);
 
 static ssize_t
 blktap_sysfs_show_devices(struct class *class, char *buf)
@@ -303,43 +246,32 @@ blktap_sysfs_show_devices(struct class *class, char *buf)
 
 	return ret;
 }
-CLASS_ATTR(devices, S_IRUSR, blktap_sysfs_show_devices, NULL);
+static CLASS_ATTR(devices, S_IRUGO, blktap_sysfs_show_devices, NULL);
 
 void
-blktap_sysfs_free(void)
+blktap_sysfs_exit(void)
 {
-	if (!class)
-		return;
-
-	class_remove_file(class, &class_attr_verbosity);
-	class_remove_file(class, &class_attr_devices);
-
-	class_destroy(class);
+	if (class)
+		class_destroy(class);
 }
 
 int __init
 blktap_sysfs_init(void)
 {
 	struct class *cls;
-	int err;
-
-	if (class)
-		return -EEXIST;
+	int err = 0;
 
 	cls = class_create(THIS_MODULE, "blktap2");
 	if (IS_ERR(cls))
-		return PTR_ERR(cls);
+		err = PTR_ERR(cls);
+	if (!err)
+		err = class_create_file(cls, &class_attr_verbosity);
+	if (!err)
+		err = class_create_file(cls, &class_attr_devices);
+	if (!err)
+		class = cls;
+	else
+		class_destroy(cls);
 
-	err = class_create_file(cls, &class_attr_verbosity);
-	if (err)
-		goto out_unregister;
-	err = class_create_file(cls, &class_attr_devices);
-	if (err)
-		goto out_unregister;
-
-	class = cls;
-	return 0;
-out_unregister:
-	class_destroy(cls);
 	return err;
 }

@@ -214,7 +214,7 @@ blktap_exit(void)
 {
 	blktap_control_exit();
 	blktap_ring_exit();
-	blktap_sysfs_free();
+	blktap_sysfs_exit();
 	blktap_device_exit();
 	blktap_request_pool_free();
 }
