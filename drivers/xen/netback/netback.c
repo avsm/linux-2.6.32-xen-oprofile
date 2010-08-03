@@ -89,18 +89,37 @@ static inline void netif_set_page_ext(struct page *pg, unsigned int group,
 	pg->mapping = ext.mapping;
 }
 
-static inline unsigned int netif_page_group(const struct page *pg)
+static inline int netif_get_page_ext(struct page *pg, unsigned int *_group, unsigned int *_idx)
 {
 	union page_ext ext = { .mapping = pg->mapping };
+	struct xen_netbk *netbk;
+	unsigned int group, idx;
 
-	return ext.e.group - 1;
-}
+	if (!PageForeign(pg))
+		return 0;
 
-static inline unsigned int netif_page_index(const struct page *pg)
-{
-	union page_ext ext = { .mapping = pg->mapping };
+	group = ext.e.group - 1;
 
-	return ext.e.idx;
+	if (group < 0 || group >= xen_netbk_group_nr)
+		return 0;
+
+	netbk = &xen_netbk[group];
+
+	if (netbk->mmap_pages == NULL)
+		return 0;
+
+	idx = ext.e.idx;
+
+	if ((idx < 0) || (idx >= MAX_PENDING_REQS))
+		return 0;
+
+	if (netbk->mmap_pages[idx] != pg)
+		return 0;
+
+	*_group = group;
+	*_idx = idx;
+
+	return 1;
 }
 
 /*
@@ -386,8 +405,12 @@ static void netbk_gop_frag_copy(struct xen_netif *netif,
 {
 	struct gnttab_copy *copy_gop;
 	struct netbk_rx_meta *meta;
-	int group = netif_page_group(page);
-	int idx = netif_page_index(page);
+	/*
+	 * These variables a used iff netif_get_page_ext returns true,
+	 * in which case they are guaranteed to be initialized.
+         */
+	unsigned int uninitialized_var(group), uninitialized_var(idx);
+	int foreign = netif_get_page_ext(page, &group, &idx);
 	unsigned long bytes;
 
 	/* Data must not cross a page boundary. */
@@ -445,7 +468,7 @@ static void netbk_gop_frag_copy(struct xen_netif *netif,
 
 		copy_gop = npo->copy + npo->copy_prod++;
 		copy_gop->flags = GNTCOPY_dest_gref;
-		if (PageForeign(page)) {
+		if (foreign) {
 			struct xen_netbk *netbk = &xen_netbk[group];
 			struct pending_tx_info *src_pend;
 
@@ -1546,14 +1569,13 @@ static void netif_idx_release(struct xen_netbk *netbk, u16 pending_idx)
 
 static void netif_page_release(struct page *page, unsigned int order)
 {
-	int group = netif_page_group(page);
-	int idx = netif_page_index(page);
-	struct xen_netbk *netbk = &xen_netbk[group];
+	unsigned int group, idx;
+	int foreign = netif_get_page_ext(page, &group, &idx);
+
+	BUG_ON(!foreign);
 	BUG_ON(order);
-	BUG_ON(group < 0 || group >= xen_netbk_group_nr);
-	BUG_ON(idx < 0 || idx >= MAX_PENDING_REQS);
-	BUG_ON(netbk->mmap_pages[idx] != page);
-	netif_idx_release(netbk, idx);
+
+	netif_idx_release(&xen_netbk[group], idx);
 }
 
 irqreturn_t netif_be_int(int irq, void *dev_id)
@@ -1781,7 +1803,6 @@ static int __init netback_init(void)
 
 			if (!IS_ERR(netbk->kthread.task)) {
 				kthread_bind(netbk->kthread.task, group);
-				wake_up_process(netbk->kthread.task);
 			} else {
 				printk(KERN_ALERT
 					"kthread_run() fails at netback\n");
@@ -1807,6 +1828,9 @@ static int __init netback_init(void)
 		spin_lock_init(&netbk->net_schedule_list_lock);
 
 		atomic_set(&netbk->netfront_count, 0);
+
+		if (MODPARM_netback_kthread)
+			wake_up_process(netbk->kthread.task);
 	}
 
 	netbk_copy_skb_mode = NETBK_DONT_COPY_SKB;
