@@ -157,9 +157,11 @@ extern struct blktap **blktaps;
 extern int blktap_max_minor;
 
 int blktap_control_destroy_tap(struct blktap *);
+size_t blktap_control_debug(struct blktap *, char *, size_t);
 
 int blktap_ring_init(void);
 void blktap_ring_exit(void);
+size_t blktap_ring_debug(struct blktap *, char *, size_t);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
@@ -172,6 +174,7 @@ void blktap_sysfs_destroy(struct blktap *);
 
 int blktap_device_init(void);
 void blktap_device_exit(void);
+size_t blktap_device_debug(struct blktap *, char *, size_t);
 int blktap_device_create(struct blktap *, struct blktap_params *);
 int blktap_device_destroy(struct blktap *);
 void blktap_device_destroy_sync(struct blktap *);

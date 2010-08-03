@@ -172,6 +172,19 @@ static struct miscdevice blktap_misc = {
 	.fops     = &blktap_control_file_operations,
 };
 
+size_t
+blktap_control_debug(struct blktap *tap, char *buf, size_t size)
+{
+	char *s = buf, *end = buf + size;
+
+	s += snprintf(s, end - s,
+		      "tap %u:%u name:'%s' flags:%#08lx\n",
+		      MAJOR(tap->ring.devno), MINOR(tap->ring.devno),
+		      tap->name, tap->dev_inuse);
+
+	return s - buf;
+}
+
 static int __init
 blktap_control_init(void)
 {

@@ -96,43 +96,19 @@ static ssize_t
 blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	struct blktap *tap;
-	char *tmp = buf;
-	int i;
+	char *s = buf, *end = buf + PAGE_SIZE;
 
 	tap = dev_get_drvdata(dev);
 	if (!tap)
 		return 0;
 
-	tmp += sprintf(tmp, "%s (%u:%u), dev_inuse: 0x%08lx\n",
-		       tap->name, MAJOR(tap->ring.devno),
-		       MINOR(tap->ring.devno), tap->dev_inuse);
+	s += blktap_control_debug(tap, s, end - s);
 
-	if (tap->device.gd) {
-		struct gendisk *gd = tap->device.gd;
-		struct block_device *bdev = bdget_disk(gd, 0);
-		tmp += sprintf(tmp, "capacity: 0x%llx, sector size: %#x, "
-			       "device users: %d\n", get_capacity(gd),
-			       gd->queue->hardsect_size, bdev->bd_openers);
-		bdput(bdev);
-	}
+	s += blktap_device_debug(tap, s, end - s);
 
-	tmp += sprintf(tmp, "pending requests: %d\n", tap->pending_cnt);
+	s += blktap_ring_debug(tap, s, end - s);
 
-	for (i = 0; i < MAX_PENDING_REQS; i++) {
-		struct blktap_request *req = tap->pending_requests[i];
-		if (!req)
-			continue;
-
-		tmp += sprintf(tmp, "req %d: id: %llu, usr_idx: %d, "
-			       "status: 0x%02x, pendcnt: %d, "
-			       "nr_pages: %u, op: %d, time: %lu:%lu\n",
-			       i, (unsigned long long)req->id, req->usr_idx,
-			       req->status, atomic_read(&req->pendcnt),
-			       req->nr_pages, req->operation, req->time.tv_sec,
-			       req->time.tv_usec);
-	}
-
-	return (tmp - buf) + 1;
+	return s - buf;
 }
 static DEVICE_ATTR(debug, S_IRUGO, blktap_sysfs_debug_device, NULL);
 

@@ -879,6 +879,41 @@ fail:
 	return err;
 }
 
+size_t
+blktap_device_debug(struct blktap *tap, char *buf, size_t size)
+{
+	struct gendisk *disk = tap->device.gd;
+	struct request_queue *q;
+	struct block_device *bdev;
+	char *s = buf, *end = buf + size;
+
+	if (!disk)
+		return 0;
+
+	q = disk->queue;
+
+	s += snprintf(s, end - s,
+		      "disk capacity:%llu sector size:%u\n",
+		      get_capacity(disk), queue_hardsect_size(q));
+
+	s += snprintf(s, end - s,
+		      "queue flags:%#lx plugged:%d stopped:%d empty:%d\n",
+		      q->queue_flags,
+		      blk_queue_plugged(q), blk_queue_stopped(q),
+		      elv_queue_empty(q));
+
+	bdev = bdget_disk(disk, 0);
+	if (bdev) {
+		s += snprintf(s, end - s,
+			      "bdev openers:%d closed:%d\n",
+			      bdev->bd_openers,
+			      test_bit(BLKTAP_DEVICE_CLOSED, &tap->dev_inuse));
+		bdput(bdev);
+	}
+
+	return s - buf;
+}
+
 int __init
 blktap_device_init()
 {

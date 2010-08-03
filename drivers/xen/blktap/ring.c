@@ -445,6 +445,41 @@ blktap_ring_create(struct blktap *tap)
 	return 0;
 }
 
+size_t
+blktap_ring_debug(struct blktap *tap, char *buf, size_t size)
+{
+	char *s = buf, *end = buf + size;
+	int usr_idx;
+
+	s += snprintf(s, end - s,
+		      "begin pending:%d\n", tap->pending_cnt);
+
+	for (usr_idx = 0; usr_idx < MAX_PENDING_REQS; usr_idx++) {
+		struct blktap_request *request;
+		struct timeval *time;
+		int write;
+
+		request = tap->pending_requests[usr_idx];
+		if (!request)
+			continue;
+
+		write = request->operation == BLKIF_OP_WRITE;
+		time  = &request->time;
+
+		s += snprintf(s, end - s,
+			      "%02d: usr_idx:%02d "
+			      "op:%c nr_pages:%02d time:%lu.%09lu\n",
+			      usr_idx, request->usr_idx,
+			      write ? 'W' : 'R', request->nr_pages,
+			      time->tv_sec, time->tv_usec);
+	}
+
+	s += snprintf(s, end - s, "end pending\n");
+
+	return s - buf;
+}
+
+
 int __init
 blktap_ring_init(void)
 {
