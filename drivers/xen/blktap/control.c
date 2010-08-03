@@ -6,7 +6,7 @@
 
 #include "blktap.h"
 
-static DEFINE_SPINLOCK(blktap_control_lock);
+static DEFINE_MUTEX(blktap_lock);
 struct blktap *blktaps[MAX_BLKTAP_DEVICE];
 
 static int ring_major;
@@ -39,7 +39,8 @@ blktap_control_create_tap(void)
 
 	blktap_control_initialize_tap(tap);
 
-	spin_lock_irq(&blktap_control_lock);
+	mutex_lock(&blktap_lock);
+
 	for (minor = 0; minor < MAX_BLKTAP_DEVICE; minor++)
 		if (!blktaps[minor])
 			break;
@@ -54,7 +55,7 @@ blktap_control_create_tap(void)
 	blktaps[minor] = tap;
 
 out:
-	spin_unlock_irq(&blktap_control_lock);
+	mutex_unlock(&blktap_lock);
 	return tap;
 }
 
@@ -70,7 +71,7 @@ blktap_control_allocate_tap(void)
 	 */
 	BUG_ON(irqs_disabled());
 
-	spin_lock_irq(&blktap_control_lock);
+	mutex_lock(&blktap_lock);
 
 	for (minor = 0; minor < MAX_BLKTAP_DEVICE; minor++) {
 		tap = blktaps[minor];
@@ -86,7 +87,7 @@ blktap_control_allocate_tap(void)
 	tap = NULL;
 
 found:
-	spin_unlock_irq(&blktap_control_lock);
+	mutex_unlock(&blktap_lock);
 
 	if (!tap) {
 		tap = blktap_control_create_tap();
