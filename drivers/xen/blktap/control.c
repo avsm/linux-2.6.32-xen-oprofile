@@ -221,7 +221,7 @@ static void
 blktap_exit(void)
 {
 	blktap_control_free();
-	blktap_ring_free();
+	blktap_ring_exit();
 	blktap_sysfs_free();
 	blktap_device_free();
 	blktap_request_pool_free();

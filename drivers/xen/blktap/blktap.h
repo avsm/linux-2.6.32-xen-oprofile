@@ -23,7 +23,7 @@ extern int blktap_debug_level;
 #define BTWARN(_f, _a...)            BTPRINTK(0, KERN_WARNING, 0, _f, ##_a)
 #define BTERR(_f, _a...)             BTPRINTK(0, KERN_ERR, 0, _f, ##_a)
 
-#define MAX_BLKTAP_DEVICE            256
+#define MAX_BLKTAP_DEVICE            512
 
 #define BLKTAP_CONTROL               1
 #define BLKTAP_RING_FD               2
@@ -177,7 +177,7 @@ blktap_active(struct blktap *tap)
 int blktap_control_destroy_device(struct blktap *);
 
 int blktap_ring_init(int *);
-int blktap_ring_free(void);
+void blktap_ring_exit(void);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);

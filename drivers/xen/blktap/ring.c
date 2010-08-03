@@ -15,6 +15,7 @@
 #endif
 
 static int blktap_ring_major;
+static struct cdev blktap_ring_cdev;
 
 static inline struct blktap *
 vma_to_blktap(struct vm_area_struct *vma)
@@ -450,24 +451,41 @@ blktap_ring_create(struct blktap *tap)
 int __init
 blktap_ring_init(int *major)
 {
+	dev_t dev = 0;
 	int err;
 
-	err = register_chrdev(0, "blktap2", &blktap_ring_file_operations);
+	cdev_init(&blktap_ring_cdev, &blktap_ring_file_operations);
+	blktap_ring_cdev.owner = THIS_MODULE;
+
+	err = alloc_chrdev_region(&dev, 0, MAX_BLKTAP_DEVICE, "blktap2");
 	if (err < 0) {
-		BTERR("error registering blktap ring device: %d\n", err);
+		BTERR("error registering ring devices: %d\n", err);
 		return err;
 	}
 
-	blktap_ring_major = *major = err;
+	err = cdev_add(&blktap_ring_cdev, dev, MAX_BLKTAP_DEVICE);
+	if (err) {
+		BTERR("error adding ring device: %d\n", err);
+		unregister_chrdev_region(dev, MAX_BLKTAP_DEVICE);
+		return err;
+	}
+
+	blktap_ring_major = MAJOR(dev);
 	BTINFO("blktap ring major: %d\n", blktap_ring_major);
+	*major = blktap_ring_major;
+
 	return 0;
 }
 
-int
-blktap_ring_free(void)
+void
+blktap_ring_exit(void)
 {
-	if (blktap_ring_major)
-		unregister_chrdev(blktap_ring_major, "blktap2");
+	if (!blktap_ring_major)
+		return;
 
-	return 0;
+	cdev_del(&blktap_ring_cdev);
+	unregister_chrdev_region(MKDEV(blktap_ring_major, 0),
+				 MAX_BLKTAP_DEVICE);
+
+	blktap_ring_major = 0;
 }
