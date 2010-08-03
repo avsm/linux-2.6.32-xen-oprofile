@@ -10,6 +10,8 @@
 #include <xen/grant_table.h>
 
 extern int blktap_debug_level;
+extern int blktap_ring_major;
+extern int blktap_device_major;
 
 #define BTPRINTK(level, tag, force, _f, _a...)				\
 	do {								\
@@ -178,7 +180,7 @@ blktap_active(struct blktap *tap)
 
 int blktap_control_destroy_device(struct blktap *);
 
-int blktap_ring_init(int *);
+int blktap_ring_init(void);
 void blktap_ring_exit(void);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
@@ -189,8 +191,8 @@ void blktap_sysfs_free(void);
 int blktap_sysfs_create(struct blktap *);
 int blktap_sysfs_destroy(struct blktap *);
 
-int blktap_device_init(int *);
-void blktap_device_free(void);
+int blktap_device_init(void);
+void blktap_device_exit(void);
 int blktap_device_create(struct blktap *, struct blktap_params *);
 int blktap_device_destroy(struct blktap *);
 int blktap_device_run_queue(struct blktap *);

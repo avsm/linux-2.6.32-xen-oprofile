@@ -11,9 +11,6 @@ DEFINE_MUTEX(blktap_lock);
 struct blktap **blktaps;
 int blktap_max_minor;
 
-static int ring_major;
-static int device_major;
-
 static struct blktap *
 blktap_control_get_minor(void)
 {
@@ -140,8 +137,8 @@ blktap_control_ioctl(struct inode *inode, struct file *filp,
 		if (!tap)
 			return -ENOMEM;
 
-		h.ring   = ring_major;
-		h.device = device_major;
+		h.ring   = blktap_ring_major;
+		h.device = blktap_device_major;
 		h.minor  = tap->minor;
 
 		if (copy_to_user(ptr, &h, sizeof(h))) {
@@ -252,7 +249,7 @@ blktap_exit(void)
 	blktap_control_exit();
 	blktap_ring_exit();
 	blktap_sysfs_free();
-	blktap_device_free();
+	blktap_device_exit();
 	blktap_request_pool_free();
 }
 
@@ -268,11 +265,11 @@ blktap_init(void)
 	if (err)
 		return err;
 
-	err = blktap_device_init(&device_major);
+	err = blktap_device_init();
 	if (err)
 		goto fail;
 
-	err = blktap_ring_init(&ring_major);
+	err = blktap_ring_init();
 	if (err)
 		goto fail;
 

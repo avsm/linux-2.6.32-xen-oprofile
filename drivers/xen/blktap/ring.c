@@ -14,7 +14,7 @@
 #define blkback_pagemap_contains_page(page) 0
 #endif
 
-static int blktap_ring_major;
+int blktap_ring_major;
 static struct cdev blktap_ring_cdev;
 
 static inline struct blktap *
@@ -442,7 +442,7 @@ blktap_ring_create(struct blktap *tap)
 }
 
 int __init
-blktap_ring_init(int *major)
+blktap_ring_init(void)
 {
 	dev_t dev = 0;
 	int err;
@@ -465,7 +465,6 @@ blktap_ring_init(int *major)
 
 	blktap_ring_major = MAJOR(dev);
 	BTINFO("blktap ring major: %d\n", blktap_ring_major);
-	*major = blktap_ring_major;
 
 	return 0;
 }

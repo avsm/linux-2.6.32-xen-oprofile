@@ -30,7 +30,7 @@ struct blktap_grant_table {
 	struct gnttab_map_grant_ref grants[BLKIF_MAX_SEGMENTS_PER_REQUEST * 2];
 };
 
-static int blktap_device_major;
+int blktap_device_major;
 
 static inline struct blktap *
 dev_to_blktap(struct blktap_device *dev)
@@ -941,7 +941,7 @@ fail:
 }
 
 int __init
-blktap_device_init(int *maj)
+blktap_device_init()
 {
 	int major;
 
@@ -950,16 +950,16 @@ blktap_device_init(int *maj)
 	if (major < 0) {
 		BTERR("Couldn't register blktap device\n");
 		return -ENOMEM;
-	}	
+	}
 
-	blktap_device_major = *maj = major;
+	blktap_device_major = major;
 	BTINFO("blktap device major %d\n", major);
 
 	return 0;
 }
 
 void
-blktap_device_free(void)
+blktap_device_exit(void)
 {
 	if (blktap_device_major)
 		unregister_blkdev(blktap_device_major, "tapdev");
