@@ -294,7 +294,7 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 		      request->handles[i].user);
 
 		if (request->handles[i].kernel == INVALID_GRANT_HANDLE) {
-			blktap_umap_uaddr(tap->ring.vma->vm_mm, kvaddr);
+			blktap_umap_uaddr(current->mm, kvaddr);
 			flush_tlb_kernel_page(kvaddr);
 			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
 					    INVALID_P2M_ENTRY);
