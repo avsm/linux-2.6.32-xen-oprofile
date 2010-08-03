@@ -14,22 +14,8 @@ int blktap_max_minor;
 static int ring_major;
 static int device_major;
 
-static void
-blktap_control_initialize_tap(struct blktap *tap)
-{
-	int minor = tap->minor;
-
-	memset(tap, 0, sizeof(*tap));
-	set_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-	init_waitqueue_head(&tap->wq);
-	atomic_set(&tap->refcnt, 0);
-	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
-
-	tap->minor = minor;
-}
-
 static struct blktap *
-blktap_control_create_tap(void)
+blktap_control_get_minor(void)
 {
 	int minor;
 	struct blktap *tap;
@@ -38,7 +24,11 @@ blktap_control_create_tap(void)
 	if (unlikely(!tap))
 		return NULL;
 
-	blktap_control_initialize_tap(tap);
+	memset(tap, 0, sizeof(*tap));
+	set_bit(BLKTAP_CONTROL, &tap->dev_inuse);
+	init_waitqueue_head(&tap->wq);
+	atomic_set(&tap->refcnt, 0);
+	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
 	mutex_lock(&blktap_lock);
 
@@ -68,6 +58,7 @@ blktap_control_create_tap(void)
 	tap->minor = minor;
 	blktaps[minor] = tap;
 
+	__module_get(THIS_MODULE);
 out:
 	mutex_unlock(&blktap_lock);
 	return tap;
@@ -79,91 +70,101 @@ fail:
 	goto out;
 }
 
-static struct blktap *
-blktap_control_allocate_tap(void)
+static void
+blktap_control_put_minor(struct blktap* tap)
 {
-	int err, minor;
+	blktaps[tap->minor] = NULL;
+	kfree(tap);
+
+	module_put(THIS_MODULE);
+}
+
+static struct blktap*
+blktap_control_create_tap(void)
+{
 	struct blktap *tap;
+	int err;
 
-	/*
-	 * This is called only from the ioctl, which
-	 * means we should always have interrupts enabled.
-	 */
-	BUG_ON(irqs_disabled());
-
-	mutex_lock(&blktap_lock);
-
-	for (minor = 0; minor < MAX_BLKTAP_DEVICE; minor++) {
-		tap = blktaps[minor];
-		if (!tap)
-			goto found;
-
-		if (!tap->dev_inuse) {
-			blktap_control_initialize_tap(tap);
-			goto found;
-		}
-	}
-
-	tap = NULL;
-
-found:
-	mutex_unlock(&blktap_lock);
-
-	if (!tap) {
-		tap = blktap_control_create_tap();
-		if (!tap)
-			return NULL;
-	}
+	tap = blktap_control_get_minor();
+	if (!tap)
+		return NULL;
 
 	err = blktap_ring_create(tap);
-	if (err) {
-		BTERR("ring creation failed: %d\n", err);
-		clear_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-		return NULL;
-	}
+	if (err)
+		goto fail_tap;
 
-	BTINFO("allocated tap %p\n", tap);
+	err = blktap_sysfs_create(tap);
+	if (err)
+		goto fail_ring;
+
 	return tap;
+
+fail_ring:
+	blktap_sysfs_destroy(tap);
+fail_tap:
+	blktap_control_put_minor(tap);
+
+	return NULL;
+}
+
+static int
+blktap_control_destroy_tap(struct blktap *tap)
+{
+	int err;
+
+	err = blktap_sysfs_destroy(tap);
+	if (err)
+		return err;
+
+	err = blktap_ring_destroy(tap);
+	if (err)
+		return err;
+
+	blktap_control_put_minor(tap);
+
+	return 0;
 }
 
 static int
 blktap_control_ioctl(struct inode *inode, struct file *filp,
 		     unsigned int cmd, unsigned long arg)
 {
-	unsigned long dev;
 	struct blktap *tap;
 
 	switch (cmd) {
 	case BLKTAP2_IOCTL_ALLOC_TAP: {
 		struct blktap_handle h;
+		void __user *ptr = (void __user*)arg;
 
-		tap = blktap_control_allocate_tap();
-		if (!tap) {
-			BTERR("error allocating device\n");
+		tap = blktap_control_create_tap();
+		if (!tap)
 			return -ENOMEM;
-		}
 
 		h.ring   = ring_major;
 		h.device = device_major;
 		h.minor  = tap->minor;
 
-		if (copy_to_user((struct blktap_handle __user *)arg,
-				 &h, sizeof(h))) {
-			blktap_control_destroy_device(tap);
+		if (copy_to_user(ptr, &h, sizeof(h))) {
+			blktap_control_destroy_tap(tap);
 			return -EFAULT;
 		}
 
 		return 0;
 	}
 
-	case BLKTAP2_IOCTL_FREE_TAP:
-		dev = arg;
+	case BLKTAP2_IOCTL_FREE_TAP: {
+		int minor = arg;
 
-		if (dev > MAX_BLKTAP_DEVICE || !blktaps[dev])
+		if (minor > MAX_BLKTAP_DEVICE)
 			return -EINVAL;
 
-		blktap_control_destroy_device(blktaps[dev]);
+		tap = blktaps[minor];
+		if (!tap)
+			return -ENODEV;
+
+		blktap_control_destroy_tap(tap);
 		return 0;
+	}
 	}
 
 	return -ENOIOCTLCMD;
@@ -234,11 +235,6 @@ blktap_control_init(void)
 static void
 blktap_control_exit(void)
 {
-	int i;
-
-	for (i = 0; i < MAX_BLKTAP_DEVICE; i++)
-		blktap_control_destroy_device(blktaps[i]);
-
 	if (blktaps) {
 		kfree(blktaps);
 		blktaps = NULL;

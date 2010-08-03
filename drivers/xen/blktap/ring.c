@@ -187,11 +187,14 @@ blktap_ring_open(struct inode *inode, struct file *filp)
 	if (minor < blktap_max_minor)
 		tap = blktaps[minor];
 
+	if (!tap)
+		return -ENXIO;
+
 	if (!test_bit(BLKTAP_CONTROL, &tap->dev_inuse))
 		return -ENODEV;
 
 	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
-		return -EBUSY;
+		return -ENXIO;
 
 	/* Only one process can access ring at a time */
 	if (test_and_set_bit(BLKTAP_RING_FD, &tap->dev_inuse))
@@ -427,20 +430,15 @@ blktap_ring_destroy(struct blktap *tap)
 	return -EAGAIN;
 }
 
-static void
-blktap_ring_initialize(struct blktap_ring *ring, int minor)
-{
-	memset(ring, 0, sizeof(*ring));
-	init_waitqueue_head(&ring->poll_wait);
-	ring->devno = MKDEV(blktap_ring_major, minor);
-}
-
 int
 blktap_ring_create(struct blktap *tap)
 {
 	struct blktap_ring *ring = &tap->ring;
-	blktap_ring_initialize(ring, tap->minor);
-	return blktap_sysfs_create(tap);
+
+	init_waitqueue_head(&ring->poll_wait);
+	ring->devno = MKDEV(blktap_ring_major, tap->minor);
+
+	return 0;
 }
 
 int __init
