@@ -294,11 +294,7 @@ blktap_unmap(struct blktap *tap, struct blktap_request *request)
 		}
 	}
 
-	if (tap->ring.vma) {
-		down_write(&tap->ring.vma->vm_mm->mmap_sem);
-		blktap_device_fast_flush(tap, request);
-		up_write(&tap->ring.vma->vm_mm->mmap_sem);
-	}
+	blktap_device_fast_flush(tap, request);
 }
 
 void

@@ -34,16 +34,17 @@ vma_to_blktap(struct vm_area_struct *vma)
 static void
 blktap_read_ring(struct blktap *tap)
 {
-	/* This is called to read responses from the ring. */
+	struct blktap_ring *ring = &tap->ring;
 	RING_IDX rc, rp;
 	struct blkif_response res;
-	struct blktap_ring *ring;
 	struct blktap_request *request;
 	int usr_idx, error;
 
-	ring = &tap->ring;
-	if (!ring->vma)
+	down_read(&current->mm->mmap_sem);
+	if (!ring->vma) {
+		up_read(&current->mm->mmap_sem);
 		return;
+	}
 
 	/* for each outstanding message on the ring  */
 	rp = ring->ring.sring->rsp_prod;
@@ -74,6 +75,8 @@ blktap_read_ring(struct blktap *tap)
 		BTWARN("Request %d/%d invalid [%x], tapdisk %d%p\n",
 		       rc, rp, usr_idx, ring->task->pid, ring->vma);
 	}
+
+	up_read(&current->mm->mmap_sem);
 }
 
 static int blktap_ring_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
@@ -134,7 +137,6 @@ blktap_ring_clear_pte(struct vm_area_struct *vma,
 		set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT, 
 				    INVALID_P2M_ENTRY);
 	}
-
 
 	if (khandle->user != INVALID_GRANT_HANDLE) {
 		BUG_ON(xen_feature(XENFEAT_auto_translated_physmap));
@@ -382,19 +384,11 @@ static unsigned int blktap_ring_poll(struct file *filp, poll_table *wait)
 	struct blktap_ring *ring = &tap->ring;
 	int work = 0;
 
-	down_read(&current->mm->mmap_sem);
-
-	if (!ring->vma) {
-		up_read(&current->mm->mmap_sem);
-		force_sig(SIGSEGV, current);
-		return 0;
-	}
-
 	poll_wait(filp, &ring->poll_wait, wait);
 
-	if (test_bit(BLKTAP_DEVICE, &tap->dev_inuse))
+	down_read(&current->mm->mmap_sem);
+	if (ring->vma && tap->device.gd)
 		work = blktap_device_run_queue(tap);
-
 	up_read(&current->mm->mmap_sem);
 
 	if (work ||
