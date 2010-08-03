@@ -1154,12 +1154,6 @@ asmlinkage void __init xen_start_kernel(void)
 
 	xen_init_mmu_ops();
 
-	/*
-	 * Prevent page tables from being allocated in highmem, even
-	 * if CONFIG_HIGHPTE is enabled.
-	 */
-	__userpte_alloc_gfp &= ~__GFP_HIGHMEM;
-
 	/* Prevent unwanted bits from being set in PTEs. */
 	__supported_pte_mask &= ~_PAGE_GLOBAL;
 	if (!xen_initial_domain())
