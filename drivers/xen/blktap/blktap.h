@@ -28,7 +28,6 @@ extern int blktap_device_major;
 #define MAX_BLKTAP_DEVICE            1024
 
 #define BLKTAP_CONTROL               1
-#define BLKTAP_RING_FD               2
 #define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
 #define BLKTAP_SHUTDOWN_REQUESTED    8
@@ -106,6 +105,8 @@ struct blktap_device {
 };
 
 struct blktap_ring {
+	struct task_struct            *task;
+
 	struct vm_area_struct         *vma;
 	struct blkif_front_ring             ring;
 	struct vm_foreign_map          foreign_map;
@@ -151,7 +152,6 @@ struct blktap_request {
 
 struct blktap {
 	int                            minor;
-	pid_t                          pid;
 	atomic_t                       refcnt;
 	unsigned long                  dev_inuse;
 

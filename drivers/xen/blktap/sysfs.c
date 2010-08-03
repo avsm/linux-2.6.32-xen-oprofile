@@ -147,6 +147,7 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 	}
 
 	tmp += sprintf(tmp, "pending requests: %d\n", tap->pending_cnt);
+
 	for (i = 0; i < MAX_PENDING_REQS; i++) {
 		struct blktap_request *req = tap->pending_requests[i];
 		if (!req)
@@ -171,44 +172,54 @@ out:
 }
 CLASS_DEVICE_ATTR(debug, S_IRUSR, blktap_sysfs_debug_device, NULL);
 
+static ssize_t
+blktap_sysfs_show_task(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct blktap *tap;
+	ssize_t rv = 0;
+
+	tap = dev_get_drvdata(dev);
+	if (!tap)
+		return 0;
+
+	if (tap->ring.task)
+		rv = sprintf(buf, "%d\n", tap->ring.task->pid);
+
+	return rv;
+}
+DEVICE_ATTR(task, S_IRUSR, blktap_sysfs_show_task, NULL);
+
 int
 blktap_sysfs_create(struct blktap *tap)
 {
 	struct blktap_ring *ring;
 	struct device *dev;
-	int err;
+	int err = 0;
 
 	if (!class)
 		return -ENODEV;
 
 	ring = &tap->ring;
+	mutex_init(&ring->sysfs_mutex);
+	atomic_set(&ring->sysfs_refcnt, 0);
 
 	dev = device_create(class, NULL, ring->devno,
 			    tap, "blktap%d", tap->minor);
 	if (IS_ERR(dev))
-		return PTR_ERR(dev);
+		err = PTR_ERR(dev);
+	if (!err)
+		err = device_create_file(dev, &dev_attr_name);
+	if (!err)
+		err = device_create_file(dev, &dev_attr_remove);
+	if (!err)
+		err = device_create_file(dev, &dev_attr_debug);
+	if (!err)
+		err = device_create_file(dev, &dev_attr_task);
+	if (!err)
+		ring->dev = dev;
+	else
+		device_unregister(dev);
 
-	ring->dev = dev;
-
-	mutex_init(&ring->sysfs_mutex);
-	atomic_set(&ring->sysfs_refcnt, 0);
-
-
-	printk(KERN_CRIT "%s: adding attributes for dev %p\n", __func__, dev);
-	err = device_create_file(dev, &dev_attr_name);
-	if (err)
-		goto fail;
-	err = device_create_file(dev, &dev_attr_remove);
-	if (err)
-		goto fail;
-	err = device_create_file(dev, &dev_attr_debug);
-	if (err)
-		goto fail;
-
-	return 0;
-
-fail:
-	device_unregister(dev);
 	return err;
 }
 

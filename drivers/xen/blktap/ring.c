@@ -57,7 +57,7 @@ blktap_read_ring(struct blktap *tap)
 		if (usr_idx >= MAX_PENDING_REQS ||
 		    !tap->pending_requests[usr_idx]) {
 			BTWARN("Request %d/%d invalid [%x], tapdisk %d%p\n",
-			       rc, rp, usr_idx, tap->pid, ring->vma);
+			       rc, rp, usr_idx, ring->task->pid, ring->vma);
 			continue;
 		}
 
@@ -196,12 +196,11 @@ blktap_ring_open(struct inode *inode, struct file *filp)
 	if (test_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
 		return -ENXIO;
 
-	/* Only one process can access ring at a time */
-	if (test_and_set_bit(BLKTAP_RING_FD, &tap->dev_inuse))
+	if (tap->ring.task)
 		return -EBUSY;
 
 	filp->private_data = tap;
-	BTINFO("opened device %d\n", tap->minor);
+	tap->ring.task = current;
 
 	return 0;
 }
@@ -211,11 +210,9 @@ blktap_ring_release(struct inode *inode, struct file *filp)
 {
 	struct blktap *tap = filp->private_data;
 
-	BTINFO("freeing device %d\n", tap->minor);
-	clear_bit(BLKTAP_RING_FD, &tap->dev_inuse);
-	filp->private_data = NULL;
-
 	blktap_control_destroy_device(tap);
+
+	tap->ring.task = NULL;
 
 	return 0;
 }
@@ -307,9 +304,6 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 #ifdef CONFIG_X86
 	vma->vm_mm->context.has_foreign_mappings = 1;
 #endif
-
-	tap->pid = current->pid;
-	BTINFO("blktap: mapping pid is %d\n", tap->pid);
 
 	ring->vma = vma;
 	return 0;
@@ -419,7 +413,9 @@ blktap_ring_kick_user(struct blktap *tap)
 int
 blktap_ring_destroy(struct blktap *tap)
 {
-	if (!test_bit(BLKTAP_RING_FD, &tap->dev_inuse) &&
+	struct blktap_ring *ring = &tap->ring;
+
+	if (!ring->task &&
 	    !test_bit(BLKTAP_RING_VMA, &tap->dev_inuse))
 		return 0;
 
