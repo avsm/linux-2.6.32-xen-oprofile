@@ -43,6 +43,10 @@ blktap_device_open(struct block_device *bdev, fmode_t mode)
 	if (!tapdev)
 		return -ENXIO;
 
+	/* NB. we might have bounced a bd trylock by tapdisk. when
+	 * failing for reasons not !tapdev, make sure to kick tapdisk
+	 * out of destroy wait state again. */
+
 	return 0;
 }
 
@@ -734,7 +738,14 @@ blktap_device_destroy(struct blktap *tap)
 		return 0;
 
 	bdev = bdget_disk(gd, 0);
-	mutex_lock(&bdev->bd_mutex);
+
+	err = !mutex_trylock(&bdev->bd_mutex);
+	if (err) {
+		/* NB. avoid a deadlock. the last opener syncs the
+		 * bdev holding bd_mutex. */
+		err = -EBUSY;
+		goto out_nolock;
+	}
 
 	if (bdev->bd_openers) {
 		err = -EBUSY;
@@ -753,6 +764,7 @@ blktap_device_destroy(struct blktap *tap)
 	err = 0;
 out:
 	mutex_unlock(&bdev->bd_mutex);
+out_nolock:
 	bdput(bdev);
 
 	return err;
