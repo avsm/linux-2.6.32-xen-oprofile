@@ -103,10 +103,9 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 	if (!tap)
 		return 0;
 
-	tmp += sprintf(tmp, "%s (%u:%u), refcnt: %d, dev_inuse: 0x%08lx\n",
+	tmp += sprintf(tmp, "%s (%u:%u), dev_inuse: 0x%08lx\n",
 		       tap->name, MAJOR(tap->ring.devno),
-		       MINOR(tap->ring.devno), atomic_read(&tap->refcnt),
-		       tap->dev_inuse);
+		       MINOR(tap->ring.devno), tap->dev_inuse);
 
 	if (tap->device.gd) {
 		struct gendisk *gd = tap->device.gd;

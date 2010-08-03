@@ -22,7 +22,6 @@ blktap_control_get_minor(void)
 		return NULL;
 
 	memset(tap, 0, sizeof(*tap));
-	atomic_set(&tap->refcnt, 0);
 	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
 	mutex_lock(&blktap_lock);

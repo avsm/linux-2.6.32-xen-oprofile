@@ -1,4 +1,3 @@
-#include <linux/version.h> /* XXX Remove uses of VERSION instead. */
 #include <linux/fs.h>
 #include <linux/blkdev.h>
 #include <linux/cdrom.h>
@@ -18,12 +17,6 @@
 #include "blktap.h"
 
 #include "../blkback/blkback-pagemap.h"
-
-#if 0
-#define DPRINTK_IOCTL(_f, _a...) printk(KERN_ALERT _f, ## _a)
-#else
-#define DPRINTK_IOCTL(_f, _a...) ((void)0)
-#endif
 
 struct blktap_grant_table {
 	int cnt;
@@ -89,9 +82,6 @@ blktap_device_ioctl(struct block_device *bd, fmode_t mode,
 		    unsigned command, unsigned long argument)
 {
 	int i;
-
-	DPRINTK_IOCTL("command: 0x%x, argument: 0x%lx, dev: 0x%04x\n",
-		      command, (long)argument, inode->i_rdev);
 
 	switch (command) {
 	case CDROMMULTISESSION:

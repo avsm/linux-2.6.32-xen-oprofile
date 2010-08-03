@@ -31,7 +31,6 @@ extern int blktap_device_major;
 #define BLKTAP_DEVICE                4
 #define BLKTAP_DEVICE_CLOSED         5
 #define BLKTAP_SHUTDOWN_REQUESTED    8
-#define BLKTAP_PASSTHROUGH           9
 
 /* blktap IOCTLs: */
 #define BLKTAP2_IOCTL_KICK_FE        1
@@ -68,15 +67,6 @@ extern int blktap_device_major;
          ((_req) * BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE) +        \
          ((_seg) * PAGE_SIZE))
 
-#define blktap_get(_b) (atomic_inc(&(_b)->refcnt))
-#define blktap_put(_b)					\
-	do {						\
-		if (atomic_dec_and_test(&(_b)->refcnt))	\
-			wake_up(&(_b)->wq);		\
-	} while (0)
-
-struct blktap;
-
 struct grant_handle_pair {
 	grant_handle_t                 kernel;
 	grant_handle_t                 user;
@@ -98,10 +88,6 @@ struct blktap_params {
 struct blktap_device {
 	spinlock_t                     lock;
 	struct gendisk                *gd;
-
-#ifdef ENABLE_PASSTHROUGH
-	struct block_device           *bdev;
-#endif
 };
 
 struct blktap_ring {
@@ -150,7 +136,6 @@ struct blktap_request {
 
 struct blktap {
 	int                            minor;
-	atomic_t                       refcnt;
 	unsigned long                  dev_inuse;
 
 	struct blktap_ring             ring;
@@ -192,10 +177,6 @@ int blktap_device_destroy(struct blktap *);
 void blktap_device_destroy_sync(struct blktap *);
 int blktap_device_run_queue(struct blktap *);
 void blktap_device_end_request(struct blktap *, struct blktap_request *, int);
-#ifdef ENABLE_PASSTHROUGH
-int blktap_device_enable_passthrough(struct blktap *,
-				     unsigned, unsigned);
-#endif
 
 int blktap_request_pool_init(void);
 void blktap_request_pool_free(void);
