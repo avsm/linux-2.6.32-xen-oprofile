@@ -115,7 +115,7 @@ blktap_sysfs_remove_device(struct device *dev,
 	if (test_and_set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse))
 		goto wait;
 
-	if (blktap_active(tap)) {
+	if (tap->ring.vma) {
 		blkif_sring_t *sring = tap->ring.ring.sring;
 		sring->private.tapif_user.msg = BLKTAP2_RING_MESSAGE_CLOSE;
 		blktap_ring_kick_user(tap);

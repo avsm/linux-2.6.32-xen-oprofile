@@ -28,7 +28,6 @@ extern int blktap_device_major;
 #define MAX_BLKTAP_DEVICE            1024
 
 #define BLKTAP_CONTROL               1
-#define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
 #define BLKTAP_DEVICE_CLOSED         5
 #define BLKTAP_SHUTDOWN_REQUESTED    8
@@ -173,12 +172,6 @@ struct blktap {
 extern struct mutex blktap_lock;
 extern struct blktap **blktaps;
 extern int blktap_max_minor;
-
-static inline int
-blktap_active(struct blktap *tap)
-{
-	return test_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
-}
 
 int blktap_control_destroy_tap(struct blktap *);
 

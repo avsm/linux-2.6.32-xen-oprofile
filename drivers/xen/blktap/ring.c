@@ -181,11 +181,16 @@ blktap_ring_vm_close(struct vm_area_struct *vma)
 {
 	struct blktap *tap = vma_to_blktap(vma);
 	struct blktap_ring *ring = &tap->ring;
+	struct page *page = virt_to_page(ring->ring.sring);
 
 	blktap_ring_fail_pending(tap);
 
-	zap_page_range(vma, vma->vm_start, vma->vm_end - vma->vm_start, NULL);
-	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
+	kfree(ring->foreign_map.map);
+	ring->foreign_map.map = NULL;
+
+	zap_page_range(vma, vma->vm_start, PAGE_SIZE, NULL);
+	ClearPageReserved(page);
+	__free_page(page);
 
 	ring->vma = NULL;
 
@@ -261,19 +266,18 @@ blktap_ring_release(struct inode *inode, struct file *filp)
 static int
 blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 {
+	struct blktap *tap = filp->private_data;
+	struct blktap_ring *ring = &tap->ring;
+	struct blkif_sring *sring;
+	struct page *page;
 	int size, err;
 	struct page **map;
-	struct blktap *tap;
-	struct blkif_sring *sring;
-	struct blktap_ring *ring;
 
-	tap   = filp->private_data;
-	ring  = &tap->ring;
 	map   = NULL;
 	sring = NULL;
 
-	if (!tap || test_and_set_bit(BLKTAP_RING_VMA, &tap->dev_inuse))
-		return -ENOMEM;
+	if (ring->vma)
+		return -EBUSY;
 
 	size = (vma->vm_end - vma->vm_start) >> PAGE_SHIFT;
 	if (size != (MMAP_PAGES + RING_PAGES)) {
@@ -282,39 +286,28 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 		return -EAGAIN;
 	}
 
-	/* Allocate the fe ring. */
-	sring = (struct blkif_sring *)get_zeroed_page(GFP_KERNEL);
-	if (!sring) {
-		BTERR("Couldn't alloc sring.\n");
-		goto fail_mem;
-	}
+	/* allocate the shared ring */
+	page = alloc_page(GFP_KERNEL|__GFP_ZERO);
+	if (!page)
+		goto fail;
 
-	map = kzalloc(size * sizeof(struct page *), GFP_KERNEL);
-	if (!map) {
-		BTERR("Couldn't alloc VM_FOREIGN map.\n");
-		goto fail_mem;
-	}
+	SetPageReserved(page);
 
-	SetPageReserved(virt_to_page(sring));
-    
+	err = vm_insert_page(vma, vma->vm_start, page);
+	if (err)
+		goto fail;
+
+	sring = page_address(page);
 	SHARED_RING_INIT(sring);
 	FRONT_RING_INIT(&ring->ring, sring, PAGE_SIZE);
 
 	ring->ring_vstart = vma->vm_start;
-	ring->user_vstart = ring->ring_vstart + (RING_PAGES << PAGE_SHIFT);
+	ring->user_vstart = ring->ring_vstart + PAGE_SIZE;
 
-	/* Map the ring pages to the start of the region and reserve it. */
-	if (xen_feature(XENFEAT_auto_translated_physmap))
-		err = vm_insert_page(vma, vma->vm_start,
-				     virt_to_page(ring->ring.sring));
-	else
-		err = remap_pfn_range(vma, vma->vm_start,
-				      __pa(ring->ring.sring) >> PAGE_SHIFT,
-				      PAGE_SIZE, vma->vm_page_prot);
-	if (err) {
-		BTERR("Mapping user ring failed: %d\n", err);
+	/* allocate the foreign map */
+	map = kzalloc(size * sizeof(struct page *), GFP_KERNEL);
+	if (!map)
 		goto fail;
-	}
 
 	/* Mark this VM as containing foreign pages, and set up mappings. */
 	ring->foreign_map.map = map;
@@ -331,16 +324,15 @@ blktap_ring_mmap(struct file *filp, struct vm_area_struct *vma)
 	ring->vma = vma;
 	return 0;
 
- fail:
-	/* Clear any active mappings. */
-	zap_page_range(vma, vma->vm_start, 
-		       vma->vm_end - vma->vm_start, NULL);
-	ClearPageReserved(virt_to_page(sring));
- fail_mem:
-	free_page((unsigned long)sring);
-	kfree(map);
+fail:
+	if (page) {
+		zap_page_range(vma, vma->vm_start, PAGE_SIZE, NULL);
+		ClearPageReserved(page);
+		__free_page(page);
+	}
 
-	clear_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
+	if (map)
+		kfree(map);
 
 	return -ENOMEM;
 }
@@ -392,7 +384,7 @@ static unsigned int blktap_ring_poll(struct file *filp, poll_table *wait)
 
 	down_read(&current->mm->mmap_sem);
 
-	if (!blktap_active(tap)) {
+	if (!ring->vma) {
 		up_read(&current->mm->mmap_sem);
 		force_sig(SIGSEGV, current);
 		return 0;
