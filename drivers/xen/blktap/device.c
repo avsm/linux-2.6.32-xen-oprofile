@@ -605,8 +605,8 @@ blktap_device_run_queue(struct blktap *tap)
 			continue;
 		}
 
-		if (blk_barrier_rq(req)) {
-			end_request(req, 0);
+		if (blk_empty_barrier_rq(req)) {
+			end_request(req, 1);
 			continue;
 		}
 
@@ -690,6 +690,9 @@ blktap_device_configure(struct blktap *tap,
 
 	/* Make sure buffer addresses are sector-aligned. */
 	blk_queue_dma_alignment(rq, 511);
+
+	/* We are reordering, but cacheless. */
+	blk_queue_ordered(rq, QUEUE_ORDERED_DRAIN, NULL);
 
 	spin_unlock_irq(&dev->lock);
 }
