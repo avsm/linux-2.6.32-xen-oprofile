@@ -179,18 +179,13 @@ static struct vm_operations_struct blktap_ring_vm_operations = {
 static int
 blktap_ring_open(struct inode *inode, struct file *filp)
 {
-	int idx;
-	struct blktap *tap;
+	struct blktap *tap = NULL;
+	int minor;
 
-	idx = iminor(inode);
-	if (idx < 0 || idx > MAX_BLKTAP_DEVICE || blktaps[idx] == NULL) {
-		BTERR("unable to open device blktap%d\n", idx);
-		return -ENODEV;
-	}
+	minor = iminor(inode);
 
-	tap = blktaps[idx];
-
-	BTINFO("opening device blktap%d\n", idx);
+	if (minor < blktap_max_minor)
+		tap = blktaps[minor];
 
 	if (!test_bit(BLKTAP_CONTROL, &tap->dev_inuse))
 		return -ENODEV;

@@ -6,12 +6,13 @@
 
 #include "blktap.h"
 
-static DEFINE_MUTEX(blktap_lock);
-struct blktap *blktaps[MAX_BLKTAP_DEVICE];
+DEFINE_MUTEX(blktap_lock);
+
+struct blktap **blktaps;
+int blktap_max_minor;
 
 static int ring_major;
 static int device_major;
-static int blktap_control_registered;
 
 static void
 blktap_control_initialize_tap(struct blktap *tap)
@@ -41,14 +42,27 @@ blktap_control_create_tap(void)
 
 	mutex_lock(&blktap_lock);
 
-	for (minor = 0; minor < MAX_BLKTAP_DEVICE; minor++)
+	for (minor = 0; minor < blktap_max_minor; minor++)
 		if (!blktaps[minor])
 			break;
 
-	if (minor == MAX_BLKTAP_DEVICE) {
-		kfree(tap);
-		tap = NULL;
-		goto out;
+	if (minor == MAX_BLKTAP_DEVICE)
+		goto fail;
+
+	if (minor == blktap_max_minor) {
+		void *p;
+		int n;
+
+		n = min(2 * blktap_max_minor, MAX_BLKTAP_DEVICE);
+		p = krealloc(blktaps, n * sizeof(blktaps[0]), GFP_KERNEL);
+		if (!p)
+			goto fail;
+
+		blktaps          = p;
+		minor            = blktap_max_minor;
+		blktap_max_minor = n;
+
+		memset(&blktaps[minor], 0, (n - minor) * sizeof(blktaps[0]));
 	}
 
 	tap->minor = minor;
@@ -57,6 +71,12 @@ blktap_control_create_tap(void)
 out:
 	mutex_unlock(&blktap_lock);
 	return tap;
+
+fail:
+	mutex_unlock(&blktap_lock);
+	kfree(tap);
+	tap = NULL;
+	goto out;
 }
 
 static struct blktap *
@@ -196,31 +216,44 @@ blktap_control_init(void)
 
 	err = misc_register(&blktap_misc);
 	if (err) {
+		blktap_misc.minor = MISC_DYNAMIC_MINOR;
 		BTERR("misc_register failed for control device");
 		return err;
 	}
 
-	blktap_control_registered = 1;
+	blktap_max_minor = min(64, MAX_BLKTAP_DEVICE);
+	blktaps = kzalloc(blktap_max_minor * sizeof(blktaps[0]), GFP_KERNEL);
+	if (!blktaps) {
+		BTERR("failed to allocate blktap minor map");
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 
 static void
-blktap_control_free(void)
+blktap_control_exit(void)
 {
 	int i;
 
 	for (i = 0; i < MAX_BLKTAP_DEVICE; i++)
 		blktap_control_destroy_device(blktaps[i]);
 
-	if (blktap_control_registered)
-		if (misc_deregister(&blktap_misc) < 0)
-			BTERR("misc_deregister failed for control device");
+	if (blktaps) {
+		kfree(blktaps);
+		blktaps = NULL;
+	}
+
+	if (blktap_misc.minor != MISC_DYNAMIC_MINOR) {
+		misc_deregister(&blktap_misc);
+		blktap_misc.minor = MISC_DYNAMIC_MINOR;
+	}
 }
 
 static void
 blktap_exit(void)
 {
-	blktap_control_free();
+	blktap_control_exit();
 	blktap_ring_exit();
 	blktap_sysfs_free();
 	blktap_device_free();

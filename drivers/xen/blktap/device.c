@@ -888,11 +888,18 @@ blktap_device_create(struct blktap *tap, struct blktap_params *params)
 		goto fail;
 	}
 
-	if (minor < 26)
-		sprintf(gd->disk_name, "tapdev%c", 'a' + minor);
-	else
-		sprintf(gd->disk_name, "tapdev%c%c",
-			'a' + ((minor / 26) - 1), 'a' + (minor % 26));
+	if (minor < 26) {
+		sprintf(gd->disk_name, "td%c", 'a' + minor % 26);
+	} else if (minor < (26 + 1) * 26) {
+		sprintf(gd->disk_name, "td%c%c",
+			'a' + minor / 26 - 1,'a' + minor % 26);
+	} else {
+		const unsigned int m1 = (minor / 26 - 1) / 26 - 1;
+		const unsigned int m2 = (minor / 26 - 1) % 26;
+		const unsigned int m3 =  minor % 26;
+		sprintf(gd->disk_name, "td%c%c%c",
+			'a' + m1, 'a' + m2, 'a' + m3);
+	}
 
 	gd->major = blktap_device_major;
 	gd->first_minor = minor;

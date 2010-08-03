@@ -262,8 +262,10 @@ blktap_sysfs_show_devices(struct class *class, char *buf)
 	int i, ret;
 	struct blktap *tap;
 
+	mutex_lock(&blktap_lock);
+
 	ret = 0;
-	for (i = 0; i < MAX_BLKTAP_DEVICE; i++) {
+	for (i = 0; i < blktap_max_minor; i++) {
 		tap = blktaps[i];
 		if (!tap)
 			continue;
@@ -273,6 +275,8 @@ blktap_sysfs_show_devices(struct class *class, char *buf)
 
 		ret += sprintf(buf + ret, "%d %s\n", tap->minor, tap->name);
 	}
+
+	mutex_unlock(&blktap_lock);
 
 	return ret;
 }

@@ -23,7 +23,7 @@ extern int blktap_debug_level;
 #define BTWARN(_f, _a...)            BTPRINTK(0, KERN_WARNING, 0, _f, ##_a)
 #define BTERR(_f, _a...)             BTPRINTK(0, KERN_ERR, 0, _f, ##_a)
 
-#define MAX_BLKTAP_DEVICE            512
+#define MAX_BLKTAP_DEVICE            1024
 
 #define BLKTAP_CONTROL               1
 #define BLKTAP_RING_FD               2
@@ -166,7 +166,9 @@ struct blktap {
 	struct blktap_statistics       stats;
 };
 
-extern struct blktap *blktaps[MAX_BLKTAP_DEVICE];
+extern struct mutex blktap_lock;
+extern struct blktap **blktaps;
+extern int blktap_max_minor;
 
 static inline int
 blktap_active(struct blktap *tap)
