@@ -1,4 +1,4 @@
-#include <linux/module.h>
+#include <linux/device.h>
 #include <linux/signal.h>
 #include <linux/sched.h>
 #include <linux/poll.h>
@@ -34,13 +34,58 @@ vma_to_blktap(struct vm_area_struct *vma)
 #define RING_PAGES 1
 
 static void
+blktap_ring_read_response(struct blktap *tap,
+		     const struct blkif_response *rsp)
+{
+	struct blktap_ring *ring = &tap->ring;
+	struct blktap_request *request;
+	int usr_idx, err;
+
+	request = NULL;
+
+	usr_idx = rsp->id;
+	if (usr_idx < 0 || usr_idx >= MAX_PENDING_REQS) {
+		err = -ERANGE;
+		goto invalid;
+	}
+
+	request = tap->pending_requests[usr_idx];
+
+	if (!request) {
+		err = -ESRCH;
+		goto invalid;
+	}
+
+	if (rsp->operation != request->operation) {
+		err = -EINVAL;
+		goto invalid;
+	}
+
+	dev_dbg(ring->dev,
+		"request %d [%p] response: %d\n",
+		request->usr_idx, request, rsp->status);
+
+	err = rsp->status == BLKIF_RSP_OKAY ? 0 : -EIO;
+end_request:
+	blktap_device_end_request(tap, request, err);
+	return;
+
+invalid:
+	dev_warn(ring->dev,
+		 "invalid response, idx:%d status:%d op:%d/%d: err %d\n",
+		 usr_idx, rsp->status,
+		 rsp->operation, request->operation,
+		 err);
+	if (request)
+		goto end_request;
+}
+
+static void
 blktap_read_ring(struct blktap *tap)
 {
 	struct blktap_ring *ring = &tap->ring;
+	struct blkif_response rsp;
 	RING_IDX rc, rp;
-	struct blkif_response res;
-	struct blktap_request *request;
-	int usr_idx, error;
 
 	down_read(&current->mm->mmap_sem);
 	if (!ring->vma) {
@@ -53,30 +98,11 @@ blktap_read_ring(struct blktap *tap)
 	rmb();
 
 	for (rc = ring->ring.rsp_cons; rc != rp; rc++) {
-		memcpy(&res, RING_GET_RESPONSE(&ring->ring, rc), sizeof(res));
-		++ring->ring.rsp_cons;
-
-		usr_idx = res.id;
-		if (usr_idx < 0 || usr_idx >= MAX_PENDING_REQS)
-			goto invalid;
-
-		request = tap->pending_requests[usr_idx];
-		if (!request)
-			goto invalid;
-
-		if (res.operation != request->operation)
-			goto invalid;
-
-		BTDBG("request %p response #%d id %x\n", request, rc, usr_idx);
-
-		error = res.status == BLKIF_RSP_OKAY ? 0 : -EIO;
-		blktap_device_end_request(tap, request, error);
-		continue;
-
-	invalid:
-		BTWARN("Request %d/%d invalid [%x], tapdisk %d%p\n",
-		       rc, rp, usr_idx, ring->task->pid, ring->vma);
+		memcpy(&rsp, RING_GET_RESPONSE(&ring->ring, rc), sizeof(rsp));
+		blktap_ring_read_response(tap, &rsp);
 	}
+
+	ring->ring.rsp_cons = rc;
 
 	up_read(&current->mm->mmap_sem);
 }
