@@ -593,7 +593,7 @@ blktap_device_run_queue(struct blktap *tap)
 	while ((req = blk_peek_request(rq)) != NULL) {
 		if (!blk_fs_request(req)) {
 			blk_start_request(req);
-			__blk_end_request_cur(req, 0);
+			__blk_end_request_cur(req, -EOPNOTSUPP);
 			continue;
 		}
 
