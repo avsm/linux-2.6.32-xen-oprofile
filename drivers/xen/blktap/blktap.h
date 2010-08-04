@@ -10,6 +10,8 @@
 #include <xen/grant_table.h>
 
 extern int blktap_debug_level;
+extern int blktap_ring_major;
+extern int blktap_device_major;
 
 #define BTPRINTK(level, tag, force, _f, _a...)				\
 	do {								\
@@ -23,20 +25,19 @@ extern int blktap_debug_level;
 #define BTWARN(_f, _a...)            BTPRINTK(0, KERN_WARNING, 0, _f, ##_a)
 #define BTERR(_f, _a...)             BTPRINTK(0, KERN_ERR, 0, _f, ##_a)
 
-#define MAX_BLKTAP_DEVICE            256
+#define MAX_BLKTAP_DEVICE            1024
 
 #define BLKTAP_CONTROL               1
-#define BLKTAP_RING_FD               2
-#define BLKTAP_RING_VMA              3
 #define BLKTAP_DEVICE                4
+#define BLKTAP_DEVICE_CLOSED         5
 #define BLKTAP_SHUTDOWN_REQUESTED    8
-#define BLKTAP_PASSTHROUGH           9
 
 /* blktap IOCTLs: */
 #define BLKTAP2_IOCTL_KICK_FE        1
-#define BLKTAP2_IOCTL_ALLOC_TAP	     200
+#define BLKTAP2_IOCTL_ALLOC_TAP      200
 #define BLKTAP2_IOCTL_FREE_TAP       201
 #define BLKTAP2_IOCTL_CREATE_DEVICE  202
+#define BLKTAP2_IOCTL_REMOVE_DEVICE  207
 
 #define BLKTAP2_MAX_MESSAGE_LEN      256
 
@@ -66,15 +67,6 @@ extern int blktap_debug_level;
          ((_req) * BLKIF_MAX_SEGMENTS_PER_REQUEST * PAGE_SIZE) +        \
          ((_seg) * PAGE_SIZE))
 
-#define blktap_get(_b) (atomic_inc(&(_b)->refcnt))
-#define blktap_put(_b)					\
-	do {						\
-		if (atomic_dec_and_test(&(_b)->refcnt))	\
-			wake_up(&(_b)->wq);		\
-	} while (0)
-
-struct blktap;
-
 struct grant_handle_pair {
 	grant_handle_t                 kernel;
 	grant_handle_t                 user;
@@ -94,16 +86,13 @@ struct blktap_params {
 };
 
 struct blktap_device {
-	int                            users;
 	spinlock_t                     lock;
 	struct gendisk                *gd;
-
-#ifdef ENABLE_PASSTHROUGH
-	struct block_device           *bdev;
-#endif
 };
 
 struct blktap_ring {
+	struct task_struct            *task;
+
 	struct vm_area_struct         *vma;
 	struct blkif_front_ring             ring;
 	struct vm_foreign_map          foreign_map;
@@ -114,8 +103,6 @@ struct blktap_ring {
 
 	dev_t                          devno;
 	struct device                 *dev;
-	atomic_t                       sysfs_refcnt;
-	struct mutex                   sysfs_mutex;
 };
 
 struct blktap_statistics {
@@ -134,7 +121,7 @@ struct blktap_statistics {
 };
 
 struct blktap_request {
-	uint64_t                       id;
+	struct request                *rq;
 	uint16_t                       usr_idx;
 
 	uint8_t                        status;
@@ -149,11 +136,7 @@ struct blktap_request {
 
 struct blktap {
 	int                            minor;
-	pid_t                          pid;
-	atomic_t                       refcnt;
 	unsigned long                  dev_inuse;
-
-	struct blktap_params           params;
 
 	struct blktap_ring             ring;
 	struct blktap_device           device;
@@ -162,56 +145,41 @@ struct blktap {
 	struct blktap_request         *pending_requests[MAX_PENDING_REQS];
 	struct scatterlist             sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
-	wait_queue_head_t              wq;
+	wait_queue_head_t              remove_wait;
+	struct work_struct             remove_work;
+	char                           name[BLKTAP2_MAX_MESSAGE_LEN];
 
 	struct blktap_statistics       stats;
 };
 
-extern struct blktap *blktaps[MAX_BLKTAP_DEVICE];
+extern struct mutex blktap_lock;
+extern struct blktap **blktaps;
+extern int blktap_max_minor;
 
-static inline int
-blktap_active(struct blktap *tap)
-{
-	return test_bit(BLKTAP_RING_VMA, &tap->dev_inuse);
-}
+int blktap_control_destroy_tap(struct blktap *);
+size_t blktap_control_debug(struct blktap *, char *, size_t);
 
-static inline int
-blktap_validate_params(struct blktap *tap, struct blktap_params *params)
-{
-	/* TODO: sanity check */
-	params->name[sizeof(params->name) - 1] = '\0';
-	BTINFO("%s: capacity: %llu, sector-size: %lu\n",
-	       params->name, params->capacity, params->sector_size);
-	return 0;
-}
-
-int blktap_control_destroy_device(struct blktap *);
-
-int blktap_ring_init(int *);
-int blktap_ring_free(void);
+int blktap_ring_init(void);
+void blktap_ring_exit(void);
+size_t blktap_ring_debug(struct blktap *, char *, size_t);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
+void blktap_ring_kick_all(void);
 
 int blktap_sysfs_init(void);
-void blktap_sysfs_free(void);
+void blktap_sysfs_exit(void);
 int blktap_sysfs_create(struct blktap *);
-int blktap_sysfs_destroy(struct blktap *);
+void blktap_sysfs_destroy(struct blktap *);
 
-int blktap_device_init(int *);
-void blktap_device_free(void);
-int blktap_device_create(struct blktap *);
+int blktap_device_init(void);
+void blktap_device_exit(void);
+size_t blktap_device_debug(struct blktap *, char *, size_t);
+int blktap_device_create(struct blktap *, struct blktap_params *);
 int blktap_device_destroy(struct blktap *);
+void blktap_device_destroy_sync(struct blktap *);
 int blktap_device_run_queue(struct blktap *);
-void blktap_device_restart(struct blktap *);
-void blktap_device_finish_request(struct blktap *,
-				  struct blkif_response *,
-				  struct blktap_request *);
-void blktap_device_fail_pending_requests(struct blktap *);
-#ifdef ENABLE_PASSTHROUGH
-int blktap_device_enable_passthrough(struct blktap *,
-				     unsigned, unsigned);
-#endif
+void blktap_device_end_request(struct blktap *, struct blktap_request *, int);
 
 int blktap_request_pool_init(void);
 void blktap_request_pool_free(void);
