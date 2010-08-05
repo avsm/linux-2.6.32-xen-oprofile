@@ -6,29 +6,13 @@
 
 #include "blktap.h"
 
-static DEFINE_SPINLOCK(blktap_control_lock);
-struct blktap *blktaps[MAX_BLKTAP_DEVICE];
+DEFINE_MUTEX(blktap_lock);
 
-static int ring_major;
-static int device_major;
-static int blktap_control_registered;
-
-static void
-blktap_control_initialize_tap(struct blktap *tap)
-{
-	int minor = tap->minor;
-
-	memset(tap, 0, sizeof(*tap));
-	set_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-	init_waitqueue_head(&tap->wq);
-	atomic_set(&tap->refcnt, 0);
-	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
-
-	tap->minor = minor;
-}
+struct blktap **blktaps;
+int blktap_max_minor;
 
 static struct blktap *
-blktap_control_create_tap(void)
+blktap_control_get_minor(void)
 {
 	int minor;
 	struct blktap *tap;
@@ -37,112 +21,141 @@ blktap_control_create_tap(void)
 	if (unlikely(!tap))
 		return NULL;
 
-	blktap_control_initialize_tap(tap);
+	memset(tap, 0, sizeof(*tap));
+	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
-	spin_lock_irq(&blktap_control_lock);
-	for (minor = 0; minor < MAX_BLKTAP_DEVICE; minor++)
+	mutex_lock(&blktap_lock);
+
+	for (minor = 0; minor < blktap_max_minor; minor++)
 		if (!blktaps[minor])
 			break;
 
-	if (minor == MAX_BLKTAP_DEVICE) {
-		kfree(tap);
-		tap = NULL;
-		goto out;
+	if (minor == MAX_BLKTAP_DEVICE)
+		goto fail;
+
+	if (minor == blktap_max_minor) {
+		void *p;
+		int n;
+
+		n = min(2 * blktap_max_minor, MAX_BLKTAP_DEVICE);
+		p = krealloc(blktaps, n * sizeof(blktaps[0]), GFP_KERNEL);
+		if (!p)
+			goto fail;
+
+		blktaps          = p;
+		minor            = blktap_max_minor;
+		blktap_max_minor = n;
+
+		memset(&blktaps[minor], 0, (n - minor) * sizeof(blktaps[0]));
 	}
 
 	tap->minor = minor;
 	blktaps[minor] = tap;
 
+	__module_get(THIS_MODULE);
 out:
-	spin_unlock_irq(&blktap_control_lock);
+	mutex_unlock(&blktap_lock);
 	return tap;
+
+fail:
+	mutex_unlock(&blktap_lock);
+	kfree(tap);
+	tap = NULL;
+	goto out;
 }
 
-static struct blktap *
-blktap_control_allocate_tap(void)
+static void
+blktap_control_put_minor(struct blktap* tap)
 {
-	int err, minor;
+	blktaps[tap->minor] = NULL;
+	kfree(tap);
+
+	module_put(THIS_MODULE);
+}
+
+static struct blktap*
+blktap_control_create_tap(void)
+{
 	struct blktap *tap;
+	int err;
 
-	/*
-	 * This is called only from the ioctl, which
-	 * means we should always have interrupts enabled.
-	 */
-	BUG_ON(irqs_disabled());
-
-	spin_lock_irq(&blktap_control_lock);
-
-	for (minor = 0; minor < MAX_BLKTAP_DEVICE; minor++) {
-		tap = blktaps[minor];
-		if (!tap)
-			goto found;
-
-		if (!tap->dev_inuse) {
-			blktap_control_initialize_tap(tap);
-			goto found;
-		}
-	}
-
-	tap = NULL;
-
-found:
-	spin_unlock_irq(&blktap_control_lock);
-
-	if (!tap) {
-		tap = blktap_control_create_tap();
-		if (!tap)
-			return NULL;
-	}
+	tap = blktap_control_get_minor();
+	if (!tap)
+		return NULL;
 
 	err = blktap_ring_create(tap);
-	if (err) {
-		BTERR("ring creation failed: %d\n", err);
-		clear_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-		return NULL;
-	}
+	if (err)
+		goto fail_tap;
 
-	BTINFO("allocated tap %p\n", tap);
+	err = blktap_sysfs_create(tap);
+	if (err)
+		goto fail_ring;
+
 	return tap;
+
+fail_ring:
+	blktap_ring_destroy(tap);
+fail_tap:
+	blktap_control_put_minor(tap);
+
+	return NULL;
+}
+
+int
+blktap_control_destroy_tap(struct blktap *tap)
+{
+	int err;
+
+	err = blktap_ring_destroy(tap);
+	if (err)
+		return err;
+
+	blktap_sysfs_destroy(tap);
+
+	blktap_control_put_minor(tap);
+
+	return 0;
 }
 
 static int
 blktap_control_ioctl(struct inode *inode, struct file *filp,
 		     unsigned int cmd, unsigned long arg)
 {
-	unsigned long dev;
 	struct blktap *tap;
 
 	switch (cmd) {
 	case BLKTAP2_IOCTL_ALLOC_TAP: {
 		struct blktap_handle h;
+		void __user *ptr = (void __user*)arg;
 
-		tap = blktap_control_allocate_tap();
-		if (!tap) {
-			BTERR("error allocating device\n");
+		tap = blktap_control_create_tap();
+		if (!tap)
 			return -ENOMEM;
-		}
 
-		h.ring   = ring_major;
-		h.device = device_major;
+		h.ring   = blktap_ring_major;
+		h.device = blktap_device_major;
 		h.minor  = tap->minor;
 
-		if (copy_to_user((struct blktap_handle __user *)arg,
-				 &h, sizeof(h))) {
-			blktap_control_destroy_device(tap);
+		if (copy_to_user(ptr, &h, sizeof(h))) {
+			blktap_control_destroy_tap(tap);
 			return -EFAULT;
 		}
 
 		return 0;
 	}
 
-	case BLKTAP2_IOCTL_FREE_TAP:
-		dev = arg;
+	case BLKTAP2_IOCTL_FREE_TAP: {
+		int minor = arg;
 
-		if (dev > MAX_BLKTAP_DEVICE || !blktaps[dev])
+		if (minor > MAX_BLKTAP_DEVICE)
 			return -EINVAL;
 
-		blktap_control_destroy_device(blktaps[dev]);
-		return 0;
+		tap = blktaps[minor];
+		if (!tap)
+			return -ENODEV;
+
+		return blktap_control_destroy_tap(tap);
+	}
 	}
 
 	return -ENOIOCTLCMD;
@@ -159,33 +172,17 @@ static struct miscdevice blktap_misc = {
 	.fops     = &blktap_control_file_operations,
 };
 
-int
-blktap_control_destroy_device(struct blktap *tap)
+size_t
+blktap_control_debug(struct blktap *tap, char *buf, size_t size)
 {
-	int err;
+	char *s = buf, *end = buf + size;
 
-	if (!tap)
-		return 0;
+	s += snprintf(s, end - s,
+		      "tap %u:%u name:'%s' flags:%#08lx\n",
+		      MAJOR(tap->ring.devno), MINOR(tap->ring.devno),
+		      tap->name, tap->dev_inuse);
 
-	set_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse);
-
-	err = blktap_device_destroy(tap);
-	if (err)
-		return err;
-
-	err = blktap_sysfs_destroy(tap);
-	if (err)
-		return err;
-
-	err = blktap_ring_destroy(tap);
-	if (err)
-		return err;
-
-	clear_bit(BLKTAP_SHUTDOWN_REQUESTED, &tap->dev_inuse);
-	clear_bit(BLKTAP_CONTROL, &tap->dev_inuse);
-	wake_up(&tap->wq);
-
-	return 0;
+	return s - buf;
 }
 
 static int __init
@@ -195,34 +192,42 @@ blktap_control_init(void)
 
 	err = misc_register(&blktap_misc);
 	if (err) {
+		blktap_misc.minor = MISC_DYNAMIC_MINOR;
 		BTERR("misc_register failed for control device");
 		return err;
 	}
 
-	blktap_control_registered = 1;
+	blktap_max_minor = min(64, MAX_BLKTAP_DEVICE);
+	blktaps = kzalloc(blktap_max_minor * sizeof(blktaps[0]), GFP_KERNEL);
+	if (!blktaps) {
+		BTERR("failed to allocate blktap minor map");
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 
 static void
-blktap_control_free(void)
+blktap_control_exit(void)
 {
-	int i;
+	if (blktaps) {
+		kfree(blktaps);
+		blktaps = NULL;
+	}
 
-	for (i = 0; i < MAX_BLKTAP_DEVICE; i++)
-		blktap_control_destroy_device(blktaps[i]);
-
-	if (blktap_control_registered)
-		if (misc_deregister(&blktap_misc) < 0)
-			BTERR("misc_deregister failed for control device");
+	if (blktap_misc.minor != MISC_DYNAMIC_MINOR) {
+		misc_deregister(&blktap_misc);
+		blktap_misc.minor = MISC_DYNAMIC_MINOR;
+	}
 }
 
 static void
 blktap_exit(void)
 {
-	blktap_control_free();
-	blktap_ring_free();
-	blktap_sysfs_free();
-	blktap_device_free();
+	blktap_control_exit();
+	blktap_ring_exit();
+	blktap_sysfs_exit();
+	blktap_device_exit();
 	blktap_request_pool_free();
 }
 
@@ -238,11 +243,11 @@ blktap_init(void)
 	if (err)
 		return err;
 
-	err = blktap_device_init(&device_major);
+	err = blktap_device_init();
 	if (err)
 		goto fail;
 
-	err = blktap_ring_init(&ring_major);
+	err = blktap_ring_init();
 	if (err)
 		goto fail;
 
