@@ -85,6 +85,11 @@ static inline void __init paravirt_pagetable_setup_done(pgd_t *base)
 
 #endif	/* CONFIG_PARAVIRT */
 
+static inline pteval_t pte_flags(pte_t pte)
+{
+	return pte_val(pte) & PTE_FLAGS_MASK;
+}
+
 /*
  * The following only work if pte_present() is true.
  * Undefined behaviour if not..
