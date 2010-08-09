@@ -42,6 +42,8 @@
 #include <asm/cacheflush.h>
 #include <asm/pgtable.h>
 #include "agp.h"
+#include <xen/page.h>
+#include <asm/xen/page.h>
 
 __u32 *agp_gatt_table;
 int agp_memory_reserved;
@@ -1002,6 +1004,14 @@ int agp_generic_create_gatt_table(struct agp_bridge_data *bridge)
 		return -ENOMEM;
 	}
 	bridge->gatt_bus_addr = virt_to_phys(bridge->gatt_table_real);
+	/* KRW: virt_to_phys under Xen is not safe. */
+	if (xen_pv_domain()) {
+		/* Use back-door to get the "real" PFN. */
+		phys_addr_t pfn = virt_to_pfn(bridge->gatt_table_real);
+		phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(pfn));
+		if (bridge->gatt_bus_addr != xen_phys)
+			bridge->gatt_bus_addr = xen_phys;
+	}
 
 	/* AK: bogus, should encode addresses > 4GB */
 	for (i = 0; i < num_entries; i++) {
@@ -1141,8 +1151,17 @@ int agp_generic_insert_memory(struct agp_memory * mem, off_t pg_start, int type)
 	}
 
 	for (i = 0, j = pg_start; i < mem->page_count; i++, j++) {
+		phys_addr_t phys = page_to_phys(mem->pages[i]);
+
+		/* HACK: Via a back-door we get the bus address. */
+		if (xen_pv_domain()) {
+			phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+					page_to_pfn(mem->pages[i])));
+			if (phys != xen_phys)
+				phys = xen_phys;
+		}
 		writel(bridge->driver->mask_memory(bridge,
-						   page_to_phys(mem->pages[i]),
+						   phys,
 						   mask_type),
 		       bridge->gatt_table+j);
 	}
@@ -1235,7 +1254,16 @@ int agp_generic_alloc_pages(struct agp_bridge_data *bridge, struct agp_memory *m
 	int i, ret = -ENOMEM;
 
 	for (i = 0; i < num_pages; i++) {
-		page = alloc_page(GFP_KERNEL | GFP_DMA32 | __GFP_ZERO);
+		if (xen_pv_domain()) {
+			void *addr;
+			dma_addr_t _d;
+
+			addr = dma_alloc_coherent(NULL, PAGE_SIZE, &_d, GFP_KERNEL);
+			if (!addr)
+				goto out;
+			page = virt_to_page(addr);
+		} else
+			page = alloc_page(GFP_KERNEL | GFP_DMA32 | __GFP_ZERO);
 		/* agp_free_memory() needs gart address */
 		if (page == NULL)
 			goto out;
@@ -1263,7 +1291,17 @@ struct page *agp_generic_alloc_page(struct agp_bridge_data *bridge)
 {
 	struct page * page;
 
-	page = alloc_page(GFP_KERNEL | GFP_DMA32 | __GFP_ZERO);
+	if (xen_pv_domain()) {
+		void *addr;
+		dma_addr_t _d;
+
+		addr = dma_alloc_coherent(NULL, PAGE_SIZE, &_d, GFP_KERNEL);
+		if (!addr)
+			return NULL;
+		page = virt_to_page(addr);
+	} else
+		page = alloc_page(GFP_KERNEL | GFP_DMA32 | __GFP_ZERO);
+
 	if (page == NULL)
 		return NULL;
 
@@ -1294,7 +1332,12 @@ void agp_generic_destroy_pages(struct agp_memory *mem)
 		unmap_page_from_agp(page);
 #endif
 		put_page(page);
-		__free_page(page);
+		if (xen_pv_domain()) {
+			void *addr = page_address(page);
+			dma_free_coherent(NULL, PAGE_SIZE, addr,
+					  virt_to_bus(addr));
+		} else 
+			__free_page(page);
 		atomic_dec(&agp_bridge->current_memory_agp);
 		mem->pages[i] = NULL;
 	}
@@ -1311,7 +1354,12 @@ void agp_generic_destroy_page(struct page *page, int flags)
 
 	if (flags & AGP_PAGE_DESTROY_FREE) {
 		put_page(page);
-		__free_page(page);
+		if (xen_pv_domain()) {
+			void *addr = page_address(page);
+			dma_free_coherent(NULL, PAGE_SIZE, addr,
+					  virt_to_bus(addr));
+		} else
+			__free_page(page);
 		atomic_dec(&agp_bridge->current_memory_agp);
 	}
 }

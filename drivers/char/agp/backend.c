@@ -38,6 +38,8 @@
 #include <linux/vmalloc.h>
 #include <asm/io.h>
 #include "agp.h"
+#include <xen/page.h>
+#include <asm/xen/page.h>
 
 /* Due to XFree86 brain-damage, we can't go to 1.0 until they
  * fix some real stupidity. It's only by chance we can bump
@@ -160,8 +162,13 @@ static int agp_backend_initialize(struct agp_bridge_data *bridge)
 			}
 		} else {
 			bridge->scratch_page_dma = page_to_phys(page);
+			if (xen_pv_domain()) {
+				phys_addr_t xen_phys = PFN_PHYS(pfn_to_mfn(
+							page_to_pfn(page)));
+				if (bridge->scratch_page_dma != xen_phys)
+					bridge->scratch_page_dma = xen_phys;
+			}
 		}
-
 		bridge->scratch_page = bridge->driver->mask_memory(bridge,
 						   bridge->scratch_page_dma, 0);
 	}

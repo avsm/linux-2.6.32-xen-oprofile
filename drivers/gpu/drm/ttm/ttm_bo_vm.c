@@ -87,6 +87,9 @@ static int ttm_bo_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	bool is_iomem;
 	unsigned long address = (unsigned long)vmf->virtual_address;
 	int retval = VM_FAULT_NOPAGE;
+	bool vm_io = (vma->vm_flags & VM_IO) && VM_IO;
+	bool pte_iomap = (pgprot_val(vma->vm_page_prot) & _PAGE_IOMAP)
+			&& _PAGE_IOMAP;
 
 	/*
 	 * Work around locking order reversal in fault / nopfn
@@ -158,11 +161,30 @@ static int ttm_bo_vm_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	if (is_iomem) {
 		vma->vm_page_prot = ttm_io_prot(bo->mem.placement,
 						vma->vm_page_prot);
+		if (!vm_io || !pte_iomap) {
+			vma->vm_flags |= VM_IO;
+			pgprot_val(vma->vm_page_prot) |= _PAGE_IOMAP;
+		}
 	} else {
 		ttm = bo->ttm;
 		vma->vm_page_prot = (bo->mem.placement & TTM_PL_FLAG_CACHED) ?
 		    vm_get_page_prot(vma->vm_flags) :
 		    ttm_io_prot(bo->mem.placement, vma->vm_page_prot);
+		/*
+		 * During PCI suspend the graphic cards purge their VRAM and
+		 * move their graphic objects to the TT. They also unmap all
+		 * of the objects, meaning that when an user application is
+		 * unfrozen it will re-fault  and call here.
+		 *
+		 * What this means is that the VMA for the graphic object might
+		 * have been set for VRAM TTM but now it is with the TT
+		 * (normal RAM) meaning that the vma->vm_flags could be
+		 * inappropiate (say, VM_IO on TT - no good).
+		 */
+		if (vm_io || pte_iomap) {
+			vma->vm_flags &= ~VM_IO;
+			pgprot_val(vma->vm_page_prot) &= ~_PAGE_IOMAP;
+		}
 	}
 
 	/*
@@ -239,6 +261,7 @@ int ttm_bo_mmap(struct file *filp, struct vm_area_struct *vma,
 {
 	struct ttm_bo_driver *driver;
 	struct ttm_buffer_object *bo;
+	struct ttm_mem_type_manager *man;
 	int ret;
 
 	read_lock(&bdev->vm_lock);
@@ -271,7 +294,10 @@ int ttm_bo_mmap(struct file *filp, struct vm_area_struct *vma,
 	 */
 
 	vma->vm_private_data = bo;
-	vma->vm_flags |= VM_RESERVED | VM_IO | VM_MIXEDMAP | VM_DONTEXPAND;
+	vma->vm_flags |= VM_RESERVED | VM_MIXEDMAP | VM_DONTEXPAND;
+	man = &bdev->man[bo->mem.mem_type];
+	if (man->flags & TTM_MEMTYPE_FLAG_NEEDS_IOREMAP)
+		vma->vm_flags |= VM_IO;
 	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
 	return 0;
 out_unref:
@@ -288,7 +314,6 @@ int ttm_fbdev_mmap(struct vm_area_struct *vma, struct ttm_buffer_object *bo)
 	vma->vm_ops = &ttm_bo_vm_ops;
 	vma->vm_private_data = ttm_bo_reference(bo);
 	vma->vm_flags |= VM_RESERVED | VM_IO | VM_MIXEDMAP | VM_DONTEXPAND;
-	vma->vm_page_prot = vm_get_page_prot(vma->vm_flags);
 	return 0;
 }
 EXPORT_SYMBOL(ttm_fbdev_mmap);
