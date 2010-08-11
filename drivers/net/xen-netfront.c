@@ -1288,6 +1288,14 @@ static void xennet_disconnect_backend(struct netfront_info *info)
 	info->rx.sring = NULL;
 }
 
+static int netfront_suspend(struct xenbus_device *dev, pm_message_t state)
+{
+	struct netfront_info *info = dev_get_drvdata(&dev->dev);
+	struct hrtimer *timer = &info->smart_poll.timer;
+	hrtimer_cancel(timer);
+	return 0;
+}
+
 /**
  * We are reconnecting to the backend, due to a suspend/resume, or a backend
  * driver restart.  We tear down our netif structure and recreate it, but
@@ -1339,6 +1347,10 @@ static enum hrtimer_restart smart_poll_function(struct hrtimer *timer)
 	np = netdev_priv(dev);
 
 	spin_lock_irqsave(&np->tx_lock, flags);
+
+	if (!np->rx.sring)
+		goto end;
+
 	np->smart_poll.counter++;
 
 	if (likely(netif_carrier_ok(dev))) {
@@ -1907,6 +1919,7 @@ static struct xenbus_driver netfront_driver = {
 	.ids = netfront_ids,
 	.probe = netfront_probe,
 	.remove = __devexit_p(xennet_remove),
+	.suspend = netfront_suspend,
 	.resume = netfront_resume,
 	.otherend_changed = backend_changed,
 };
