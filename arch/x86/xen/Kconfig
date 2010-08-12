@@ -29,10 +29,6 @@ config XEN_SAVE_RESTORE
        depends on XEN && PM
        default y
 
-config XEN_SCHED_CLOCK
-       bool
-       default n
-
 config XEN_DEBUG_FS
 	bool "Enable Xen debug and tuning parameters in debugfs"
 	depends on XEN && DEBUG_FS

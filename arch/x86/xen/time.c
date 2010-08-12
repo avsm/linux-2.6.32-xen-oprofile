@@ -155,46 +155,6 @@ static void do_stolen_accounting(void)
 	account_idle_ticks(ticks);
 }
 
-#ifdef CONFIG_XEN_SCHED_CLOCK
-/*
- * Xen sched_clock implementation.  Returns the number of unstolen
- * nanoseconds, which is nanoseconds the VCPU spent in RUNNING+BLOCKED
- * states.
- */
-static unsigned long long xen_sched_clock(void)
-{
-	struct vcpu_runstate_info state;
-	cycle_t now;
-	u64 ret;
-	s64 offset;
-
-	/*
-	 * Ideally sched_clock should be called on a per-cpu basis
-	 * anyway, so preempt should already be disabled, but that's
-	 * not current practice at the moment.
-	 */
-	preempt_disable();
-
-	now = xen_clocksource_read();
-
-	get_runstate_snapshot(&state);
-
-	WARN_ON(state.state != RUNSTATE_running);
-
-	offset = now - state.state_entry_time;
-	if (offset < 0)
-		offset = 0;
-
-	ret = state.time[RUNSTATE_blocked] +
-		state.time[RUNSTATE_running] +
-		offset;
-
-	preempt_enable();
-
-	return ret;
-}
-#endif
-
 /* Get the TSC speed from Xen */
 static unsigned long xen_tsc_khz(void)
 {
@@ -516,11 +476,7 @@ static __init void xen_time_init(void)
 }
 
 static const struct pv_time_ops xen_time_ops __initdata = {
-#ifdef CONFIG_XEN_SCHED_CLOCK
-       .sched_clock = xen_sched_clock,
-#else
        .sched_clock = xen_clocksource_read,
-#endif
 };
 
 __init void xen_init_time_ops(void)
