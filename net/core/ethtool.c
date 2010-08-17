@@ -179,14 +179,24 @@ static int ethtool_get_drvinfo(struct net_device *dev, void __user *useraddr)
 	struct ethtool_drvinfo info;
 	const struct ethtool_ops *ops = dev->ethtool_ops;
 
-	if (!ops->get_drvinfo)
-		return -EOPNOTSUPP;
-
 	memset(&info, 0, sizeof(info));
 	info.cmd = ETHTOOL_GDRVINFO;
-	ops->get_drvinfo(dev, &info);
+	if (ops && ops->get_drvinfo) {
+		ops->get_drvinfo(dev, &info);
+	} else if (dev->dev.parent && dev->dev.parent->driver) {
+		strlcpy(info.bus_info, dev_name(dev->dev.parent),
+			sizeof(info.bus_info));
+		strlcpy(info.driver, dev->dev.parent->driver->name,
+			sizeof(info.driver));
+	} else {
+		return -EOPNOTSUPP;
+	}
 
-	if (ops->get_sset_count) {
+	/*
+	 * this method of obtaining string set info is deprecated;
+	 * Use ETHTOOL_GSSET_INFO instead.
+	 */
+	if (ops && ops->get_sset_count) {
 		int rc;
 
 		rc = ops->get_sset_count(dev, ETH_SS_TEST);
@@ -206,9 +216,9 @@ static int ethtool_get_drvinfo(struct net_device *dev, void __user *useraddr)
 		if (ops->get_stats_count)
 			info.n_stats = ops->get_stats_count(dev);
 	}
-	if (ops->get_regs_len)
+	if (ops && ops->get_regs_len)
 		info.regdump_len = ops->get_regs_len(dev);
-	if (ops->get_eeprom_len)
+	if (ops && ops->get_eeprom_len)
 		info.eedump_len = ops->get_eeprom_len(dev);
 
 	if (copy_to_user(useraddr, &info, sizeof(info)))
@@ -945,11 +955,18 @@ int dev_ethtool(struct net *net, struct ifreq *ifr)
 	if (!dev || !netif_device_present(dev))
 		return -ENODEV;
 
-	if (!dev->ethtool_ops)
-		return -EOPNOTSUPP;
-
-	if (copy_from_user(&ethcmd, useraddr, sizeof (ethcmd)))
+	if (copy_from_user(&ethcmd, useraddr, sizeof(ethcmd)))
 		return -EFAULT;
+
+	if (!dev->ethtool_ops) {
+		/* ETHTOOL_GDRVINFO does not require any driver support.
+		 * It is also unprivileged and does not change anything,
+		 * so we can take a shortcut to it. */
+		if (ethcmd == ETHTOOL_GDRVINFO)
+			return ethtool_get_drvinfo(dev, useraddr);
+		else
+			return -EOPNOTSUPP;
+	}
 
 	/* Allow some commands to be done by anyone */
 	switch(ethcmd) {
