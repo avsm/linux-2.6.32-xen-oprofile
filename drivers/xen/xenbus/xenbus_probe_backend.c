@@ -54,7 +54,7 @@
 #include "xenbus_probe.h"
 
 /* backend/<type>/<fe-uuid>/<id> => <type>-<fe-domid>-<id> */
-static int backend_bus_id(char bus_id[BUS_ID_SIZE], const char *nodename)
+static int backend_bus_id(char bus_id[XEN_BUS_ID_SIZE], const char *nodename)
 {
 	int domid, err;
 	const char *devid, *type, *frontend;
@@ -84,8 +84,8 @@ static int backend_bus_id(char bus_id[BUS_ID_SIZE], const char *nodename)
 	if (err)
 		return err;
 
-	if (snprintf(bus_id, BUS_ID_SIZE,
-		     "%.*s-%i-%s", typelen, type, domid, devid) >= BUS_ID_SIZE)
+	if (snprintf(bus_id, XEN_BUS_ID_SIZE,
+		     "%.*s-%i-%s", typelen, type, domid, devid) >= XEN_BUS_ID_SIZE)
 		return -ENOSPC;
 	return 0;
 }
@@ -267,10 +267,8 @@ static int backend_probe_and_watch(struct notifier_block *notifier,
 {
 	/* Enumerate devices in xenstore and watch for changes. */
 	xenbus_probe_devices(&xenbus_backend);
-	printk(KERN_CRIT "%s devices probed ok\n", __func__);
 	register_xenbus_watch(&be_watch);
-	printk(KERN_CRIT "%s watch add ok ok\n", __func__);
-	printk(KERN_CRIT "%s all done\n", __func__);
+
 	return NOTIFY_DONE;
 }
 
@@ -285,11 +283,8 @@ static int __init xenbus_probe_backend_init(void)
 
 	/* Register ourselves with the kernel bus subsystem */
 	err = bus_register(&xenbus_backend.bus);
-	if (err) {
-		printk(KERN_CRIT "%s didn't register bus!\n", __func__);
+	if (err)
 		return err;
-	}
-	printk(KERN_CRIT "%s bus registered ok\n", __func__);
 
 	register_xenstore_notifier(&xenstore_notifier);
 

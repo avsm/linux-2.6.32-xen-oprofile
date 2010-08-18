@@ -25,15 +25,15 @@
 #include "xenbus_probe.h"
 
 /* device/<type>/<id> => <type>-<id> */
-static int frontend_bus_id(char bus_id[BUS_ID_SIZE], const char *nodename)
+static int frontend_bus_id(char bus_id[XEN_BUS_ID_SIZE], const char *nodename)
 {
 	nodename = strchr(nodename, '/');
-	if (!nodename || strlen(nodename + 1) >= BUS_ID_SIZE) {
+	if (!nodename || strlen(nodename + 1) >= XEN_BUS_ID_SIZE) {
 		printk(KERN_WARNING "XENBUS: bad frontend %s\n", nodename);
 		return -EINVAL;
 	}
 
-	strlcpy(bus_id, nodename + 1, BUS_ID_SIZE);
+	strlcpy(bus_id, nodename + 1, XEN_BUS_ID_SIZE);
 	if (!strchr(bus_id, '/')) {
 		printk(KERN_WARNING "XENBUS: bus_id %s no slash\n", bus_id);
 		return -EINVAL;
@@ -233,10 +233,8 @@ static int frontend_probe_and_watch(struct notifier_block *notifier,
 {
 	/* Enumerate devices in xenstore and watch for changes. */
 	xenbus_probe_devices(&xenbus_frontend);
-	printk(KERN_CRIT "%s devices probed ok\n", __func__);
 	register_xenbus_watch(&fe_watch);
-	printk(KERN_CRIT "%s watch add ok ok\n", __func__);
-	printk(KERN_CRIT "%s all done\n", __func__);
+
 	return NOTIFY_DONE;
 }
 
@@ -252,11 +250,8 @@ static int __init xenbus_probe_frontend_init(void)
 
 	/* Register ourselves with the kernel bus subsystem */
 	err = bus_register(&xenbus_frontend.bus);
-	if (err) {
-		printk(KERN_CRIT "%s didn't register bus!\n", __func__);
+	if (err)
 		return err;
-	}
-	printk(KERN_CRIT "%s bus registered ok\n", __func__);
 
 	register_xenstore_notifier(&xenstore_notifier);
 
