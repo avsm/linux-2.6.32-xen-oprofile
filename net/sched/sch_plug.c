@@ -7,13 +7,13 @@
  *             2 of the License, or (at your option) any later version.
  *
  * The operation of the buffer is as follows:
- * When a checkpoint begins, a barrier is inserted into the
+ * When a checkpoint begins, a plug is inserted into the
  *   network queue by a netlink request (it operates by storing
  *   a pointer to the next packet which arrives and blocking dequeue
  *   when that packet is at the head of the queue).
  * When a checkpoint completes (the backup acknowledges receipt),
  *   currently-queued packets are released.
- * So it supports two operations, barrier and release.
+ * So it supports two operations, plug and unplug.
  */
 
 #include <linux/module.h>
@@ -24,22 +24,21 @@
 #include <linux/skbuff.h>
 #include <net/pkt_sched.h>
 
-/* xenbus directory */
 #define FIFO_BUF    (10*1024*1024)
 
-#define TCQ_CHECKPOINT 0
-#define TCQ_DEQUEUE    1
+#define TCQ_PLUG   0
+#define TCQ_UNPLUG 1
 
-struct queue_sched_data {
+struct plug_sched_data {
 	/*
 	 * This packet is the first packet which should not be
-	 * delivered.  If it is NULL, queue_enqueue will set it to the
+	 * delivered.  If it is NULL, plug_enqueue will set it to the
 	 * next packet it sees.
 	 */
 	struct sk_buff *stop;
 };
 
-struct tc_queue_qopt {
+struct tc_plug_qopt {
 	/* 0: reset stop packet pointer
 	 * 1: dequeue to stop pointer */
 	int action;
@@ -50,9 +49,9 @@ static int skb_remove_foreign_references(struct sk_buff *skb)
 	return !skb_linearize(skb);
 }
 
-static int queue_enqueue(struct sk_buff *skb, struct Qdisc* sch)
+static int plug_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 {
-	struct queue_sched_data *q = qdisc_priv(sch);
+	struct plug_sched_data *q = qdisc_priv(sch);
 
 	if (likely(sch->qstats.backlog + skb->len <= FIFO_BUF)) {
 		if (!q->stop)
@@ -73,9 +72,9 @@ static int queue_enqueue(struct sk_buff *skb, struct Qdisc* sch)
 
 /* dequeue doesn't actually dequeue until the release command is
  * received. */
-static struct sk_buff *queue_dequeue(struct Qdisc* sch)
+static struct sk_buff *plug_dequeue(struct Qdisc* sch)
 {
-	struct queue_sched_data *q = qdisc_priv(sch);
+	struct plug_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *peek;
 
 	if (sch->flags & TCQ_F_THROTTLED)
@@ -96,7 +95,7 @@ static struct sk_buff *queue_dequeue(struct Qdisc* sch)
 	return qdisc_dequeue_head(sch);
 }
 
-static int queue_init(struct Qdisc *sch, struct nlattr *opt)
+static int plug_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	sch->flags |= TCQ_F_THROTTLED;
 
@@ -108,20 +107,20 @@ static int queue_init(struct Qdisc *sch, struct nlattr *opt)
  *   0: checkpoint queue (set stop to next packet)
  *   1: dequeue until stop
  */
-static int queue_change(struct Qdisc *sch, struct nlattr *opt)
+static int plug_change(struct Qdisc *sch, struct nlattr *opt)
 {
-	struct queue_sched_data *q = qdisc_priv(sch);
-	struct tc_queue_qopt *msg;
+	struct plug_sched_data *q = qdisc_priv(sch);
+	struct tc_plug_qopt *msg;
 
 	if (!opt || nla_len(opt) < sizeof(*msg))
 		return -EINVAL;
 
 	msg = nla_data(opt);
 
-	if (msg->action == TCQ_CHECKPOINT) {
+	if (msg->action == TCQ_PLUG) {
 		/* reset stop */
 		q->stop = NULL;
-	} else if (msg->action == TCQ_DEQUEUE) {
+	} else if (msg->action == TCQ_UNPLUG) {
 		/* dequeue */
 		sch->flags &= ~TCQ_F_THROTTLED;
 		netif_schedule_queue(sch->dev_queue);
@@ -132,26 +131,26 @@ static int queue_change(struct Qdisc *sch, struct nlattr *opt)
 	return 0;
 }
 
-struct Qdisc_ops queue_qdisc_ops = {
+struct Qdisc_ops plug_qdisc_ops = {
 	.id          =       "plug",
-	.priv_size   =       sizeof(struct queue_sched_data),
-	.enqueue     =       queue_enqueue,
-	.dequeue     =       queue_dequeue,
+	.priv_size   =       sizeof(struct plug_sched_data),
+	.enqueue     =       plug_enqueue,
+	.dequeue     =       plug_dequeue,
 	.peek        =       qdisc_peek_head,
-	.init        =       queue_init,
-	.change      =       queue_change,
+	.init        =       plug_init,
+	.change      =       plug_change,
 	.owner       =       THIS_MODULE,
 };
 
-static int __init queue_module_init(void)
+static int __init plug_module_init(void)
 {
-	return register_qdisc(&queue_qdisc_ops);
+	return register_qdisc(&plug_qdisc_ops);
 }
 
-static void __exit queue_module_exit(void)
+static void __exit plug_module_exit(void)
 {
-	unregister_qdisc(&queue_qdisc_ops);
+	unregister_qdisc(&plug_qdisc_ops);
 }
-module_init(queue_module_init)
-module_exit(queue_module_exit)
+module_init(plug_module_init)
+module_exit(plug_module_exit)
 MODULE_LICENSE("GPL");
