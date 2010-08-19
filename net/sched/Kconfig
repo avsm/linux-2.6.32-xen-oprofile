@@ -221,8 +221,14 @@ config NET_SCH_PLUG
 	  Say Y here if you are using this kernel for Xen dom0 and
 	  want to protect Xen guests with Remus.
 
-	  This scheduler plugs network traffic until explicitly released,
-	  to allow system-wide atomic checkpoints.
+	  This queueing discipline is controlled by netlink. When it receives an
+	  enqueue command it inserts a plug into the outbound queue that causes
+	  following packets to enqueue until a dequeue command arrives over
+	  netlink, releasing packets up to the plug for delivery.
+
+	  Its intention is to support speculative execution by allowing generated
+	  network traffic to be rolled back. It is used to provide network
+	  protection for the Remus high availability project.
 
 	  If unsure, say N.
 
