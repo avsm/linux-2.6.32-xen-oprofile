@@ -1,5 +1,5 @@
 /*
- * sch_queue.c Queue traffic until an explicit release command
+ * sch_plug.c Queue traffic until an explicit release command
  *
  *             This program is free software; you can redistribute it and/or
  *             modify it under the terms of the GNU General Public License
@@ -133,7 +133,7 @@ static int queue_change(struct Qdisc *sch, struct nlattr *opt)
 }
 
 struct Qdisc_ops queue_qdisc_ops = {
-	.id          =       "queue",
+	.id          =       "plug",
 	.priv_size   =       sizeof(struct queue_sched_data),
 	.enqueue     =       queue_enqueue,
 	.dequeue     =       queue_dequeue,

@@ -215,15 +215,19 @@ config NET_SCH_INGRESS
 	  To compile this code as a module, choose M here: the
 	  module will be called sch_ingress.
 
-config NET_SCH_QUEUE
-	tristate "Remus network buffer"
+config NET_SCH_PLUG
+	tristate "Plug network traffic until release"
 	---help---
 	  Say Y here if you are using this kernel for Xen dom0 and
 	  want to protect Xen guests with Remus.
+
+	  This scheduler plugs network traffic until explicitly released,
+	  to allow system-wide atomic checkpoints.
+
 	  If unsure, say N.
 
 	  To compile this code as a module, choose M here: the
-	  module will be called sch_queue.
+	  module will be called sch_plug.
 
 comment "Classification"
 
