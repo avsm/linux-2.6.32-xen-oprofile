@@ -215,6 +215,16 @@ config NET_SCH_INGRESS
 	  To compile this code as a module, choose M here: the
 	  module will be called sch_ingress.
 
+config NET_SCH_QUEUE
+	tristate "Remus network buffer"
+	---help---
+	  Say Y here if you are using this kernel for Xen dom0 and
+	  want to protect Xen guests with Remus.
+	  If unsure, say N.
+
+	  To compile this code as a module, choose M here: the
+	  module will be called sch_queue.
+
 comment "Classification"
 
 config NET_CLS
