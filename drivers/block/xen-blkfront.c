@@ -86,6 +86,7 @@ struct blkfront_info
 	struct blkif_front_ring ring;
 	struct scatterlist sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 	unsigned int evtchn, irq;
+	struct tasklet_struct tasklet;
 	struct request_queue *rq;
 	struct work_struct work;
 	struct gnttab_free_callback callback;
@@ -676,13 +677,14 @@ static void blkif_completion(struct blk_shadow *s)
 		gnttab_end_foreign_access(s->req.seg[i].gref, 0, 0UL);
 }
 
-static irqreturn_t blkif_interrupt(int irq, void *dev_id)
+static void
+blkif_do_interrupt(unsigned long data)
 {
+	struct blkfront_info *info = (struct blkfront_info *)data;
 	struct request *req;
 	struct blkif_response *bret;
 	RING_IDX i, rp;
 	unsigned long flags;
-	struct blkfront_info *info = (struct blkfront_info *)dev_id;
 	int error;
 
 	spin_lock_irqsave(&info->io_lock, flags);
@@ -743,6 +745,15 @@ static irqreturn_t blkif_interrupt(int irq, void *dev_id)
 
 out:
 	spin_unlock_irqrestore(&info->io_lock, flags);
+}
+
+
+static irqreturn_t
+blkif_interrupt(int irq, void *dev_id)
+{
+	struct blkfront_info *info = (struct blkfront_info *)dev_id;
+
+	tasklet_schedule(&info->tasklet);
 
 	return IRQ_HANDLED;
 }
@@ -893,6 +904,7 @@ static int blkfront_probe(struct xenbus_device *dev,
 	info->connected = BLKIF_STATE_DISCONNECTED;
 	INIT_WORK(&info->work, blkif_restart_queue);
 	spin_lock_init(&info->io_lock);
+	tasklet_init(&info->tasklet, blkif_do_interrupt, (unsigned long)info);
 
 	for (i = 0; i < BLK_RING_SIZE; i++)
 		info->shadow[i].req.id = i+1;
