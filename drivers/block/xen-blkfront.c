@@ -88,6 +88,7 @@ struct blkfront_info
 	struct blkif_front_ring ring;
 	struct scatterlist sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 	unsigned int evtchn, irq;
+	struct tasklet_struct tasklet;
 	struct request_queue *rq;
 	struct work_struct work;
 	struct gnttab_free_callback callback;
@@ -95,9 +96,9 @@ struct blkfront_info
 	unsigned long shadow_free;
 	int feature_barrier;
 	int is_ready;
-};
 
-static DEFINE_SPINLOCK(blkif_io_lock);
+	spinlock_t io_lock;
+};
 
 static unsigned int nr_minors;
 static unsigned long *minors;
@@ -119,6 +120,10 @@ static DEFINE_SPINLOCK(minor_lock);
 #define BLKIF_MINOR_EXT(dev) ((dev)&(~EXTENDED))
 
 #define DEV_NAME	"xvd"	/* name in /dev */
+
+/* all the Xen major numbers we currently support are identical to Linux
+ * major numbers */
+static inline int xen_translate_major(int major) { return major; }
 
 static int get_id_from_freelist(struct blkfront_info *info)
 {
@@ -383,11 +388,12 @@ wait:
 		flush_requests(info);
 }
 
-static int xlvbd_init_blk_queue(struct gendisk *gd, u16 sector_size)
+static int xlvbd_init_blk_queue(struct blkfront_info *info,
+				struct gendisk *gd, u16 sector_size)
 {
 	struct request_queue *rq;
 
-	rq = blk_init_queue(do_blkif_request, &blkif_io_lock);
+	rq = blk_init_queue(do_blkif_request, &info->io_lock);
 	if (rq == NULL)
 		return -1;
 
@@ -420,17 +426,22 @@ static int xlvbd_init_blk_queue(struct gendisk *gd, u16 sector_size)
 static int xlvbd_barrier(struct blkfront_info *info)
 {
 	int err;
+	const char *barrier;
 
-	err = blk_queue_ordered(info->rq,
-				info->feature_barrier ? QUEUE_ORDERED_DRAIN : QUEUE_ORDERED_NONE,
-				NULL);
+	switch (info->feature_barrier) {
+	case QUEUE_ORDERED_DRAIN:	barrier = "enabled (drain)"; break;
+	case QUEUE_ORDERED_TAG:		barrier = "enabled (tag)"; break;
+	case QUEUE_ORDERED_NONE:	barrier = "disabled"; break;
+	default:			return -EINVAL;
+	}
+
+	err = blk_queue_ordered(info->rq, info->feature_barrier, NULL);
 
 	if (err)
 		return err;
 
 	printk(KERN_INFO "blkfront: %s: barriers %s\n",
-	       info->gd->disk_name,
-	       info->feature_barrier ? "enabled" : "disabled");
+	       info->gd->disk_name, barrier);
 	return 0;
 }
 
@@ -443,8 +454,9 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	int nr_minors = 1;
 	int err = -ENODEV;
 	unsigned int offset;
-	int minor;
+	int minor = 0, major = XENVBD_MAJOR;
 	int nr_parts;
+	char *name = DEV_NAME;
 
 	BUG_ON(info->gd != NULL);
 	BUG_ON(info->rq != NULL);
@@ -456,11 +468,62 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	}
 
 	if (!VDEV_IS_EXTENDED(info->vdevice)) {
+		major = BLKIF_MAJOR(info->vdevice);
 		minor = BLKIF_MINOR(info->vdevice);
 		nr_parts = PARTS_PER_DISK;
+		switch (major) {
+		case XEN_IDE0_MAJOR:
+			major = xen_translate_major(major);
+			offset = (minor / 64);
+			name = "hd";
+			break;
+		case XEN_IDE1_MAJOR:
+			major = xen_translate_major(major);
+			offset = (minor / 64) + 2;
+			name = "hd";
+			break;
+		case XEN_SCSI_DISK0_MAJOR:
+			major = xen_translate_major(major);
+			offset = minor / nr_parts;
+			name = "sd";
+			break;
+		case XEN_SCSI_DISK1_MAJOR:
+		case XEN_SCSI_DISK2_MAJOR:
+		case XEN_SCSI_DISK3_MAJOR:
+		case XEN_SCSI_DISK4_MAJOR:
+		case XEN_SCSI_DISK5_MAJOR:
+		case XEN_SCSI_DISK6_MAJOR:
+		case XEN_SCSI_DISK7_MAJOR:
+			offset = (minor / nr_parts) +
+				(major - XEN_SCSI_DISK1_MAJOR + 1) * 16;
+			major = xen_translate_major(major);
+			name = "sd";
+			break;
+		case XEN_SCSI_DISK8_MAJOR:
+		case XEN_SCSI_DISK9_MAJOR:
+		case XEN_SCSI_DISK10_MAJOR:
+		case XEN_SCSI_DISK11_MAJOR:
+		case XEN_SCSI_DISK12_MAJOR:
+		case XEN_SCSI_DISK13_MAJOR:
+		case XEN_SCSI_DISK14_MAJOR:
+		case XEN_SCSI_DISK15_MAJOR:
+			offset = (minor / nr_parts) +
+				(major - XEN_SCSI_DISK8_MAJOR + 8) * 16;
+			major = xen_translate_major(major);
+			name = "sd";
+			break;
+		case XENVBD_MAJOR:
+			offset = minor / nr_parts;
+			break;
+		default:
+			printk(KERN_WARNING "blkfront: your disk configuration is "
+					"incorrect, please use an xvd device instead\n");
+			return -ENODEV;
+		}
 	} else {
 		minor = BLKIF_MINOR_EXT(info->vdevice);
 		nr_parts = PARTS_PER_EXT_DISK;
+		offset = minor / nr_parts;
 	}
 
 	if ((minor % nr_parts) == 0)
@@ -475,34 +538,32 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	if (gd == NULL)
 		goto release;
 
-	offset = minor / nr_parts;
-
 	if (nr_minors > 1) {
 		if (offset < 26)
-			sprintf(gd->disk_name, "%s%c", DEV_NAME, 'a' + offset);
+			sprintf(gd->disk_name, "%s%c", name, 'a' + offset);
 		else
-			sprintf(gd->disk_name, "%s%c%c", DEV_NAME,
-				'a' + ((offset / 26)-1), 'a' + (offset % 26));
+			sprintf(gd->disk_name, "%s%c%c", name,
+					'a' + ((offset / 26)-1), 'a' + (offset % 26));
 	} else {
 		if (offset < 26)
-			sprintf(gd->disk_name, "%s%c%d", DEV_NAME,
+			sprintf(gd->disk_name, "%s%c%d", name,
 				'a' + offset,
 				minor & (nr_parts - 1));
 		else
-			sprintf(gd->disk_name, "%s%c%c%d", DEV_NAME,
+			sprintf(gd->disk_name, "%s%c%c%d", name,
 				'a' + ((offset / 26) - 1),
 				'a' + (offset % 26),
 				minor & (nr_parts - 1));
 	}
 
-	gd->major = XENVBD_MAJOR;
+	gd->major = major;
 	gd->first_minor = minor;
 	gd->fops = &xlvbd_block_fops;
 	gd->private_data = info;
 	gd->driverfs_dev = &(info->xbdev->dev);
 	set_capacity(gd, capacity);
 
-	if (xlvbd_init_blk_queue(gd, sector_size)) {
+	if (xlvbd_init_blk_queue(info, gd, sector_size)) {
 		del_gendisk(gd);
 		goto release;
 	}
@@ -510,8 +571,7 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 	info->rq = gd->queue;
 	info->gd = gd;
 
-	if (info->feature_barrier)
-		xlvbd_barrier(info);
+	xlvbd_barrier(info);
 
 	if (vdisk_info & VDISK_READONLY)
 		set_disk_ro(gd, 1);
@@ -538,14 +598,14 @@ static void xlvbd_release_gendisk(struct blkfront_info *info)
 	if (info->rq == NULL)
 		return;
 
-	spin_lock_irqsave(&blkif_io_lock, flags);
+	spin_lock_irqsave(&info->io_lock, flags);
 
 	/* No more blkif_request(). */
 	blk_stop_queue(info->rq);
 
 	/* No more gnttab callback work. */
 	gnttab_cancel_free_callback(&info->callback);
-	spin_unlock_irqrestore(&blkif_io_lock, flags);
+	spin_unlock_irqrestore(&info->io_lock, flags);
 
 	/* Flush gnttab callback work. Must be done with no locks held. */
 	flush_scheduled_work();
@@ -577,16 +637,16 @@ static void blkif_restart_queue(struct work_struct *work)
 {
 	struct blkfront_info *info = container_of(work, struct blkfront_info, work);
 
-	spin_lock_irq(&blkif_io_lock);
+	spin_lock_irq(&info->io_lock);
 	if (info->connected == BLKIF_STATE_CONNECTED)
 		kick_pending_request_queues(info);
-	spin_unlock_irq(&blkif_io_lock);
+	spin_unlock_irq(&info->io_lock);
 }
 
 static void blkif_free(struct blkfront_info *info, int suspend)
 {
 	/* Prevent new requests being issued until we fix things up. */
-	spin_lock_irq(&blkif_io_lock);
+	spin_lock_irq(&info->io_lock);
 	info->connected = suspend ?
 		BLKIF_STATE_SUSPENDED : BLKIF_STATE_DISCONNECTED;
 	/* No more blkif_request(). */
@@ -594,7 +654,7 @@ static void blkif_free(struct blkfront_info *info, int suspend)
 		blk_stop_queue(info->rq);
 	/* No more gnttab callback work. */
 	gnttab_cancel_free_callback(&info->callback);
-	spin_unlock_irq(&blkif_io_lock);
+	spin_unlock_irq(&info->io_lock);
 
 	/* Flush gnttab callback work. Must be done with no locks held. */
 	flush_scheduled_work();
@@ -619,21 +679,20 @@ static void blkif_completion(struct blk_shadow *s)
 		gnttab_end_foreign_access(s->req.seg[i].gref, 0, 0UL);
 }
 
-static irqreturn_t blkif_interrupt(int irq, void *dev_id)
+static void
+blkif_do_interrupt(unsigned long data)
 {
+	struct blkfront_info *info = (struct blkfront_info *)data;
 	struct request *req;
 	struct blkif_response *bret;
 	RING_IDX i, rp;
 	unsigned long flags;
-	struct blkfront_info *info = (struct blkfront_info *)dev_id;
 	int error;
 
-	spin_lock_irqsave(&blkif_io_lock, flags);
+	spin_lock_irqsave(&info->io_lock, flags);
 
-	if (unlikely(info->connected != BLKIF_STATE_CONNECTED)) {
-		spin_unlock_irqrestore(&blkif_io_lock, flags);
-		return IRQ_HANDLED;
-	}
+	if (unlikely(info->connected != BLKIF_STATE_CONNECTED))
+		goto out;
 
  again:
 	rp = info->ring.sring->rsp_prod;
@@ -657,7 +716,7 @@ static irqreturn_t blkif_interrupt(int irq, void *dev_id)
 				printk(KERN_WARNING "blkfront: %s: write barrier op failed\n",
 				       info->gd->disk_name);
 				error = -EOPNOTSUPP;
-				info->feature_barrier = 0;
+				info->feature_barrier = QUEUE_ORDERED_NONE;
 				xlvbd_barrier(info);
 			}
 			/* fall through */
@@ -686,7 +745,17 @@ static irqreturn_t blkif_interrupt(int irq, void *dev_id)
 
 	kick_pending_request_queues(info);
 
-	spin_unlock_irqrestore(&blkif_io_lock, flags);
+out:
+	spin_unlock_irqrestore(&info->io_lock, flags);
+}
+
+
+static irqreturn_t
+blkif_interrupt(int irq, void *dev_id)
+{
+	struct blkfront_info *info = (struct blkfront_info *)dev_id;
+
+	tasklet_schedule(&info->tasklet);
 
 	return IRQ_HANDLED;
 }
@@ -852,6 +921,8 @@ static int blkfront_probe(struct xenbus_device *dev,
 	info->vdevice = vdevice;
 	info->connected = BLKIF_STATE_DISCONNECTED;
 	INIT_WORK(&info->work, blkif_restart_queue);
+	spin_lock_init(&info->io_lock);
+	tasklet_init(&info->tasklet, blkif_do_interrupt, (unsigned long)info);
 
 	for (i = 0; i < BLK_RING_SIZE; i++)
 		info->shadow[i].req.id = i+1;
@@ -925,7 +996,7 @@ static int blkif_recover(struct blkfront_info *info)
 
 	xenbus_switch_state(info->xbdev, XenbusStateConnected);
 
-	spin_lock_irq(&blkif_io_lock);
+	spin_lock_irq(&info->io_lock);
 
 	/* Now safe for us to use the shared ring */
 	info->connected = BLKIF_STATE_CONNECTED;
@@ -936,7 +1007,7 @@ static int blkif_recover(struct blkfront_info *info)
 	/* Kick any other new requests queued since we resumed */
 	kick_pending_request_queues(info);
 
-	spin_unlock_irq(&blkif_io_lock);
+	spin_unlock_irq(&info->io_lock);
 
 	return 0;
 }
@@ -1011,6 +1082,7 @@ static void blkfront_connect(struct blkfront_info *info)
 	unsigned long sector_size;
 	unsigned int binfo;
 	int err;
+	int barrier;
 
 	switch (info->connected) {
 	case BLKIF_STATE_CONNECTED:
@@ -1051,10 +1123,26 @@ static void blkfront_connect(struct blkfront_info *info)
 	}
 
 	err = xenbus_gather(XBT_NIL, info->xbdev->otherend,
-			    "feature-barrier", "%lu", &info->feature_barrier,
+			    "feature-barrier", "%lu", &barrier,
 			    NULL);
+
+	/*
+	 * If there's no "feature-barrier" defined, then it means
+	 * we're dealing with a very old backend which writes
+	 * synchronously; draining will do what needs to get done.
+	 *
+	 * If there are barriers, then we can do full queued writes
+	 * with tagged barriers.
+	 *
+	 * If barriers are not supported, then there's no much we can
+	 * do, so just set ordering to NONE.
+	 */
 	if (err)
-		info->feature_barrier = 0;
+		info->feature_barrier = QUEUE_ORDERED_DRAIN;
+	else if (barrier)
+		info->feature_barrier = QUEUE_ORDERED_TAG;
+	else
+		info->feature_barrier = QUEUE_ORDERED_NONE;
 
 	err = xlvbd_alloc_gendisk(sectors, info, binfo, sector_size);
 	if (err) {
@@ -1066,10 +1154,10 @@ static void blkfront_connect(struct blkfront_info *info)
 	xenbus_switch_state(info->xbdev, XenbusStateConnected);
 
 	/* Kick pending requests. */
-	spin_lock_irq(&blkif_io_lock);
+	spin_lock_irq(&info->io_lock);
 	info->connected = BLKIF_STATE_CONNECTED;
 	kick_pending_request_queues(info);
-	spin_unlock_irq(&blkif_io_lock);
+	spin_unlock_irq(&info->io_lock);
 
 	add_disk(info->gd);
 
