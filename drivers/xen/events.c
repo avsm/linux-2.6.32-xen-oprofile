@@ -556,7 +556,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 		irq = find_unbound_irq();
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-				      handle_level_irq, name);
+				      handle_edge_irq, name);
 
 	irq_info[irq] = mk_pirq_info(0, gsi);
  	irq_info[irq].u.pirq.flags |= shareable ? PIRQ_SHAREABLE : 0;
@@ -644,7 +644,7 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 	irq_info[irq] = mk_pirq_info(0, map_irq.pirq);
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-			handle_level_irq,
+			handle_edge_irq,
 			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
 
 out:
