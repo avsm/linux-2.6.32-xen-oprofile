@@ -126,8 +126,8 @@ static inline unsigned long *cpu_evtchn_mask(int cpu)
 #define VALID_EVTCHN(chn)	((chn) != 0)
 
 static struct irq_chip xen_dynamic_chip;
-static struct irq_chip xen_pirq_chip;
 static struct irq_chip xen_percpu_chip;
+static struct irq_chip xen_pirq_chip;
 
 /* Constructor for packed IRQ information. */
 static struct irq_info mk_unbound_info(void)
@@ -598,7 +598,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 		irq = find_unbound_irq();
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-				      handle_level_irq, name);
+				      handle_edge_irq, name);
 
 	irq_op.irq = gsi;
 	irq_op.vector = 0;
@@ -707,7 +707,7 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		irq_info[irq].u.pirq.domid = domid;
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-			handle_level_irq,
+			handle_edge_irq,
 			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
 
 out:
@@ -1471,7 +1471,7 @@ void __init xen_init_IRQ(void)
 	irq_info = kcalloc(nr_irqs, sizeof(*irq_info), GFP_KERNEL);
 
 	evtchn_to_irq = kcalloc(NR_EVENT_CHANNELS, sizeof(*evtchn_to_irq),
-				    GFP_KERNEL);
+				GFP_KERNEL);
 	for(i = 0; i < NR_EVENT_CHANNELS; i++)
 		evtchn_to_irq[i] = -1;
 
