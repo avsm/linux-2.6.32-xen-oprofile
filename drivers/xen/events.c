@@ -126,6 +126,7 @@ static inline unsigned long *cpu_evtchn_mask(int cpu)
 #define VALID_EVTCHN(chn)	((chn) != 0)
 
 static struct irq_chip xen_dynamic_chip;
+static struct irq_chip xen_percpu_chip;
 static struct irq_chip xen_pirq_chip;
 
 /* Constructor for packed IRQ information. */
@@ -597,7 +598,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 		irq = find_unbound_irq();
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-				      handle_level_irq, name);
+				      handle_edge_irq, name);
 
 	irq_op.irq = gsi;
 	irq_op.vector = 0;
@@ -653,6 +654,7 @@ out:
 	return rc;
 }
 
+#ifdef CONFIG_PCI_XEN
 int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 {
 	int irq = 0;
@@ -706,13 +708,14 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		irq_info[irq].u.pirq.domid = domid;
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-			handle_level_irq,
+			handle_edge_irq,
 			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
 
 out:
 	spin_unlock(&irq_mapping_update_lock);
 	return irq;
 }
+#endif
 #endif
 
 int xen_vector_from_irq(unsigned irq)
@@ -738,7 +741,7 @@ int bind_evtchn_to_irq(unsigned int evtchn)
 		irq = find_unbound_irq();
 
 		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_level_irq, "event");
+					      handle_edge_irq, "event");
 
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_evtchn_info(evtchn);
@@ -764,8 +767,8 @@ static int bind_ipi_to_irq(unsigned int ipi, unsigned int cpu)
 		if (irq < 0)
 			goto out;
 
-		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_level_irq, "ipi");
+		set_irq_chip_and_handler_name(irq, &xen_percpu_chip,
+					      handle_percpu_irq, "ipi");
 
 		bind_ipi.vcpu = cpu;
 		if (HYPERVISOR_event_channel_op(EVTCHNOP_bind_ipi,
@@ -820,8 +823,8 @@ int bind_virq_to_irq(unsigned int virq, unsigned int cpu)
 
 		irq = find_unbound_irq();
 
-		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_level_irq, "virq");
+		set_irq_chip_and_handler_name(irq, &xen_percpu_chip,
+					      handle_percpu_irq, "virq");
 
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_virq_info(evtchn, virq);
@@ -1384,6 +1387,16 @@ static struct irq_chip xen_dynamic_chip __read_mostly = {
 	.retrigger	= retrigger_dynirq,
 };
 
+static struct irq_chip xen_percpu_chip __read_mostly = {
+	.name		= "xen-percpu",
+
+	.disable	= disable_dynirq,
+	.mask		= disable_dynirq,
+	.unmask		= enable_dynirq,
+
+	.ack		= ack_dynirq,
+};
+
 static struct irq_chip xen_pirq_chip __read_mostly = {
 	.name		= "xen-pirq",
 
@@ -1460,7 +1473,7 @@ void __init xen_init_IRQ(void)
 	irq_info = kcalloc(nr_irqs, sizeof(*irq_info), GFP_KERNEL);
 
 	evtchn_to_irq = kcalloc(NR_EVENT_CHANNELS, sizeof(*evtchn_to_irq),
-				    GFP_KERNEL);
+				GFP_KERNEL);
 	for(i = 0; i < NR_EVENT_CHANNELS; i++)
 		evtchn_to_irq[i] = -1;
 
