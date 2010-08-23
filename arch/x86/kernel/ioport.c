@@ -119,11 +119,10 @@ static int do_iopl(unsigned int level, struct pt_regs *regs)
 	return 0;
 }
 
-#ifdef CONFIG_X86_32
-long sys_iopl(struct pt_regs *regs)
+asmlinkage long sys_iopl(unsigned int level)
 {
-	unsigned int level = regs->bx;
 	struct thread_struct *t = &current->thread;
+	struct pt_regs *regs = task_pt_regs(current);
 	int rc;
 
 	rc = do_iopl(level, regs);
@@ -135,9 +134,3 @@ long sys_iopl(struct pt_regs *regs)
 out:
 	return rc;
 }
-#else
-asmlinkage long sys_iopl(unsigned int level, struct pt_regs *regs)
-{
-	return do_iopl(level, regs);
-}
-#endif

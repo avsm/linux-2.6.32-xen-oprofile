@@ -147,13 +147,25 @@ void smp_invalidate_interrupt(struct pt_regs *regs)
 		 * BUG();
 		 */
 
-	if (f->flush_mm == percpu_read(cpu_tlbstate.active_mm)) {
-		if (percpu_read(cpu_tlbstate.state) == TLBSTATE_OK) {
+	if (f->flush_mm == NULL ||
+	    f->flush_mm == percpu_read(cpu_tlbstate.active_mm)) {
+		int tlbstate = percpu_read(cpu_tlbstate.state);
+
+		/*
+		 * flush_mm == NULL means flush everything, including
+		 * global tlbs, which will only happen when flushing
+		 * kernel mappings.
+		 */
+		if (f->flush_mm == NULL)
+			__flush_tlb_all();
+		else if (tlbstate == TLBSTATE_OK) {
 			if (f->flush_va == TLB_FLUSH_ALL)
 				local_flush_tlb();
 			else
 				__flush_tlb_one(f->flush_va);
-		} else
+		}
+
+		if (tlbstate == TLBSTATE_LAZY)
 			leave_mm(cpu);
 	}
 out:
@@ -217,16 +229,13 @@ void native_flush_tlb_others(const struct cpumask *cpumask,
 	flush_tlb_others_ipi(cpumask, mm, va);
 }
 
-static int __cpuinit init_smp_flush(void)
+void __init init_smp_flush(void)
 {
 	int i;
 
 	for (i = 0; i < ARRAY_SIZE(flush_state); i++)
 		spin_lock_init(&flush_state[i].tlbstate_lock);
-
-	return 0;
 }
-core_initcall(init_smp_flush);
 
 void flush_tlb_current_task(void)
 {
@@ -275,16 +284,16 @@ void flush_tlb_page(struct vm_area_struct *vma, unsigned long va)
 	preempt_enable();
 }
 
-static void do_flush_tlb_all(void *info)
+void flush_tlb_all(void)
 {
-	unsigned long cpu = smp_processor_id();
+	/* flush_tlb_others expects preempt to be disabled */
+	int cpu = get_cpu();
+
+	flush_tlb_others(cpu_online_mask, NULL, TLB_FLUSH_ALL);
 
 	__flush_tlb_all();
 	if (percpu_read(cpu_tlbstate.state) == TLBSTATE_LAZY)
 		leave_mm(cpu);
-}
 
-void flush_tlb_all(void)
-{
-	on_each_cpu(do_flush_tlb_all, NULL, 1);
+	put_cpu();
 }

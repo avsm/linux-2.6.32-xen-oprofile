@@ -48,9 +48,11 @@
 #include <asm/traps.h>
 #include <asm/setup.h>
 #include <asm/desc.h>
+#include <asm/pgalloc.h>
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 #include <asm/reboot.h>
+#include <asm/stackprotector.h>
 
 #include "xen-ops.h"
 #include "mmu.h"
@@ -92,6 +94,14 @@ struct shared_info *HYPERVISOR_shared_info = (void *)&xen_dummy_shared_info;
  */
 static int have_vcpu_info_placement = 1;
 
+static void clamp_max_cpus(void)
+{
+#ifdef CONFIG_SMP
+	if (setup_max_cpus > MAX_VIRT_CPUS)
+		setup_max_cpus = MAX_VIRT_CPUS;
+#endif
+}
+
 static void xen_vcpu_setup(int cpu)
 {
 	struct vcpu_register_vcpu_info info;
@@ -99,13 +109,17 @@ static void xen_vcpu_setup(int cpu)
 	struct vcpu_info *vcpup;
 
 	BUG_ON(HYPERVISOR_shared_info == &xen_dummy_shared_info);
-	per_cpu(xen_vcpu, cpu) = &HYPERVISOR_shared_info->vcpu_info[cpu];
 
-	if (!have_vcpu_info_placement)
-		return;		/* already tested, not available */
+	if (cpu < MAX_VIRT_CPUS)
+		per_cpu(xen_vcpu,cpu) = &HYPERVISOR_shared_info->vcpu_info[cpu];
+
+	if (!have_vcpu_info_placement) {
+		if (cpu >= MAX_VIRT_CPUS)
+			clamp_max_cpus();
+		return;
+	}
 
 	vcpup = &per_cpu(xen_vcpu_info, cpu);
-
 	info.mfn = arbitrary_virt_to_mfn(vcpup);
 	info.offset = offset_in_page(vcpup);
 
@@ -120,6 +134,7 @@ static void xen_vcpu_setup(int cpu)
 	if (err) {
 		printk(KERN_DEBUG "register_vcpu_info failed: err=%d\n", err);
 		have_vcpu_info_placement = 0;
+		clamp_max_cpus();
 	} else {
 		/* This cpu is using the registered vcpu info, even if
 		   later ones fail to. */
@@ -137,24 +152,23 @@ static void xen_vcpu_setup(int cpu)
  */
 void xen_vcpu_restore(void)
 {
-	if (have_vcpu_info_placement) {
-		int cpu;
+	int cpu;
 
-		for_each_online_cpu(cpu) {
-			bool other_cpu = (cpu != smp_processor_id());
+	for_each_online_cpu(cpu) {
+		bool other_cpu = (cpu != smp_processor_id());
 
-			if (other_cpu &&
-			    HYPERVISOR_vcpu_op(VCPUOP_down, cpu, NULL))
-				BUG();
+		if (other_cpu &&
+		    HYPERVISOR_vcpu_op(VCPUOP_down, cpu, NULL))
+			BUG();
 
+		xen_setup_runstate_info(cpu);
+
+		if (have_vcpu_info_placement)
 			xen_vcpu_setup(cpu);
 
-			if (other_cpu &&
-			    HYPERVISOR_vcpu_op(VCPUOP_up, cpu, NULL))
-				BUG();
-		}
-
-		BUG_ON(!have_vcpu_info_placement);
+		if (other_cpu &&
+		    HYPERVISOR_vcpu_op(VCPUOP_up, cpu, NULL))
+			BUG();
 	}
 }
 
@@ -173,10 +187,12 @@ static void __init xen_banner(void)
 
 static __read_mostly unsigned int cpuid_leaf1_edx_mask = ~0;
 static __read_mostly unsigned int cpuid_leaf1_ecx_mask = ~0;
+static __read_mostly unsigned int cpuid_leaf81_edx_mask = ~0;
 
 static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 		      unsigned int *cx, unsigned int *dx)
 {
+	unsigned maskebx = ~0;
 	unsigned maskecx = ~0;
 	unsigned maskedx = ~0;
 
@@ -184,9 +200,20 @@ static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 	 * Mask out inconvenient features, to try and disable as many
 	 * unsupported kernel subsystems as possible.
 	 */
-	if (*ax == 1) {
+	switch (*ax) {
+	case 0x1:
 		maskecx = cpuid_leaf1_ecx_mask;
 		maskedx = cpuid_leaf1_edx_mask;
+		break;
+
+	case 0xb:
+		/* Suppress extended topology stuff */
+		maskebx = 0;
+		break;
+
+	case 0x80000001:
+		maskedx = cpuid_leaf81_edx_mask;
+		break;
 	}
 
 	asm(XEN_EMULATE_PREFIX "cpuid"
@@ -196,6 +223,7 @@ static void xen_cpuid(unsigned int *ax, unsigned int *bx,
 		  "=d" (*dx)
 		: "0" (*ax), "2" (*cx));
 
+	*bx &= maskebx;
 	*cx &= maskecx;
 	*dx &= maskedx;
 }
@@ -209,12 +237,15 @@ static __init void xen_init_cpuid_mask(void)
 		  (1 << X86_FEATURE_MCA)  |  /* disable MCA */
 		  (1 << X86_FEATURE_ACC));   /* thermal monitoring */
 
+	cpuid_leaf81_edx_mask = ~(1 << (X86_FEATURE_GBPAGES % 32));
+
 	if (!xen_initial_domain())
 		cpuid_leaf1_edx_mask &=
 			~((1 << X86_FEATURE_APIC) |  /* disable local APIC */
 			  (1 << X86_FEATURE_ACPI));  /* disable ACPI */
 
 	ax = 1;
+	cx = 0;
 	xen_cpuid(&ax, &bx, &cx, &dx);
 
 	/* cpuid claims we support xsave; try enabling it to see what happens */
@@ -329,18 +360,28 @@ static void xen_load_gdt(const struct desc_ptr *dtr)
 	unsigned long frames[pages];
 	int f;
 
-	/* A GDT can be up to 64k in size, which corresponds to 8192
-	   8-byte entries, or 16 4k pages.. */
+	/* 
+	 * A GDT can be up to 64k in size, which corresponds to 8192
+	 * 8-byte entries, or 16 4k pages..
+	 */
 
 	BUG_ON(size > 65536);
 	BUG_ON(va & ~PAGE_MASK);
 
 	for (f = 0; va < dtr->address + size; va += PAGE_SIZE, f++) {
 		int level;
-		pte_t *ptep = lookup_address(va, &level);
+		pte_t *ptep;
 		unsigned long pfn, mfn;
 		void *virt;
 
+		/*
+		 * The GDT is per-cpu and is in the percpu data area.
+		 * That can be virtually mapped, so we need to do a
+		 * page-walk to get the underlying MFN for the
+		 * hypercall.  The page can also be in the kernel's
+		 * linear range, so we need to RO that mapping too.
+		 */
+		ptep = lookup_address(va, &level);
 		BUG_ON(ptep == NULL);
 
 		pfn = pte_pfn(*ptep);
@@ -351,6 +392,44 @@ static void xen_load_gdt(const struct desc_ptr *dtr)
 
 		make_lowmem_page_readonly((void *)va);
 		make_lowmem_page_readonly(virt);
+	}
+
+	if (HYPERVISOR_set_gdt(frames, size / sizeof(struct desc_struct)))
+		BUG();
+}
+
+/* 
+ * load_gdt for early boot, when the gdt is only mapped once
+ */
+static __init void xen_load_gdt_boot(const struct desc_ptr *dtr)
+{
+	unsigned long va = dtr->address;
+	unsigned int size = dtr->size + 1;
+	unsigned pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+	unsigned long frames[pages];
+	int f;
+
+	/* 
+	 * A GDT can be up to 64k in size, which corresponds to 8192
+	 * 8-byte entries, or 16 4k pages..
+	 */
+
+	BUG_ON(size > 65536);
+	BUG_ON(va & ~PAGE_MASK);
+
+	for (f = 0; va < dtr->address + size; va += PAGE_SIZE, f++) {
+		pte_t pte;
+		unsigned long pfn, mfn;
+
+		pfn = virt_to_pfn(va);
+		mfn = pfn_to_mfn(pfn);
+
+		pte = pfn_pte(pfn, PAGE_KERNEL_RO);
+
+		if (HYPERVISOR_update_va_mapping(va, pte, 0))
+			BUG();
+
+		frames[f] = mfn;
 	}
 
 	if (HYPERVISOR_set_gdt(frames, size / sizeof(struct desc_struct)))
@@ -460,11 +539,10 @@ static int cvt_gate_to_trap(int vector, const gate_desc *val,
 	} else if (addr == (unsigned long)machine_check) {
 		return 0;
 #endif
-	} else {
-		/* Some other trap using IST? */
-		if (WARN_ON(val->ist != 0))
-			return 0;
-	}
+	} else if (WARN(val->ist != 0,
+			"Unknown IST-using trap: vector %d, %pF, val->ist=%d\n",
+			vector, (void *)addr, val->ist))
+		return 0;
 #endif	/* CONFIG_X86_64 */
 	info->address = addr;
 
@@ -580,6 +658,29 @@ static void xen_write_gdt_entry(struct desc_struct *dt, int entry,
 	preempt_enable();
 }
 
+/* 
+ * Version of write_gdt_entry for use at early boot-time needed to
+ * update an entry as simply as possible.
+ */
+static __init void xen_write_gdt_entry_boot(struct desc_struct *dt, int entry,
+					    const void *desc, int type)
+{
+	switch (type) {
+	case DESC_LDT:
+	case DESC_TSS:
+		/* ignore */
+		break;
+
+	default: {
+		xmaddr_t maddr = virt_to_machine(&dt[entry]);
+
+		if (HYPERVISOR_update_descriptor(maddr.maddr, *(u64 *)desc))
+			dt[entry] = *(struct desc_struct *)desc;
+	}
+
+	}	
+}
+
 static void xen_load_sp0(struct tss_struct *tss,
 			 struct thread_struct *thread)
 {
@@ -634,7 +735,7 @@ static u32 xen_safe_apic_wait_icr_idle(void)
         return 0;
 }
 
-static void set_xen_basic_apic_ops(void)
+static __init void set_xen_basic_apic_ops(void)
 {
 	apic->read = xen_apic_read;
 	apic->write = xen_apic_write;
@@ -645,7 +746,6 @@ static void set_xen_basic_apic_ops(void)
 }
 
 #endif
-
 
 static void xen_clts(void)
 {
@@ -846,15 +946,6 @@ static const struct pv_init_ops xen_init_ops __initdata = {
 	.post_allocator_init = xen_post_allocator_init,
 };
 
-static const struct pv_time_ops xen_time_ops __initdata = {
-	.time_init = xen_time_init,
-
-	.set_wallclock = xen_set_wallclock,
-	.get_wallclock = xen_get_wallclock,
-	.get_tsc_khz = xen_tsc_khz,
-	.sched_clock = xen_sched_clock,
-};
-
 static const struct pv_cpu_ops xen_cpu_ops __initdata = {
 	.cpuid = xen_cpuid,
 
@@ -955,6 +1046,23 @@ static void xen_crash_shutdown(struct pt_regs *regs)
 	xen_reboot(SHUTDOWN_crash);
 }
 
+static int
+xen_panic_event(struct notifier_block *this, unsigned long event, void *ptr)
+{
+	xen_reboot(SHUTDOWN_crash);
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block xen_panic_block = {
+	.notifier_call= xen_panic_event,
+};
+
+int xen_panic_handler_init(void)
+{
+	atomic_notifier_chain_register(&panic_notifier_list, &xen_panic_block);
+	return 0;
+}
+
 static const struct machine_ops __initdata xen_machine_ops = {
 	.restart = xen_restart,
 	.halt = xen_machine_halt,
@@ -963,6 +1071,23 @@ static const struct machine_ops __initdata xen_machine_ops = {
 	.crash_shutdown = xen_crash_shutdown,
 	.emergency_restart = xen_emergency_restart,
 };
+
+/* 
+ * Set up the GDT and segment registers for -fstack-protector.  Until
+ * we do this, we have to be careful not to call any stack-protected
+ * function, which is most of the kernel.
+ */
+static void __init xen_setup_stackprotector(void)
+{
+	pv_cpu_ops.write_gdt_entry = xen_write_gdt_entry_boot;
+	pv_cpu_ops.load_gdt = xen_load_gdt_boot;
+
+	setup_stack_canary_segment(0);
+	switch_to_new_gdt(0);
+
+	pv_cpu_ops.write_gdt_entry = xen_write_gdt_entry;       
+	pv_cpu_ops.load_gdt = xen_load_gdt;
+}
 
 /* First C function to be called on Xen boot */
 asmlinkage void __init xen_start_kernel(void)
@@ -974,14 +1099,9 @@ asmlinkage void __init xen_start_kernel(void)
 
 	xen_domain_type = XEN_PV_DOMAIN;
 
-	BUG_ON(memcmp(xen_start_info->magic, "xen-3", 5) != 0);
-
-	xen_setup_features();
-
 	/* Install Xen paravirt ops */
 	pv_info = xen_info;
 	pv_init_ops = xen_init_ops;
-	pv_time_ops = xen_time_ops;
 	pv_cpu_ops = xen_cpu_ops;
 	pv_apic_ops = xen_apic_ops;
 	pv_mmu_ops = xen_mmu_ops;
@@ -990,8 +1110,43 @@ asmlinkage void __init xen_start_kernel(void)
 	nr_dynamic_irqs += 256;
 #endif
 
-	xen_init_irq_ops();
+	xen_init_time_ops();
 
+	/*
+	 * Prevent page tables from being allocated in highmem, even
+	 * if CONFIG_HIGHPTE is enabled.
+	 */
+	__userpte_alloc_gfp &= ~__GFP_HIGHMEM;
+
+	/* 
+	 * Set up some pagetable state before starting to set any ptes.
+	 */
+
+	/* Prevent unwanted bits from being set in PTEs. */
+	__supported_pte_mask &= ~_PAGE_GLOBAL;
+	if (!xen_initial_domain())
+		__supported_pte_mask &= ~(_PAGE_PWT | _PAGE_PCD);
+
+	__supported_pte_mask |= _PAGE_IOMAP;
+
+#ifdef CONFIG_X86_64
+	/* Work out if we support NX */
+	check_efer();
+#endif
+
+	xen_setup_features();
+
+	/* Get mfn list */
+	if (!xen_feature(XENFEAT_auto_translated_physmap))
+		xen_build_dynamic_phys_to_machine();
+
+	/* 
+	 * Set up kernel GDT and segment registers, mainly so that
+	 * -fstack-protector code can be executed.
+	 */
+	xen_setup_stackprotector();
+
+	xen_init_irq_ops();
 	xen_init_cpuid_mask();
 
 #ifdef CONFIG_X86_LOCAL_APIC
@@ -1008,13 +1163,6 @@ asmlinkage void __init xen_start_kernel(void)
 
 	machine_ops = xen_machine_ops;
 
-#ifdef CONFIG_X86_64
-	/*
-	 * Setup percpu state.  We only need to do this for 64-bit
-	 * because 32-bit already has %fs set properly.
-	 */
-	load_percpu_segment(0);
-#endif
 	/*
 	 * The only reliable way to retain the initial address of the
 	 * percpu gdt_page is to remember it here, so we can go and
@@ -1024,21 +1172,7 @@ asmlinkage void __init xen_start_kernel(void)
 
 	xen_smp_init();
 
-	/* Get mfn list */
-	if (!xen_feature(XENFEAT_auto_translated_physmap))
-		xen_build_dynamic_phys_to_machine();
-
 	pgd = (pgd_t *)xen_start_info->pt_base;
-
-	/* Prevent unwanted bits from being set in PTEs. */
-	__supported_pte_mask &= ~_PAGE_GLOBAL;
-	if (!xen_initial_domain())
-		__supported_pte_mask &= ~(_PAGE_PWT | _PAGE_PCD);
-
-#ifdef CONFIG_X86_64
-	/* Work out if we support NX */
-	check_efer();
-#endif
 
 	/* Don't do the full vcpu_info placement stuff until we have a
 	   possible map and a non-dummy shared_info. */
@@ -1068,6 +1202,7 @@ asmlinkage void __init xen_start_kernel(void)
 	/* set up basic CPUID stuff */
 	cpu_detect(&new_cpu_data);
 	new_cpu_data.hard_math = 1;
+	new_cpu_data.wp_works_ok = 1;
 	new_cpu_data.x86_capability[0] = cpuid_edx(1);
 #endif
 
@@ -1085,6 +1220,8 @@ asmlinkage void __init xen_start_kernel(void)
 	}
 
 	xen_raw_console_write("about to get started...\n");
+
+	xen_setup_runstate_info(0);
 
 	/* Start the world */
 #ifdef CONFIG_X86_32

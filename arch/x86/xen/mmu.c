@@ -185,7 +185,7 @@ static inline unsigned p2m_index(unsigned long pfn)
 }
 
 /* Build the parallel p2m_top_mfn structures */
-static void __init xen_build_mfn_list_list(void)
+void xen_build_mfn_list_list(void)
 {
 	unsigned pfn, idx;
 
@@ -1285,12 +1285,19 @@ static void xen_flush_tlb_single(unsigned long addr)
 	preempt_enable();
 }
 
+/*
+ * Flush tlb on other cpus.  Xen can do this via a single hypercall
+ * rather than explicit IPIs, which has the nice property of avoiding
+ * any cpus which don't actually have dirty tlbs.  Unfortunately it
+ * doesn't give us an opportunity to kick out cpus which are in lazy
+ * tlb state, so we may end up reflushing some cpus unnecessarily.
+ */
 static void xen_flush_tlb_others(const struct cpumask *cpus,
 				 struct mm_struct *mm, unsigned long va)
 {
 	struct {
 		struct mmuext_op op;
-		DECLARE_BITMAP(mask, NR_CPUS);
+		DECLARE_BITMAP(mask, num_processors);
 	} *args;
 	struct multicall_space mcs;
 
@@ -1429,13 +1436,14 @@ static void *xen_kmap_atomic_pte(struct page *page, enum km_type type)
 {
 	pgprot_t prot = PAGE_KERNEL;
 
+	/*
+	 * We disable highmem allocations for page tables so we should never
+	 * see any calls to kmap_atomic_pte on a highmem page.
+	 */
+	BUG_ON(PageHighMem(page));
+
 	if (PagePinned(page))
 		prot = PAGE_KERNEL_RO;
-
-	if (0 && PageHighMem(page))
-		printk("mapping highpte %lx type %d prot %s\n",
-		       page_to_pfn(page), type,
-		       (unsigned long)pgprot_val(prot) & _PAGE_RW ? "WRITE" : "READ");
 
 	return kmap_atomic_prot(page, type, prot);
 }
