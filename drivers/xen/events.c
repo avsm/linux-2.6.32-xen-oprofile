@@ -654,6 +654,7 @@ out:
 	return rc;
 }
 
+#ifdef CONFIG_PCI_XEN
 int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 {
 	int irq = 0;
@@ -714,6 +715,7 @@ out:
 	spin_unlock(&irq_mapping_update_lock);
 	return irq;
 }
+#endif
 #endif
 
 int xen_vector_from_irq(unsigned irq)
