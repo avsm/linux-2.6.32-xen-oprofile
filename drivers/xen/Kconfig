@@ -191,7 +191,7 @@ config ACPI_PROCESSOR_XEN
 
 config XEN_PLATFORM_PCI
 	tristate "xen platform pci device driver"
-	depends on XEN
+	depends on XEN_PVHVM
 	default m
 	help
 	  Driver for the Xen PCI Platform device: it is responsible for

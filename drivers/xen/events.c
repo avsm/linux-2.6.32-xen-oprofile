@@ -377,7 +377,6 @@ static int find_unbound_irq(void)
 	int irq;
 	struct irq_desc *desc;
 	int start = get_nr_hw_irqs();
-	void *chip_data;
 
 	if (start == nr_irqs)
 		goto no_irqs;
@@ -403,10 +402,7 @@ static int find_unbound_irq(void)
 	if (WARN_ON(desc == NULL))
 		return -1;
 
-	/* save and restore chip_data */
-	chip_data = desc->chip_data;
-	dynamic_irq_init(irq);
-	desc->chip_data = chip_data;
+	dynamic_irq_init_keep_chip_data(irq);
 
 	return irq;
 
@@ -1425,21 +1421,7 @@ int xen_set_callback_via(uint64_t via)
 }
 EXPORT_SYMBOL_GPL(xen_set_callback_via);
 
-void smp_xen_hvm_callback_vector(struct pt_regs *regs)
-{
-	struct pt_regs *old_regs = set_irq_regs(regs);
-
-	exit_idle();
-
-	irq_enter();
-
-	__xen_evtchn_do_upcall(regs);
-
-	irq_exit();
-
-	set_irq_regs(old_regs);
-}
-
+#ifdef CONFIG_XEN_PVHVM
 /* Vector callbacks are better than PCI interrupts to receive event
  * channel notifications because we can receive vector callbacks on any
  * vcpu and we don't need PCI support or APIC interactions. */
@@ -1461,6 +1443,9 @@ void xen_callback_vector(void)
 		alloc_intr_gate(XEN_HVM_EVTCHN_CALLBACK, xen_hvm_callback_vector);
 	}
 }
+#else
+void xen_callback_vector(void) {}
+#endif
 
 void __init xen_init_IRQ(void)
 {
