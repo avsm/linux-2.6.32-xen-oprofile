@@ -215,6 +215,26 @@ config NET_SCH_INGRESS
 	  To compile this code as a module, choose M here: the
 	  module will be called sch_ingress.
 
+config NET_SCH_PLUG
+	tristate "Plug network traffic until release"
+	---help---
+	  Say Y here if you are using this kernel for Xen dom0 and
+	  want to protect Xen guests with Remus.
+
+	  This queueing discipline is controlled by netlink. When it receives an
+	  enqueue command it inserts a plug into the outbound queue that causes
+	  following packets to enqueue until a dequeue command arrives over
+	  netlink, releasing packets up to the plug for delivery.
+
+	  Its intention is to support speculative execution by allowing generated
+	  network traffic to be rolled back. It is used to provide network
+	  protection for the Remus high availability project.
+
+	  If unsure, say N.
+
+	  To compile this code as a module, choose M here: the
+	  module will be called sch_plug.
+
 comment "Classification"
 
 config NET_CLS
