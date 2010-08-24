@@ -420,7 +420,7 @@ static bool identity_mapped_irq(unsigned irq)
 	return irq < get_nr_hw_irqs();
 }
 
-static void pirq_unmask_notify(int irq)
+static void pirq_eoi(int irq)
 {
 	struct irq_info *info = info_for_irq(irq);
 	struct physdev_eoi eoi = { .irq = info->u.pirq.gsi };
@@ -487,7 +487,7 @@ static unsigned int startup_pirq(unsigned int irq)
 
  out:
 	unmask_evtchn(evtchn);
-	pirq_unmask_notify(irq);
+	pirq_eoi(irq);
 
 	return 0;
 }
@@ -529,10 +529,9 @@ static void ack_pirq(unsigned int irq)
 
 	move_native_irq(irq);
 
-	if (VALID_EVTCHN(evtchn)) {
-		mask_evtchn(evtchn);
+	if (VALID_EVTCHN(evtchn))
 		clear_evtchn(evtchn);
-	}
+	pirq_eoi(irq);
 }
 
 static void end_pirq(unsigned int irq)
@@ -547,8 +546,7 @@ static void end_pirq(unsigned int irq)
 	    (IRQ_DISABLED|IRQ_PENDING)) {
 		shutdown_pirq(irq);
 	} else if (VALID_EVTCHN(evtchn)) {
-		unmask_evtchn(evtchn);
-		pirq_unmask_notify(irq);
+		pirq_eoi(irq);
 	}
 }
 
