@@ -40,7 +40,7 @@ extern unsigned long *machine_to_phys_mapping;
 extern unsigned int   machine_to_phys_order;
 
 extern unsigned long get_phys_to_machine(unsigned long pfn);
-extern void set_phys_to_machine(unsigned long pfn, unsigned long mfn);
+extern bool set_phys_to_machine(unsigned long pfn, unsigned long mfn);
 
 static inline unsigned long pfn_to_mfn(unsigned long pfn)
 {
