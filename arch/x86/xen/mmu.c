@@ -124,7 +124,8 @@ static inline void check_zero(void)
  * large enough to allocate page table pages to allocate the rest.
  * Each page can map 2MB.
  */
-static pte_t level1_ident_pgt[PTRS_PER_PTE * 4] __page_aligned_bss;
+#define LEVEL1_IDENT_ENTRIES	(PTRS_PER_PTE * 4)
+static RESERVE_BRK_ARRAY(pte_t, level1_ident_pgt, LEVEL1_IDENT_ENTRIES);
 
 #ifdef CONFIG_X86_64
 /* l3 pud for userspace vsyscall mapping */
@@ -155,49 +156,162 @@ DEFINE_PER_CPU(unsigned long, xen_current_cr3);	 /* actual vcpu cr3 */
  */
 #define USER_LIMIT	((STACK_TOP_MAX + PGDIR_SIZE - 1) & PGDIR_MASK)
 
+/*
+ * Xen leaves the responsibility for maintaining p2m mappings to the
+ * guests themselves, but it must also access and update the p2m array
+ * during suspend/resume when all the pages are reallocated.
+ *
+ * The p2m table is logically a flat array, but we implement it as a
+ * three-level tree to allow the address space to be sparse.
+ *
+ *                               Xen
+ *                                |
+ *     p2m_top              p2m_top_mfn
+ *       /  \                   /   \
+ * p2m_mid p2m_mid	p2m_mid_mfn p2m_mid_mfn
+ *    / \      / \         /           /
+ *  p2m p2m p2m p2m p2m p2m p2m ...
+ *
+ * The p2m_top and p2m_top_mfn levels are limited to 1 page, so the
+ * maximum representable pseudo-physical address space is:
+ *  P2M_TOP_PER_PAGE * P2M_MID_PER_PAGE * P2M_PER_PAGE pages
+ *
+ * P2M_PER_PAGE depends on the architecture, as a mfn is always
+ * unsigned long (8 bytes on 64-bit, 4 bytes on 32), leading to
+ * 512 and 1024 entries respectively. 
+ */
 
-#define P2M_ENTRIES_PER_PAGE	(PAGE_SIZE / sizeof(unsigned long))
-#define TOP_ENTRIES		(MAX_DOMAIN_PAGES / P2M_ENTRIES_PER_PAGE)
+static unsigned long max_p2m_pfn __read_mostly;
 
-/* Placeholder for holes in the address space */
-static unsigned long p2m_missing[P2M_ENTRIES_PER_PAGE] __page_aligned_data =
-		{ [ 0 ... P2M_ENTRIES_PER_PAGE-1 ] = ~0UL };
+#define P2M_PER_PAGE		(PAGE_SIZE / sizeof(unsigned long))
+#define P2M_MID_PER_PAGE	(PAGE_SIZE / sizeof(unsigned long *))
+#define P2M_TOP_PER_PAGE	(PAGE_SIZE / sizeof(unsigned long **))
 
- /* Array of pointers to pages containing p2m entries */
-static unsigned long *p2m_top[TOP_ENTRIES] __page_aligned_data =
-		{ [ 0 ... TOP_ENTRIES - 1] = &p2m_missing[0] };
+#define MAX_P2M_PFN		(P2M_TOP_PER_PAGE * P2M_MID_PER_PAGE * P2M_PER_PAGE)
 
-/* Arrays of p2m arrays expressed in mfns used for save/restore */
-static unsigned long p2m_top_mfn[TOP_ENTRIES] __page_aligned_bss;
+/* Placeholders for holes in the address space */
+static RESERVE_BRK_ARRAY(unsigned long, p2m_missing, P2M_PER_PAGE);
+static RESERVE_BRK_ARRAY(unsigned long *, p2m_mid_missing, P2M_MID_PER_PAGE);
+static RESERVE_BRK_ARRAY(unsigned long, p2m_mid_missing_mfn, P2M_MID_PER_PAGE);
 
-static unsigned long p2m_top_mfn_list[TOP_ENTRIES / P2M_ENTRIES_PER_PAGE]
-	__page_aligned_bss;
+static RESERVE_BRK_ARRAY(unsigned long **, p2m_top, P2M_TOP_PER_PAGE);
+static RESERVE_BRK_ARRAY(unsigned long, p2m_top_mfn, P2M_TOP_PER_PAGE);
+
+RESERVE_BRK(p2m_mid, PAGE_SIZE * (MAX_DOMAIN_PAGES / (P2M_PER_PAGE * P2M_MID_PER_PAGE)));
+RESERVE_BRK(p2m_mid_mfn, PAGE_SIZE * (MAX_DOMAIN_PAGES / (P2M_PER_PAGE * P2M_MID_PER_PAGE)));
 
 static inline unsigned p2m_top_index(unsigned long pfn)
 {
-	BUG_ON(pfn >= MAX_DOMAIN_PAGES);
-	return pfn / P2M_ENTRIES_PER_PAGE;
+	BUG_ON(pfn >= MAX_P2M_PFN);
+	return pfn / (P2M_MID_PER_PAGE * P2M_PER_PAGE);
+}
+
+static inline unsigned p2m_mid_index(unsigned long pfn)
+{
+	return (pfn / P2M_PER_PAGE) % P2M_MID_PER_PAGE;
 }
 
 static inline unsigned p2m_index(unsigned long pfn)
 {
-	return pfn % P2M_ENTRIES_PER_PAGE;
+	return pfn % P2M_PER_PAGE;
 }
 
-/* Build the parallel p2m_top_mfn structures */
+static void p2m_top_init(unsigned long ***top)
+{
+	unsigned i;
+
+	for (i = 0; i < P2M_TOP_PER_PAGE; i++)
+		top[i] = p2m_mid_missing;
+}
+
+static void p2m_top_mfn_init(unsigned long *top)
+{
+	unsigned i;
+
+	for (i = 0; i < P2M_TOP_PER_PAGE; i++)
+		top[i] = virt_to_mfn(p2m_mid_missing_mfn);
+}
+
+static void p2m_mid_init(unsigned long **mid)
+{
+	unsigned i;
+
+	for (i = 0; i < P2M_MID_PER_PAGE; i++)
+		mid[i] = p2m_missing;
+}
+
+static void p2m_mid_mfn_init(unsigned long *mid)
+{
+	unsigned i;
+
+	for (i = 0; i < P2M_MID_PER_PAGE; i++)
+		mid[i] = virt_to_mfn(p2m_missing);
+}
+
+static void p2m_init(unsigned long *p2m)
+{
+	unsigned i;
+
+	for (i = 0; i < P2M_MID_PER_PAGE; i++)
+		p2m[i] = INVALID_P2M_ENTRY;
+}
+
+/*
+ * Build the parallel p2m_top_mfn and p2m_mid_mfn structures
+ *
+ * This is called both at boot time, and after resuming from suspend:
+ * - At boot time we're called very early, and must use extend_brk()
+ *   to allocate memory.
+ *
+ * - After resume we're called from within stop_machine, but the mfn
+ *   tree should alreay be completely allocated.
+ */
 void xen_build_mfn_list_list(void)
 {
-	unsigned pfn, idx;
+	unsigned pfn;
 
-	for (pfn = 0; pfn < MAX_DOMAIN_PAGES; pfn += P2M_ENTRIES_PER_PAGE) {
-		unsigned topidx = p2m_top_index(pfn);
+	/* Pre-initialize p2m_top_mfn to be completely missing */
+	if (p2m_top_mfn == NULL) {
+		p2m_mid_missing_mfn = extend_brk(PAGE_SIZE, PAGE_SIZE);
+		p2m_mid_mfn_init(p2m_mid_missing_mfn);
 
-		p2m_top_mfn[topidx] = virt_to_mfn(p2m_top[topidx]);
+		p2m_top_mfn = extend_brk(PAGE_SIZE, PAGE_SIZE);
+		p2m_top_mfn_init(p2m_top_mfn);
 	}
 
-	for (idx = 0; idx < ARRAY_SIZE(p2m_top_mfn_list); idx++) {
-		unsigned topidx = idx * P2M_ENTRIES_PER_PAGE;
-		p2m_top_mfn_list[idx] = virt_to_mfn(&p2m_top_mfn[topidx]);
+	for (pfn = 0; pfn < max_p2m_pfn; pfn += P2M_PER_PAGE) {
+		unsigned topidx = p2m_top_index(pfn);
+		unsigned mididx = p2m_mid_index(pfn);
+		unsigned long **mid;
+		unsigned long mid_mfn;
+		unsigned long *mid_mfn_p;
+
+		mid = p2m_top[topidx];
+
+		/* Don't bother allocating any mfn mid levels if
+		   they're just missing */
+		if (mid[mididx] == p2m_missing)
+			continue;
+
+		mid_mfn = p2m_top_mfn[topidx];
+		mid_mfn_p = mfn_to_virt(mid_mfn);
+
+		if (mid_mfn_p == p2m_mid_missing_mfn) {
+			/*
+			 * XXX boot-time only!  We should never find
+			 * missing parts of the mfn tree after
+			 * runtime.  extend_brk() will BUG if we call
+			 * it too late.
+			 */
+			mid_mfn_p = extend_brk(PAGE_SIZE, PAGE_SIZE);
+			p2m_mid_mfn_init(mid_mfn_p);
+
+			mid_mfn = virt_to_mfn(mid_mfn_p);
+			
+			p2m_top_mfn[topidx] = mid_mfn;
+		}
+
+		mid_mfn_p[mididx] = virt_to_mfn(mid[mididx]);
 	}
 }
 
@@ -206,8 +320,8 @@ void xen_setup_mfn_list_list(void)
 	BUG_ON(HYPERVISOR_shared_info == &xen_dummy_shared_info);
 
 	HYPERVISOR_shared_info->arch.pfn_to_mfn_frame_list_list =
-		virt_to_mfn(p2m_top_mfn_list);
-	HYPERVISOR_shared_info->arch.max_pfn = xen_start_info->nr_pages;
+		virt_to_mfn(p2m_top_mfn);
+	HYPERVISOR_shared_info->arch.max_pfn = max_p2m_pfn;
 }
 
 /* Set up p2m_top to point to the domain-builder provided p2m pages */
@@ -217,96 +331,168 @@ void __init xen_build_dynamic_phys_to_machine(void)
 	unsigned long max_pfn = min(MAX_DOMAIN_PAGES, xen_start_info->nr_pages);
 	unsigned pfn;
 
-	for (pfn = 0; pfn < max_pfn; pfn += P2M_ENTRIES_PER_PAGE) {
+	max_p2m_pfn = max_pfn;
+
+	p2m_missing = extend_brk(PAGE_SIZE, PAGE_SIZE);
+	p2m_init(p2m_missing);
+
+	p2m_mid_missing = extend_brk(PAGE_SIZE, PAGE_SIZE);
+	p2m_mid_init(p2m_mid_missing);
+
+	p2m_top = extend_brk(PAGE_SIZE, PAGE_SIZE);
+	p2m_top_init(p2m_top);
+
+	/*
+	 * The domain builder gives us a pre-constructed p2m array in
+	 * mfn_list for all the pages initially given to us, so we just
+	 * need to graft that into our tree structure.
+	 */
+	for (pfn = 0; pfn < max_pfn; pfn += P2M_PER_PAGE) {
 		unsigned topidx = p2m_top_index(pfn);
+		unsigned mididx = p2m_mid_index(pfn);
 
-		p2m_top[topidx] = &mfn_list[pfn];
+		if (p2m_top[topidx] == p2m_mid_missing) {
+			unsigned long **mid = extend_brk(PAGE_SIZE, PAGE_SIZE);
+			p2m_mid_init(mid);
+
+			p2m_top[topidx] = mid;
+		}
+
+		p2m_top[topidx][mididx] = &mfn_list[pfn];
 	}
-
-	xen_build_mfn_list_list();
 }
 
 unsigned long get_phys_to_machine(unsigned long pfn)
 {
-	unsigned topidx, idx;
+	unsigned topidx, mididx, idx;
 
-	if (unlikely(pfn >= MAX_DOMAIN_PAGES))
+	if (unlikely(pfn >= MAX_P2M_PFN))
 		return INVALID_P2M_ENTRY;
 
 	topidx = p2m_top_index(pfn);
+	mididx = p2m_mid_index(pfn);
 	idx = p2m_index(pfn);
-	return p2m_top[topidx][idx];
+
+	return p2m_top[topidx][mididx][idx];
 }
 EXPORT_SYMBOL_GPL(get_phys_to_machine);
 
-/* install a  new p2m_top page */
-bool install_p2mtop_page(unsigned long pfn, unsigned long *p)
+static void *alloc_p2m_page(void)
 {
-	unsigned topidx = p2m_top_index(pfn);
-	unsigned long **pfnp, *mfnp;
-	unsigned i;
-
-	pfnp = &p2m_top[topidx];
-	mfnp = &p2m_top_mfn[topidx];
-
-	for (i = 0; i < P2M_ENTRIES_PER_PAGE; i++)
-		p[i] = INVALID_P2M_ENTRY;
-
-	if (cmpxchg(pfnp, p2m_missing, p) == p2m_missing) {
-		*mfnp = virt_to_mfn(p);
-		return true;
-	}
-
-	return false;
+	return (void *)__get_free_page(GFP_KERNEL | __GFP_REPEAT);
 }
 
-static void alloc_p2m(unsigned long pfn)
+static void free_p2m_page(void *p)
 {
-	unsigned long *p;
+	free_page((unsigned long)p);
+}
 
-	p = (void *)__get_free_page(GFP_KERNEL | __GFP_NOFAIL);
-	BUG_ON(p == NULL);
+/* 
+ * Fully allocate the p2m structure for a given pfn.  We need to check
+ * that both the top and mid levels are allocated, and make sure the
+ * parallel mfn tree is kept in sync.  We may race with other cpus, so
+ * the new pages are installed with cmpxchg; if we lose the race then
+ * simply free the page we allocated and use the one that's there.
+ */
+static bool alloc_p2m(unsigned long pfn)
+{
+	unsigned topidx, mididx;
+	unsigned long ***top_p, **mid;
+	unsigned long *top_mfn_p, *mid_mfn;
 
-	if (!install_p2mtop_page(pfn, p))
-		free_page((unsigned long)p);
+	topidx = p2m_top_index(pfn);
+	mididx = p2m_mid_index(pfn);
+
+	top_p = &p2m_top[topidx];
+	mid = *top_p;
+
+	if (mid == p2m_mid_missing) {
+		/* Mid level is missing, allocate a new one */
+		mid = alloc_p2m_page();
+		if (!mid)
+			return false;
+
+		p2m_mid_init(mid);
+
+		if (cmpxchg(top_p, p2m_mid_missing, mid) != p2m_mid_missing)
+			free_p2m_page(mid);
+	}
+
+	top_mfn_p = &p2m_top_mfn[topidx];
+	mid_mfn = mfn_to_virt(*top_mfn_p);
+
+	if (mid_mfn == p2m_mid_missing_mfn) {
+		/* Separately check the mid mfn level */
+		unsigned long missing_mfn;
+
+		mid_mfn = alloc_p2m_page();
+		if (!mid_mfn)
+			return false;
+
+		p2m_mid_mfn_init(mid_mfn);
+		
+		missing_mfn = virt_to_mfn(p2m_mid_missing_mfn);
+		if (cmpxchg(top_mfn_p, missing_mfn, mid) != missing_mfn)
+			free_p2m_page(mid);
+	}
+
+	if (p2m_top[topidx][mididx] == p2m_missing) {
+		/* p2m leaf page is missing */
+		unsigned long *p2m;
+
+		p2m = alloc_p2m_page();
+		if (!p2m)
+			return false;
+
+		p2m_init(p2m);
+
+		if (cmpxchg(&mid[mididx], p2m_missing, p2m) != p2m_missing)
+			free_p2m_page(p2m);
+		else
+			mid_mfn[mididx] = virt_to_mfn(p2m);
+	}
+
+	return true;
 }
 
 /* Try to install p2m mapping; fail if intermediate bits missing */
 bool __set_phys_to_machine(unsigned long pfn, unsigned long mfn)
 {
-	unsigned topidx, idx;
+	unsigned topidx, mididx, idx;
 
-	if (unlikely(pfn >= MAX_DOMAIN_PAGES)) {
+	if (unlikely(pfn >= MAX_P2M_PFN)) {
 		BUG_ON(mfn != INVALID_P2M_ENTRY);
 		return true;
 	}
 
 	topidx = p2m_top_index(pfn);
-	if (p2m_top[topidx] == p2m_missing) {
-		if (mfn == INVALID_P2M_ENTRY)
-			return true;
-		return false;
-	}
-
+	mididx = p2m_mid_index(pfn);
 	idx = p2m_index(pfn);
-	p2m_top[topidx][idx] = mfn;
+
+	if (p2m_top[topidx][mididx] == p2m_missing)
+		return mfn == INVALID_P2M_ENTRY;
+
+	p2m_top[topidx][mididx][idx] = mfn;
 
 	return true;
 }
 
-void set_phys_to_machine(unsigned long pfn, unsigned long mfn)
+bool set_phys_to_machine(unsigned long pfn, unsigned long mfn)
 {
 	if (unlikely(xen_feature(XENFEAT_auto_translated_physmap))) {
 		BUG_ON(pfn != mfn && mfn != INVALID_P2M_ENTRY);
-		return;
+		return true;
 	}
 
 	if (unlikely(!__set_phys_to_machine(pfn, mfn)))  {
-		alloc_p2m(pfn);
+		if (!alloc_p2m(pfn))
+			return false;
 
 		if (!__set_phys_to_machine(pfn, mfn))
-			BUG();
+			return false;
 	}
+
+	return true;
 }
 
 unsigned long arbitrary_virt_to_mfn(void *vaddr)
@@ -1639,6 +1825,9 @@ static __init void xen_map_identity_early(pmd_t *pmd, unsigned long max_pfn)
 	unsigned ident_pte;
 	unsigned long pfn;
 
+	level1_ident_pgt = extend_brk(sizeof(pte_t) * LEVEL1_IDENT_ENTRIES,
+				      PAGE_SIZE);
+
 	ident_pte = 0;
 	pfn = 0;
 	for (pmdidx = 0; pmdidx < PTRS_PER_PMD && pfn < max_pfn; pmdidx++) {
@@ -1649,7 +1838,7 @@ static __init void xen_map_identity_early(pmd_t *pmd, unsigned long max_pfn)
 			pte_page = m2v(pmd[pmdidx].pmd);
 		else {
 			/* Check for free pte pages */
-			if (ident_pte == ARRAY_SIZE(level1_ident_pgt))
+			if (ident_pte == LEVEL1_IDENT_ENTRIES)
 				break;
 
 			pte_page = &level1_ident_pgt[ident_pte];
@@ -1764,12 +1953,14 @@ __init pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd,
 	return pgd;
 }
 #else	/* !CONFIG_X86_64 */
-static pmd_t level2_kernel_pgt[PTRS_PER_PMD] __page_aligned_bss;
+static RESERVE_BRK_ARRAY(pmd_t, level2_kernel_pgt, PTRS_PER_PMD);
 
 __init pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd,
 					 unsigned long max_pfn)
 {
 	pmd_t *kernel_pmd;
+
+	level2_kernel_pgt = extend_brk(sizeof(pmd_t *) * PTRS_PER_PMD, PAGE_SIZE);
 
 	max_pfn_mapped = PFN_DOWN(__pa(xen_start_info->pt_base) +
 				  xen_start_info->nr_pt_frames * PAGE_SIZE +
