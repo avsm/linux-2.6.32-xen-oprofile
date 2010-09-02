@@ -100,7 +100,7 @@ bool xen_vcpu_stolen(int vcpu)
 	return per_cpu(runstate, vcpu).state == RUNSTATE_runnable;
 }
 
-static void setup_runstate_info(int cpu)
+void xen_setup_runstate_info(int cpu)
 {
 	struct vcpu_register_runstate_memory_area area;
 
@@ -154,6 +154,7 @@ static void do_stolen_accounting(void)
 	account_idle_ticks(ticks);
 }
 
+#ifdef CONFIG_XEN_SCHED_CLOCK
 /*
  * Xen sched_clock implementation.  Returns the number of unstolen
  * nanoseconds, which is nanoseconds the VCPU spent in RUNNING+BLOCKED
@@ -191,10 +192,10 @@ unsigned long long xen_sched_clock(void)
 
 	return ret;
 }
-
+#endif
 
 /* Get the TSC speed from Xen */
-unsigned long xen_tsc_khz(void)
+static unsigned long xen_tsc_khz(void)
 {
 	struct pvclock_vcpu_time_info *info =
 		&HYPERVISOR_shared_info->vcpu_info[0].time;
@@ -229,7 +230,7 @@ static void xen_read_wallclock(struct timespec *ts)
 	put_cpu_var(xen_vcpu);
 }
 
-unsigned long xen_get_wallclock(void)
+static unsigned long xen_get_wallclock(void)
 {
 	struct timespec ts;
 
@@ -237,7 +238,7 @@ unsigned long xen_get_wallclock(void)
 	return ts.tv_sec;
 }
 
-int xen_set_wallclock(unsigned long now)
+static int xen_set_wallclock(unsigned long now)
 {
 	/* do nothing for domU */
 	return -1;
@@ -434,7 +435,7 @@ void xen_setup_timer(int cpu)
 		name = "<timer kasprintf failed>";
 
 	irq = bind_virq_to_irqhandler(VIRQ_TIMER, cpu, xen_timer_interrupt,
-				      IRQF_DISABLED|IRQF_PERCPU|IRQF_NOBALANCING,
+				      IRQF_DISABLED|IRQF_PERCPU|IRQF_NOBALANCING|IRQF_TIMER,
 				      name, NULL);
 
 	evt = &per_cpu(xen_clock_events, cpu);
@@ -442,8 +443,6 @@ void xen_setup_timer(int cpu)
 
 	evt->cpumask = cpumask_of(cpu);
 	evt->irq = irq;
-
-	setup_runstate_info(cpu);
 }
 
 void xen_teardown_timer(int cpu)
@@ -474,7 +473,7 @@ void xen_timer_resume(void)
 	}
 }
 
-__init void xen_time_init(void)
+static __init void xen_time_init(void)
 {
 	int cpu = smp_processor_id();
 
@@ -494,6 +493,26 @@ __init void xen_time_init(void)
 
 	setup_force_cpu_cap(X86_FEATURE_TSC);
 
+	xen_setup_runstate_info(cpu);
 	xen_setup_timer(cpu);
 	xen_setup_cpu_clockevents();
 }
+
+static const struct pv_time_ops xen_time_ops __initdata = {
+	.time_init = xen_time_init,
+
+	.set_wallclock = xen_set_wallclock,
+	.get_wallclock = xen_get_wallclock,
+	.get_tsc_khz = xen_tsc_khz,
+#ifdef CONFIG_XEN_SCHED_CLOCK
+	.sched_clock = xen_sched_clock,
+#else
+	.sched_clock = xen_clocksource_read,
+#endif
+};
+
+__init void xen_init_time_ops(void)
+{
+	pv_time_ops = xen_time_ops;
+}
+

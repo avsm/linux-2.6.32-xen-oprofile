@@ -178,11 +178,18 @@ static void __init xen_smp_prepare_boot_cpu(void)
 static void __init xen_smp_prepare_cpus(unsigned int max_cpus)
 {
 	unsigned cpu;
+	unsigned int i;
 
 	xen_init_lock_cpu(0);
 
 	smp_store_cpu_info(0);
 	cpu_data(0).x86_max_cores = 1;
+
+	for_each_possible_cpu(i) {
+		zalloc_cpumask_var(&per_cpu(cpu_sibling_map, i), GFP_KERNEL);
+		zalloc_cpumask_var(&per_cpu(cpu_core_map, i), GFP_KERNEL);
+		zalloc_cpumask_var(&cpu_data(i).llc_shared_map, GFP_KERNEL);
+	}
 	set_cpu_sibling_map(0);
 
 	if (xen_smp_intr_init(0))
@@ -236,6 +243,7 @@ cpu_initialize_context(unsigned int cpu, struct task_struct *idle)
 	ctxt->user_regs.ss = __KERNEL_DS;
 #ifdef CONFIG_X86_32
 	ctxt->user_regs.fs = __KERNEL_PERCPU;
+	ctxt->user_regs.gs = __KERNEL_STACK_CANARY;
 #else
 	ctxt->gs_base_kernel = per_cpu_offset(cpu);
 #endif
@@ -294,6 +302,7 @@ static int __cpuinit xen_cpu_up(unsigned int cpu)
 		(unsigned long)task_stack_page(idle) -
 		KERNEL_STACK_OFFSET + THREAD_SIZE;
 #endif
+	xen_setup_runstate_info(cpu);
 	xen_setup_timer(cpu);
 	xen_init_lock_cpu(cpu);
 
@@ -389,6 +398,8 @@ static void stop_self(void *v)
 	/* make sure we're not pinning something down */
 	load_cr3(swapper_pg_dir);
 	/* should set up a minimal gdt */
+
+	set_cpu_online(cpu, false);
 
 	HYPERVISOR_vcpu_op(VCPUOP_down, cpu, NULL);
 	BUG();
