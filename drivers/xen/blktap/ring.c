@@ -146,11 +146,8 @@ blktap_ring_clear_pte(struct vm_area_struct *vma,
 
 	offset  = (int)((uvaddr - vma->vm_start) >> PAGE_SHIFT);
 	page    = map[offset];
-	if (page) {
-		ClearPageReserved(page);
-		if (blkback_pagemap_contains_page(page))
-			set_page_private(page, 0);
-	}
+	if (page && blkback_pagemap_contains_page(page))
+		set_page_private(page, 0);
 	map[offset] = NULL;
 
 	request = tap->pending_requests[usr_idx];

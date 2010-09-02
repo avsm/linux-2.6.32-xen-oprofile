@@ -241,11 +241,9 @@ blktap_device_fast_flush(struct blktap *tap, struct blktap_request *request)
 		      khandle->user);
 
 		page = map[offset];
-		if (page) {
-			ClearPageReserved(map[offset]);
-			if (blkback_pagemap_contains_page(page))
-				set_page_private(page, 0);
-		}
+		if (page && blkback_pagemap_contains_page(page))
+			set_page_private(page, 0);
+
 		map[offset] = NULL;
 
 		khandle->kernel = INVALID_GRANT_HANDLE;
