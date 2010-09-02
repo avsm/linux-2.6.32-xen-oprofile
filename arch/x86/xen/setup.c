@@ -35,6 +35,26 @@ extern void xen_sysenter_target(void);
 extern void xen_syscall_target(void);
 extern void xen_syscall32_target(void);
 
+/* Amount of extra memory space we add to the e820 ranges */
+phys_addr_t xen_extra_mem_start, xen_extra_mem_size;
+
+static __init void xen_add_extra_mem(unsigned long pages)
+{
+	u64 size = (u64)pages * PAGE_SIZE;
+
+	if (!pages)
+		return;
+
+	e820_add_region(xen_extra_mem_start + xen_extra_mem_size, size, E820_RAM);
+	sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &e820.nr_map);
+
+	reserve_early(xen_extra_mem_start + xen_extra_mem_size,
+		      xen_extra_mem_start + xen_extra_mem_size + size,
+		      "XEN EXTRA");
+
+	xen_extra_mem_size += size;
+}
+
 static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
 					      phys_addr_t end_addr)
 {
@@ -108,17 +128,18 @@ static unsigned long __init xen_return_unused_memory(unsigned long max_pfn,
  **/
 char * __init xen_memory_setup(void)
 {
-	static __initdata struct e820entry map[E820MAX];
+	static struct e820entry map[E820MAX] __initdata;
 
 	unsigned long max_pfn = xen_start_info->nr_pages;
-	struct xen_memory_map memmap;
 	unsigned long long mem_end;
-	int op;
 	int rc;
+	struct xen_memory_map memmap;
+	unsigned long extra_pages = 0;
+	int op;
 	int i;
 
 	max_pfn = min(MAX_DOMAIN_PAGES, max_pfn);
-	mem_end = PFN_PHYS((u64)max_pfn);
+	mem_end = PFN_PHYS(max_pfn);
 
 	memmap.nr_entries = E820MAX;
 	set_xen_guest_handle(memmap.buffer, map);
@@ -139,6 +160,7 @@ char * __init xen_memory_setup(void)
 	BUG_ON(rc);
 
 	e820.nr_map = 0;
+	xen_extra_mem_start = mem_end;
 	for (i = 0; i < memmap.nr_entries; i++) {
 		unsigned long long end = map[i].addr + map[i].size;
 		if (map[i].type == E820_RAM) {
@@ -147,6 +169,8 @@ char * __init xen_memory_setup(void)
 			if (end > mem_end) {
 				/* Truncate region to max_mem. */
 				map[i].size -= end - mem_end;
+
+				extra_pages += PFN_DOWN(end - mem_end);
 			}
 		}
 		if (map[i].size > 0)
@@ -176,7 +200,9 @@ char * __init xen_memory_setup(void)
 
 	sanitize_e820_map(e820.map, ARRAY_SIZE(e820.map), &e820.nr_map);
 
-	xen_return_unused_memory(xen_start_info->nr_pages, &e820);
+	extra_pages += xen_return_unused_memory(xen_start_info->nr_pages, &e820);
+
+	xen_add_extra_mem(extra_pages);
 
 	return "Xen";
 }
