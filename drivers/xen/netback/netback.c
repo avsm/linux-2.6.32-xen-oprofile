@@ -798,17 +798,19 @@ static void remove_from_net_schedule_list(struct xen_netif *netif)
 
 static void add_to_net_schedule_list_tail(struct xen_netif *netif)
 {
+	unsigned long flags;
+
 	struct xen_netbk *netbk = &xen_netbk[netif->group];
 	if (__on_net_schedule_list(netif))
 		return;
 
-	spin_lock_irq(&netbk->net_schedule_list_lock);
+	spin_lock_irqsave(&netbk->net_schedule_list_lock, flags);
 	if (!__on_net_schedule_list(netif) &&
 	    likely(netif_schedulable(netif))) {
 		list_add_tail(&netif->list, &netbk->net_schedule_list);
 		netif_get(netif);
 	}
-	spin_unlock_irq(&netbk->net_schedule_list_lock);
+	spin_unlock_irqrestore(&netbk->net_schedule_list_lock, flags);
 }
 
 void netif_schedule_work(struct xen_netif *netif)
