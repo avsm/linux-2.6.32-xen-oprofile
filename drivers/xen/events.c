@@ -527,11 +527,11 @@ static void ack_pirq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
-	move_native_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		clear_evtchn(evtchn);
 	pirq_eoi(irq);
+	move_masked_irq(irq);
+	
+	if (VALID_EVTCHN(evtchn))
+		unmask_evtchn(evtchn);
 }
 
 static void end_pirq(unsigned int irq)
@@ -596,7 +596,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 		irq = find_unbound_irq();
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-				      handle_edge_irq, name);
+				      handle_fasteoi_irq, name);
 
 	irq_op.irq = gsi;
 	irq_op.vector = 0;
@@ -1410,7 +1410,7 @@ static struct irq_chip xen_pirq_chip __read_mostly = {
 	.disable	= disable_pirq,
 	.mask		= disable_pirq,
 
-	.ack		= ack_pirq,
+	.eoi		= ack_pirq,
 	.end		= end_pirq,
 
 	.set_affinity	= set_affinity_irq,
