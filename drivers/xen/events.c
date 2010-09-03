@@ -475,15 +475,6 @@ static void shutdown_pirq(unsigned int irq)
 	info->evtchn = 0;
 }
 
-static void enable_pirq(unsigned int irq)
-{
-	startup_pirq(irq);
-}
-
-static void disable_pirq(unsigned int irq)
-{
-}
-
 static void ack_pirq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
@@ -1257,11 +1248,11 @@ static struct irq_chip xen_pirq_chip __read_mostly = {
 	.startup	= startup_pirq,
 	.shutdown	= shutdown_pirq,
 
-	.enable		= enable_pirq,
-	.unmask		= enable_pirq,
+	.enable		= unmask_irq,
+	.unmask		= unmask_irq,
 
-	.disable	= disable_pirq,
-	.mask		= disable_pirq,
+	.disable	= mask_irq,
+	.mask		= mask_irq,
 
 	.eoi		= ack_pirq,
 	.end		= end_pirq,
