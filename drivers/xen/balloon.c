@@ -83,13 +83,6 @@ static struct sys_device balloon_sysdev;
 
 static int register_balloon(struct sys_device *sysdev);
 
-/*
- * Protects atomic reservation decrease/increase against concurrent increases.
- * Also protects non-atomic updates of current_pages and driver_pages, and
- * balloon lists.
- */
-static DEFINE_SPINLOCK(balloon_lock);
-
 static struct balloon_stats balloon_stats;
 
 /*
@@ -240,7 +233,7 @@ static unsigned long current_target(void)
 
 static int increase_reservation(unsigned long nr_pages)
 {
-	unsigned long  pfn, mfn, i, j, flags;
+	unsigned long  pfn, mfn, i, j;
 	struct page   *page;
 	long           rc;
 	struct xen_memory_reservation reservation = {
@@ -250,8 +243,6 @@ static int increase_reservation(unsigned long nr_pages)
 
 	if (nr_pages > ARRAY_SIZE(frame_list))
 		nr_pages = ARRAY_SIZE(frame_list);
-
-	spin_lock_irqsave(&balloon_lock, flags);
 
 	page = balloon_first_page();
 	for (i = 0; i < nr_pages; i++) {
@@ -300,14 +291,12 @@ static int increase_reservation(unsigned long nr_pages)
 	balloon_stats.current_pages += rc;
 
  out:
-	spin_unlock_irqrestore(&balloon_lock, flags);
-
 	return rc < 0 ? rc : rc != nr_pages;
 }
 
 static int decrease_reservation(unsigned long nr_pages)
 {
-	unsigned long  pfn, lpfn, mfn, i, j, flags;
+	unsigned long  pfn, lpfn, mfn, i, j;
 	struct page   *page = NULL;
 	int            need_sleep = 0;
 	int		discontig, discontig_free;
@@ -336,8 +325,6 @@ static int decrease_reservation(unsigned long nr_pages)
 	/* Ensure that ballooned highmem pages don't have kmaps. */
 	kmap_flush_unused();
 	flush_tlb_all();
-
-	spin_lock_irqsave(&balloon_lock, flags);
 
 	/* No more mappings: invalidate P2M and add to balloon. */
 	for (i = 0; i < nr_pages; i++) {
@@ -375,8 +362,6 @@ static int decrease_reservation(unsigned long nr_pages)
 	reservation.extent_order = balloon_order;
 	ret = HYPERVISOR_memory_op(XENMEM_decrease_reservation, &reservation);
 	BUG_ON(ret != nr_pages);
-
-	spin_unlock_irqrestore(&balloon_lock, flags);
 
 	return need_sleep;
 }
