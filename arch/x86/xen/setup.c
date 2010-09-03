@@ -163,17 +163,19 @@ char * __init xen_memory_setup(void)
 	xen_extra_mem_start = mem_end;
 	for (i = 0; i < memmap.nr_entries; i++) {
 		unsigned long long end = map[i].addr + map[i].size;
+
 		if (map[i].type == E820_RAM) {
-			if (map[i].addr > mem_end)
-				continue;
 			if (end > mem_end) {
 				/* Truncate region to max_mem. */
 				map[i].size -= end - mem_end;
 
 				extra_pages += PFN_DOWN(end - mem_end);
 			}
-		}
-		if (map[i].size > 0)
+		} else if (map[i].type != E820_RAM)
+			xen_extra_mem_start = end;
+
+		if ((map[i].type != E820_RAM || map[i].addr < mem_end) &&
+		    map[i].size > 0)
 			e820_add_region(map[i].addr, map[i].size, map[i].type);
 	}
 
