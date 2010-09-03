@@ -1083,7 +1083,7 @@ static void ack_dynirq(unsigned int irq)
 		unmask_evtchn(evtchn);
 }
 
-static int retrigger_dynirq(unsigned int irq)
+static int retrigger_irq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 	struct shared_info *sh = HYPERVISOR_shared_info;
@@ -1238,7 +1238,7 @@ static struct irq_chip xen_dynamic_chip __read_mostly = {
 
 	.eoi		= ack_dynirq,
 	.set_affinity	= set_affinity_irq,
-	.retrigger	= retrigger_dynirq,
+	.retrigger	= retrigger_irq,
 };
 
 static struct irq_chip xen_percpu_chip __read_mostly = {
@@ -1268,7 +1268,7 @@ static struct irq_chip xen_pirq_chip __read_mostly = {
 
 	.set_affinity	= set_affinity_irq,
 
-	.retrigger	= retrigger_dynirq,
+	.retrigger	= retrigger_irq,
 };
 
 void __init xen_init_IRQ(void)
