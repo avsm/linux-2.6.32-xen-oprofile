@@ -1057,7 +1057,7 @@ int resend_irq_on_evtchn(unsigned int irq)
 	return 1;
 }
 
-static void enable_dynirq(unsigned int irq)
+static void unmask_irq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -1065,7 +1065,7 @@ static void enable_dynirq(unsigned int irq)
 		unmask_evtchn(evtchn);
 }
 
-static void disable_dynirq(unsigned int irq)
+static void mask_irq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 
@@ -1232,9 +1232,9 @@ void xen_irq_resume(void)
 static struct irq_chip xen_dynamic_chip __read_mostly = {
 	.name		= "xen-dyn",
 
-	.disable	= disable_dynirq,
-	.mask		= disable_dynirq,
-	.unmask		= enable_dynirq,
+	.disable	= mask_irq,
+	.mask		= mask_irq,
+	.unmask		= unmask_irq,
 
 	.eoi		= ack_dynirq,
 	.set_affinity	= set_affinity_irq,
@@ -1244,9 +1244,9 @@ static struct irq_chip xen_dynamic_chip __read_mostly = {
 static struct irq_chip xen_percpu_chip __read_mostly = {
 	.name		= "xen-percpu",
 
-	.disable	= disable_dynirq,
-	.mask		= disable_dynirq,
-	.unmask		= enable_dynirq,
+	.disable	= mask_irq,
+	.mask		= mask_irq,
+	.unmask		= unmask_irq,
 
 	.ack		= ack_dynirq,
 };
