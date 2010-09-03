@@ -402,11 +402,11 @@ static void pirq_eoi(int irq)
 	struct irq_info *info = info_for_irq(irq);
 	struct physdev_eoi eoi = { .irq = info->u.pirq.nr };
 
-	if (unlikely(pirq_needs_eoi(irq))) {
+	if (pirq_needs_eoi(irq)) {
 		int rc = HYPERVISOR_physdev_op(PHYSDEVOP_eoi, &eoi);
 		WARN_ON(rc);
-	} else
-		unmask_irq(irq);
+	}
+	unmask_irq(irq);
 }
 
 static void pirq_query_unmask(int irq)
