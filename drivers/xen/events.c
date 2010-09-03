@@ -312,6 +312,14 @@ static void mask_evtchn(int port)
 	sync_set_bit(port, &s->evtchn_mask[0]);
 }
 
+static void mask_irq(unsigned int irq)
+{
+	int evtchn = evtchn_from_irq(irq);
+
+	if (VALID_EVTCHN(evtchn))
+		mask_evtchn(evtchn);
+}
+
 static void unmask_evtchn(int port)
 {
 	struct shared_info *s = HYPERVISOR_shared_info;
@@ -340,6 +348,14 @@ static void unmask_evtchn(int port)
 	}
 
 	put_cpu();
+}
+
+static void unmask_irq(unsigned int irq)
+{
+	int evtchn = evtchn_from_irq(irq);
+
+	if (VALID_EVTCHN(evtchn))
+		unmask_evtchn(evtchn);
 }
 
 static int get_nr_hw_irqs(void)
@@ -389,7 +405,8 @@ static void pirq_eoi(int irq)
 	if (unlikely(pirq_needs_eoi(irq))) {
 		int rc = HYPERVISOR_physdev_op(PHYSDEVOP_eoi, &eoi);
 		WARN_ON(rc);
-	}
+	} else
+		unmask_irq(irq);
 }
 
 static void pirq_query_unmask(int irq)
@@ -447,7 +464,6 @@ static unsigned int startup_pirq(unsigned int irq)
 	info->evtchn = evtchn;
 
  out:
-	unmask_evtchn(evtchn);
 	pirq_eoi(irq);
 
 	return 0;
@@ -477,13 +493,9 @@ static void shutdown_pirq(unsigned int irq)
 
 static void ack_pirq(unsigned int irq)
 {
-	int evtchn = evtchn_from_irq(irq);
-
-	pirq_eoi(irq);
 	move_masked_irq(irq);
 	
-	if (VALID_EVTCHN(evtchn))
-		unmask_evtchn(evtchn);
+	pirq_eoi(irq);
 }
 
 static void end_pirq(unsigned int irq)
@@ -1046,22 +1058,6 @@ int resend_irq_on_evtchn(unsigned int irq)
 		unmask_evtchn(evtchn);
 
 	return 1;
-}
-
-static void unmask_irq(unsigned int irq)
-{
-	int evtchn = evtchn_from_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		unmask_evtchn(evtchn);
-}
-
-static void mask_irq(unsigned int irq)
-{
-	int evtchn = evtchn_from_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		mask_evtchn(evtchn);
 }
 
 static void ack_dynirq(unsigned int irq)
