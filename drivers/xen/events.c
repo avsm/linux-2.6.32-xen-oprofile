@@ -1266,7 +1266,7 @@ static struct irq_chip xen_pirq_chip __read_mostly = {
 	.startup	= startup_pirq,
 	.shutdown	= shutdown_pirq,
 
-	.enable		= unmask_irq,
+	.enable		= pirq_eoi,
 	.unmask		= unmask_irq,
 
 	.disable	= mask_irq,
