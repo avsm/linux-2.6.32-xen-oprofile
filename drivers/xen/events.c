@@ -657,8 +657,8 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 	irq_info[irq] = mk_pirq_info(0, map_irq.pirq);
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-			handle_edge_irq,
-			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
+				      handle_fasteoi_irq,
+				      (type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
 
 out:
 	spin_unlock(&irq_mapping_update_lock);
