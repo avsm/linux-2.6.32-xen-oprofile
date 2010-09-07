@@ -50,6 +50,7 @@
 #include <xen/interface/event_channel.h>
 #include <xen/interface/hvm/hvm_op.h>
 #include <xen/interface/hvm/params.h>
+#include <xen/page.h>
 
 #include "../pci/msi.h"
 
@@ -102,8 +103,11 @@ struct irq_info
 		} pirq;
 	} u;
 };
-#define PIRQ_NEEDS_EOI	(1 << 0)
 #define PIRQ_SHAREABLE	(1 << 1)
+
+/* Bitmap indicating which PIRQs require Xen to be notified on unmask. */
+static bool pirq_eoi_does_unmask;
+static unsigned long *pirq_needs_eoi_bits;
 
 static struct irq_info *irq_info;
 
@@ -247,7 +251,7 @@ static bool pirq_needs_eoi(unsigned irq)
 
 	BUG_ON(info->type != IRQT_PIRQ);
 
-	return info->u.pirq.flags & PIRQ_NEEDS_EOI;
+	return test_bit(info->u.pirq.gsi, pirq_needs_eoi_bits);
 }
 
 static inline unsigned long active_evtchns(unsigned int cpu,
@@ -331,6 +335,14 @@ static void mask_evtchn(int port)
 	sync_set_bit(port, &s->evtchn_mask[0]);
 }
 
+static void mask_irq(unsigned int irq)
+{
+	int evtchn = evtchn_from_irq(irq);
+
+	if (VALID_EVTCHN(evtchn))
+		mask_evtchn(evtchn);
+}
+
 static void unmask_evtchn(int port)
 {
 	struct shared_info *s = HYPERVISOR_shared_info;
@@ -359,6 +371,14 @@ static void unmask_evtchn(int port)
 	}
 
 	put_cpu();
+}
+
+static void unmask_irq(unsigned int irq)
+{
+	int evtchn = evtchn_from_irq(irq);
+
+	if (VALID_EVTCHN(evtchn))
+		unmask_evtchn(evtchn);
 }
 
 static int get_nr_hw_irqs(void)
@@ -420,8 +440,14 @@ static void pirq_eoi(int irq)
 {
 	struct irq_info *info = info_for_irq(irq);
 	struct physdev_eoi eoi = { .irq = info->u.pirq.gsi };
+	bool need_eoi;
 
-	if (unlikely(pirq_needs_eoi(irq))) {
+	need_eoi = pirq_needs_eoi(irq);
+
+	if (!need_eoi || !pirq_eoi_does_unmask)
+		unmask_evtchn(info->evtchn);
+
+	if (need_eoi) {
 		int rc = HYPERVISOR_physdev_op(PHYSDEVOP_eoi, &eoi);
 		WARN_ON(rc);
 	}
@@ -432,15 +458,18 @@ static void pirq_query_unmask(int irq)
 	struct physdev_irq_status_query irq_status;
 	struct irq_info *info = info_for_irq(irq);
 
+	if (pirq_eoi_does_unmask)
+		return;
+
 	BUG_ON(info->type != IRQT_PIRQ);
 
 	irq_status.irq = info->u.pirq.gsi;
 	if (HYPERVISOR_physdev_op(PHYSDEVOP_irq_status_query, &irq_status))
 		irq_status.flags = 0;
 
-	info->u.pirq.flags &= ~PIRQ_NEEDS_EOI;
+	clear_bit(info->u.pirq.gsi, pirq_needs_eoi_bits);
 	if (irq_status.flags & XENIRQSTAT_needs_eoi)
-		info->u.pirq.flags |= PIRQ_NEEDS_EOI;
+		set_bit(info->u.pirq.gsi, pirq_needs_eoi_bits);
 }
 
 static bool probing_irq(int irq)
@@ -482,7 +511,6 @@ static unsigned int startup_pirq(unsigned int irq)
 	info->evtchn = evtchn;
 
  out:
-	unmask_evtchn(evtchn);
 	pirq_eoi(irq);
 
 	return 0;
@@ -510,23 +538,10 @@ static void shutdown_pirq(unsigned int irq)
 	info->evtchn = 0;
 }
 
-static void enable_pirq(unsigned int irq)
-{
-	startup_pirq(irq);
-}
-
-static void disable_pirq(unsigned int irq)
-{
-}
-
 static void ack_pirq(unsigned int irq)
 {
-	int evtchn = evtchn_from_irq(irq);
-
-	move_native_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		clear_evtchn(evtchn);
+	move_masked_irq(irq);
+	
 	pirq_eoi(irq);
 }
 
@@ -592,7 +607,7 @@ int xen_allocate_pirq(unsigned gsi, int shareable, char *name)
 		irq = find_unbound_irq();
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-				      handle_edge_irq, name);
+				      handle_fasteoi_irq, name);
 
 	irq_op.irq = gsi;
 	irq_op.vector = 0;
@@ -702,8 +717,8 @@ int xen_create_msi_irq(struct pci_dev *dev, struct msi_desc *msidesc, int type)
 		irq_info[irq].u.pirq.domid = domid;
 
 	set_irq_chip_and_handler_name(irq, &xen_pirq_chip,
-			handle_edge_irq,
-			(type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
+				      handle_fasteoi_irq,
+				      (type == PCI_CAP_ID_MSIX) ? "msi-x":"msi");
 
 out:
 	spin_unlock(&irq_mapping_update_lock);
@@ -735,7 +750,7 @@ int bind_evtchn_to_irq(unsigned int evtchn)
 		irq = find_unbound_irq();
 
 		set_irq_chip_and_handler_name(irq, &xen_dynamic_chip,
-					      handle_edge_irq, "event");
+					      handle_fasteoi_irq, "event");
 
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_evtchn_info(evtchn);
@@ -1059,6 +1074,9 @@ static void __xen_evtchn_do_upcall(struct pt_regs *regs)
 				int irq = evtchn_to_irq[port];
 				struct irq_desc *desc;
 
+				mask_evtchn(port);
+				clear_evtchn(port);
+
 				if (irq != -1) {
 					desc = irq_to_desc(irq);
 					if (desc)
@@ -1177,33 +1195,17 @@ int resend_irq_on_evtchn(unsigned int irq)
 	return 1;
 }
 
-static void enable_dynirq(unsigned int irq)
+static void ack_dynirq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
+
+	move_masked_irq(irq);
 
 	if (VALID_EVTCHN(evtchn))
 		unmask_evtchn(evtchn);
 }
 
-static void disable_dynirq(unsigned int irq)
-{
-	int evtchn = evtchn_from_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		mask_evtchn(evtchn);
-}
-
-static void ack_dynirq(unsigned int irq)
-{
-	int evtchn = evtchn_from_irq(irq);
-
-	move_native_irq(irq);
-
-	if (VALID_EVTCHN(evtchn))
-		clear_evtchn(evtchn);
-}
-
-static int retrigger_dynirq(unsigned int irq)
+static int retrigger_irq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
 	struct shared_info *sh = HYPERVISOR_shared_info;
@@ -1367,26 +1369,36 @@ void xen_irq_resume(void)
 		restore_cpu_virqs(cpu);
 		restore_cpu_ipis(cpu);
 	}
+
+	if (pirq_eoi_does_unmask) {
+		struct physdev_pirq_eoi_gmfn eoi_gmfn;
+		
+		eoi_gmfn.gmfn = virt_to_mfn(pirq_needs_eoi_bits);
+		if (HYPERVISOR_physdev_op(PHYSDEVOP_pirq_eoi_gmfn, &eoi_gmfn) == 0) {
+			/* Could recover by reverting to old method...? */
+			BUG();
+		}
+	}
 }
 
 static struct irq_chip xen_dynamic_chip __read_mostly = {
 	.name		= "xen-dyn",
 
-	.disable	= disable_dynirq,
-	.mask		= disable_dynirq,
-	.unmask		= enable_dynirq,
+	.disable	= mask_irq,
+	.mask		= mask_irq,
+	.unmask		= unmask_irq,
 
-	.ack		= ack_dynirq,
+	.eoi		= ack_dynirq,
 	.set_affinity	= set_affinity_irq,
-	.retrigger	= retrigger_dynirq,
+	.retrigger	= retrigger_irq,
 };
 
 static struct irq_chip xen_percpu_chip __read_mostly = {
 	.name		= "xen-percpu",
 
-	.disable	= disable_dynirq,
-	.mask		= disable_dynirq,
-	.unmask		= enable_dynirq,
+	.disable	= mask_irq,
+	.mask		= mask_irq,
+	.unmask		= unmask_irq,
 
 	.ack		= ack_dynirq,
 };
@@ -1397,18 +1409,18 @@ static struct irq_chip xen_pirq_chip __read_mostly = {
 	.startup	= startup_pirq,
 	.shutdown	= shutdown_pirq,
 
-	.enable		= enable_pirq,
-	.unmask		= enable_pirq,
+	.enable		= pirq_eoi,
+	.unmask		= unmask_irq,
 
-	.disable	= disable_pirq,
-	.mask		= disable_pirq,
+	.disable	= mask_irq,
+	.mask		= mask_irq,
 
-	.ack		= ack_pirq,
+	.eoi		= ack_pirq,
 	.end		= end_pirq,
 
 	.set_affinity	= set_affinity_irq,
 
-	.retrigger	= retrigger_dynirq,
+	.retrigger	= retrigger_irq,
 };
 
 int xen_set_callback_via(uint64_t via)
@@ -1450,6 +1462,8 @@ void xen_callback_vector(void) {}
 void __init xen_init_IRQ(void)
 {
 	int i;
+	struct physdev_pirq_eoi_gmfn eoi_gmfn;
+	int nr_pirqs = NR_IRQS;
 
 	cpu_evtchn_mask_p = kcalloc(nr_cpu_ids, sizeof(struct cpu_evtchn_s),
 				    GFP_KERNEL);
@@ -1459,6 +1473,13 @@ void __init xen_init_IRQ(void)
 				GFP_KERNEL);
 	for(i = 0; i < NR_EVENT_CHANNELS; i++)
 		evtchn_to_irq[i] = -1;
+
+	i = get_order(sizeof(unsigned long) * BITS_TO_LONGS(nr_pirqs));
+	pirq_needs_eoi_bits = (void *)__get_free_pages(GFP_KERNEL|__GFP_ZERO, i);
+
+ 	eoi_gmfn.gmfn = virt_to_mfn(pirq_needs_eoi_bits);
+	if (HYPERVISOR_physdev_op(PHYSDEVOP_pirq_eoi_gmfn, &eoi_gmfn) == 0)
+		pirq_eoi_does_unmask = true;
 
 	init_evtchn_cpu_bindings();
 

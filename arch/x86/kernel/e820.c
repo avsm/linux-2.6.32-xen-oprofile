@@ -750,6 +750,36 @@ static int __init find_overlapped_early(u64 start, u64 end)
 	return i;
 }
 
+u64 __init early_res_next_free(u64 addr)
+{
+	int i;
+	u64 end = addr;
+	struct early_res *r;
+
+	for (i = 0; i < MAX_EARLY_RES; i++) {
+		r = &early_res[i];
+		if (addr >= r->start && addr < r->end) {
+			end = r->end;
+			break;
+		}
+	}
+	return end;
+}
+
+u64 __init early_res_next_reserved(u64 addr, u64 max)
+{
+	int i;
+	struct early_res *r;
+	u64 next_res = max;
+
+	for (i = 0; i < MAX_EARLY_RES && early_res[i].end; i++) {
+		r = &early_res[i];
+		if ((r->start >= addr) && (r->start < next_res))
+			next_res = r->start;
+	}
+	return next_res;
+}
+
 /*
  * Drop the i-th range from the early reservation map,
  * by copying any higher ranges down one over it, and

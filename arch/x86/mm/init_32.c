@@ -430,22 +430,45 @@ static int __init add_highpages_work_fn(unsigned long start_pfn,
 {
 	int node_pfn;
 	struct page *page;
+	phys_addr_t chunk_end, chunk_max;
 	unsigned long final_start_pfn, final_end_pfn;
-	struct add_highpages_data *data;
-
-	data = (struct add_highpages_data *)datax;
+	struct add_highpages_data *data = (struct add_highpages_data *)datax;
 
 	final_start_pfn = max(start_pfn, data->start_pfn);
 	final_end_pfn = min(end_pfn, data->end_pfn);
 	if (final_start_pfn >= final_end_pfn)
 		return 0;
 
-	for (node_pfn = final_start_pfn; node_pfn < final_end_pfn;
-	     node_pfn++) {
-		if (!pfn_valid(node_pfn))
-			continue;
-		page = pfn_to_page(node_pfn);
-		add_one_highpage_init(page, node_pfn);
+	chunk_end = PFN_PHYS(final_start_pfn);
+	chunk_max = PFN_PHYS(final_end_pfn);
+
+	/*
+	 * Check for reserved areas.
+	 */
+	for (;;) {
+		phys_addr_t chunk_start;
+		chunk_start = early_res_next_free(chunk_end);
+		
+		/*
+		 * Reserved area. Just count high mem pages.
+		 */
+		for (node_pfn = PFN_DOWN(chunk_end);
+		     node_pfn < PFN_DOWN(chunk_start); node_pfn++) {
+			if (pfn_valid(node_pfn))
+				totalhigh_pages++;
+		}
+
+		if (chunk_start >= chunk_max)
+			break;
+
+		chunk_end = early_res_next_reserved(chunk_start, chunk_max);
+		for (node_pfn = PFN_DOWN(chunk_start);
+		     node_pfn < PFN_DOWN(chunk_end); node_pfn++) {
+			if (!pfn_valid(node_pfn))
+				continue;
+			page = pfn_to_page(node_pfn);
+			add_one_highpage_init(page, node_pfn);
+		}
 	}
 
 	return 0;
@@ -459,7 +482,6 @@ void __init add_highpages_with_active_regions(int nid, unsigned long start_pfn,
 
 	data.start_pfn = start_pfn;
 	data.end_pfn = end_pfn;
-
 	work_with_active_regions(nid, add_highpages_work_fn, &data);
 }
 
