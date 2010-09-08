@@ -457,6 +457,7 @@ static bool alloc_p2m(unsigned long pfn)
 	if (mid_mfn == p2m_mid_missing_mfn) {
 		/* Separately check the mid mfn level */
 		unsigned long missing_mfn;
+		unsigned long mid_mfn_mfn;
 
 		mid_mfn = alloc_p2m_page();
 		if (!mid_mfn)
@@ -465,8 +466,9 @@ static bool alloc_p2m(unsigned long pfn)
 		p2m_mid_mfn_init(mid_mfn);
 		
 		missing_mfn = virt_to_mfn(p2m_mid_missing_mfn);
-		if (cmpxchg(top_mfn_p, missing_mfn, mid) != missing_mfn)
-			free_p2m_page(mid);
+		mid_mfn_mfn = virt_to_mfn(mid_mfn);
+		if (cmpxchg(top_mfn_p, missing_mfn, mid_mfn_mfn) != missing_mfn)
+			free_p2m_page(mid_mfn);
 	}
 
 	if (p2m_top[topidx][mididx] == p2m_missing) {
