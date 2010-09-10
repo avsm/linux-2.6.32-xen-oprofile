@@ -53,6 +53,10 @@
 
 static struct ethtool_ops xennet_ethtool_ops;
 
+static int use_smartpoll = 0;
+module_param(use_smartpoll, int, 0600);
+MODULE_PARM_DESC (use_smartpoll, "Use smartpoll mechanism if available");
+
 struct netfront_cb {
 	struct page *page;
 	unsigned offset;
@@ -1538,7 +1542,7 @@ again:
 		goto abort_transaction;
 	}
 
-	err = xenbus_printf(xbt, dev->nodename, "feature-smart-poll", "%d", 1);
+	err = xenbus_printf(xbt, dev->nodename, "feature-smart-poll", "%d", use_smartpoll);
 	if (err) {
 		message = "writing feature-smart-poll";
 		goto abort_transaction;
@@ -1631,11 +1635,14 @@ static int xennet_connect(struct net_device *dev)
 		return -ENODEV;
 	}
 
-	err = xenbus_scanf(XBT_NIL, np->xbdev->otherend,
-			   "feature-smart-poll", "%u",
-			   &np->smart_poll.feature_smart_poll);
-	if (err != 1)
-		np->smart_poll.feature_smart_poll = 0;
+	np->smart_poll.feature_smart_poll = 0;
+	if (use_smartpoll) {
+		err = xenbus_scanf(XBT_NIL, np->xbdev->otherend,
+				   "feature-smart-poll", "%u",
+				   &np->smart_poll.feature_smart_poll);
+		if (err != 1)
+			np->smart_poll.feature_smart_poll = 0;
+	}
 
 	if (np->smart_poll.feature_smart_poll) {
 		hrtimer_init(&np->smart_poll.timer, CLOCK_MONOTONIC,
