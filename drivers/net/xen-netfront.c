@@ -54,6 +54,10 @@
 
 static const struct ethtool_ops xennet_ethtool_ops;
 
+static int use_smartpoll = 1;
+module_param(use_smartpoll, int, 0600);
+MODULE_PARM_DESC (use_smartpoll, "Use smartpoll mechanism if available");
+
 struct netfront_cb {
 	struct page *page;
 	unsigned offset;
@@ -78,8 +82,8 @@ struct netfront_smart_poll {
 
 #define GRANT_INVALID_REF	0
 
-#define NET_TX_RING_SIZE __RING_SIZE((struct xen_netif_tx_sring *)0, PAGE_SIZE)
-#define NET_RX_RING_SIZE __RING_SIZE((struct xen_netif_rx_sring *)0, PAGE_SIZE)
+#define NET_TX_RING_SIZE __CONST_RING_SIZE(xen_netif_tx, PAGE_SIZE)
+#define NET_RX_RING_SIZE __CONST_RING_SIZE(xen_netif_rx, PAGE_SIZE)
 #define TX_MAX_TARGET min_t(int, NET_RX_RING_SIZE, 256)
 
 struct netfront_info {
@@ -1398,10 +1402,15 @@ static irqreturn_t xennet_interrupt(int irq, void *dev_id)
 			napi_schedule(&np->napi);
 	}
 
-	if (np->smart_poll.feature_smart_poll)
-		hrtimer_start(&np->smart_poll.timer,
-			ktime_set(0, NANO_SECOND/np->smart_poll.smart_poll_freq),
-			HRTIMER_MODE_REL);
+	if (np->smart_poll.feature_smart_poll) {
+		if ( hrtimer_start(&np->smart_poll.timer,
+			ktime_set(0,NANO_SECOND/np->smart_poll.smart_poll_freq),
+			HRTIMER_MODE_REL) ) {
+			printk(KERN_DEBUG "Failed to start hrtimer,"
+					"use interrupt mode for this packet\n");
+			np->rx.sring->private.netif.smartpoll_active = 0;
+		}
+	}
 
 	spin_unlock_irqrestore(&np->tx_lock, flags);
 
@@ -1539,7 +1548,7 @@ again:
 		goto abort_transaction;
 	}
 
-	err = xenbus_printf(xbt, dev->nodename, "feature-smart-poll", "%d", 1);
+	err = xenbus_printf(xbt, dev->nodename, "feature-smart-poll", "%d", use_smartpoll);
 	if (err) {
 		message = "writing feature-smart-poll";
 		goto abort_transaction;
@@ -1632,11 +1641,14 @@ static int xennet_connect(struct net_device *dev)
 		return -ENODEV;
 	}
 
-	err = xenbus_scanf(XBT_NIL, np->xbdev->otherend,
-			   "feature-smart-poll", "%u",
-			   &np->smart_poll.feature_smart_poll);
-	if (err != 1)
-		np->smart_poll.feature_smart_poll = 0;
+	np->smart_poll.feature_smart_poll = 0;
+	if (use_smartpoll) {
+		err = xenbus_scanf(XBT_NIL, np->xbdev->otherend,
+				   "feature-smart-poll", "%u",
+				   &np->smart_poll.feature_smart_poll);
+		if (err != 1)
+			np->smart_poll.feature_smart_poll = 0;
+	}
 
 	if (np->smart_poll.feature_smart_poll) {
 		hrtimer_init(&np->smart_poll.timer, CLOCK_MONOTONIC,
