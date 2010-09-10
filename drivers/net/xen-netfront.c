@@ -1401,10 +1401,15 @@ static irqreturn_t xennet_interrupt(int irq, void *dev_id)
 			napi_schedule(&np->napi);
 	}
 
-	if (np->smart_poll.feature_smart_poll)
-		hrtimer_start(&np->smart_poll.timer,
-			ktime_set(0, NANO_SECOND/np->smart_poll.smart_poll_freq),
-			HRTIMER_MODE_REL);
+	if (np->smart_poll.feature_smart_poll) {
+		if ( hrtimer_start(&np->smart_poll.timer,
+			ktime_set(0,NANO_SECOND/np->smart_poll.smart_poll_freq),
+			HRTIMER_MODE_REL) ) {
+			printk(KERN_DEBUG "Failed to start hrtimer,"
+					"use interrupt mode for this packet\n");
+			np->rx.sring->private.netif.smartpoll_active = 0;
+		}
+	}
 
 	spin_unlock_irqrestore(&np->tx_lock, flags);
 
