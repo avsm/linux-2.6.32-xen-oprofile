@@ -53,7 +53,7 @@
 
 static struct ethtool_ops xennet_ethtool_ops;
 
-static int use_smartpoll = 1;
+static int use_smartpoll = 0;
 module_param(use_smartpoll, int, 0600);
 MODULE_PARM_DESC (use_smartpoll, "Use smartpoll mechanism if available");
 
