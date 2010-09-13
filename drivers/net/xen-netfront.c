@@ -1376,10 +1376,15 @@ static enum hrtimer_restart smart_poll_function(struct hrtimer *timer)
 		np->smart_poll.active = 0;
 	}
 
-	if (np->rx.sring->private.netif.smartpoll_active)
-		hrtimer_start(timer,
+	if (np->rx.sring->private.netif.smartpoll_active) {
+		if ( hrtimer_start(timer,
 			ktime_set(0, NANO_SECOND/psmart_poll->smart_poll_freq),
-			HRTIMER_MODE_REL);
+			HRTIMER_MODE_REL) ) {
+			printk(KERN_DEBUG "Failed to start hrtimer,"
+					"use interrupt mode for this packet\n");
+			np->rx.sring->private.netif.smartpoll_active = 0;
+		}
+	}
 
 end:
 	spin_unlock_irqrestore(&np->tx_lock, flags);
