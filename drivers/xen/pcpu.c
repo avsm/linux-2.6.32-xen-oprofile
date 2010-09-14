@@ -313,6 +313,38 @@ static struct pcpu *_sync_pcpu(int cpu_num, int *max_id, int *result)
 	return pcpu;
 }
 
+int xen_pcpu_index(uint32_t id, int is_acpiid)
+{
+	int cpu_num = 0, max_id = 0, ret;
+	xen_platform_op_t op = {
+		.cmd            = XENPF_get_cpuinfo,
+		.interface_version  = XENPF_INTERFACE_VERSION,
+	};
+	struct xenpf_pcpuinfo *info = &op.u.pcpu_info;
+
+	info->xen_cpuid = 0;
+	ret = HYPERVISOR_dom0_op(&op);
+	if (ret)
+		return -1;
+	max_id = op.u.pcpu_info.max_present;
+
+	while ((cpu_num <= max_id)) {
+		info->xen_cpuid = cpu_num;
+		ret = HYPERVISOR_dom0_op(&op);
+		if (ret)
+			continue;
+
+		if (op.u.pcpu_info.max_present > max_id)
+			max_id = op.u.pcpu_info.max_present;
+		if (id == (is_acpiid ? info->acpi_id : info->apic_id))
+			return cpu_num;
+		cpu_num++;
+	}
+
+    return -1;
+}
+EXPORT_SYMBOL(xen_pcpu_index);
+
 /*
  * Sync dom0's pcpu information with xen hypervisor's
  */
@@ -417,4 +449,4 @@ static int __init xen_pcpu_init(void)
 	return err;
 }
 
-subsys_initcall(xen_pcpu_init);
+arch_initcall(xen_pcpu_init);
