@@ -27,4 +27,6 @@ static inline int xen_pcpu_online(uint32_t flags)
 extern int register_xen_pcpu_notifier(struct notifier_block *nb);
 
 extern void unregister_xen_pcpu_notifier(struct notifier_block *nb);
+
+extern int xen_pcpu_index(uint32_t acpi_id, int is_acpiid);
 #endif

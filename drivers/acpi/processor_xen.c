@@ -39,6 +39,7 @@
 #include <acpi/acpi_drivers.h>
 #include <acpi/processor.h>
 #include <xen/acpi.h>
+#include <xen/pcpu.h>
 
 #define PREFIX "ACPI: "
 
@@ -81,6 +82,42 @@ struct acpi_driver xen_acpi_processor_driver = {
 		.notify = xen_acpi_processor_notify,
 		},
 };
+
+static int is_processor_present(acpi_handle handle)
+{
+	acpi_status status;
+	unsigned long long sta = 0;
+
+
+	status = acpi_evaluate_integer(handle, "_STA", NULL, &sta);
+
+	if (ACPI_SUCCESS(status) && (sta & ACPI_STA_DEVICE_PRESENT))
+		return 1;
+
+	/*
+	 * _STA is mandatory for a processor that supports hot plug
+	 */
+	if (status == AE_NOT_FOUND)
+		ACPI_DEBUG_PRINT((ACPI_DB_INFO,
+				"Processor does not support hot plug\n"));
+	else
+		ACPI_EXCEPTION((AE_INFO, status,
+				"Processor Device is not present"));
+	return 0;
+}
+
+static acpi_status
+xen_acpi_processor_hotadd_init(struct acpi_processor *pr, int *p_cpu)
+{
+	if (!is_processor_present(pr->handle))
+		return AE_ERROR;
+
+	if (processor_cntl_xen_notify(pr,
+				PROCESSOR_HOTPLUG, HOTPLUG_TYPE_ADD))
+		return AE_ERROR;
+
+	return AE_OK;
+}
 
 static int xen_acpi_processor_get_info(struct acpi_device *device)
 {
@@ -164,14 +201,12 @@ static int xen_acpi_processor_get_info(struct acpi_device *device)
 	 *  They should be ignored _iff they are physically not present.
 	 *
 	 */
-#if 0
-	if (pr->id == -1) {
+	if (xen_pcpu_index(pr->acpi_id, 1) == -1) {
 		if (ACPI_FAILURE
-		    (acpi_processor_hotadd_init(pr->handle, &pr->id))) {
+		    (xen_acpi_processor_hotadd_init(pr, &pr->id))) {
 			return -ENODEV;
 		}
 	}
-#endif
 
 	/*
 	 * On some boxes several processors use the same processor bus id.
