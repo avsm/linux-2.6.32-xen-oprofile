@@ -1654,9 +1654,9 @@ static int xennet_connect(struct net_device *dev)
 			np->smart_poll.feature_smart_poll = 0;
 	}
 
+	hrtimer_init(&np->smart_poll.timer, CLOCK_MONOTONIC,
+		     HRTIMER_MODE_REL);
 	if (np->smart_poll.feature_smart_poll) {
-		hrtimer_init(&np->smart_poll.timer, CLOCK_MONOTONIC,
-			     HRTIMER_MODE_REL);
 		np->smart_poll.timer.function = smart_poll_function;
 		np->smart_poll.netdev = dev;
 		np->smart_poll.smart_poll_freq = DEFAULT_SMART_POLL_FREQ;
