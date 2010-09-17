@@ -1374,7 +1374,7 @@ void xen_irq_resume(void)
 		struct physdev_pirq_eoi_gmfn eoi_gmfn;
 		
 		eoi_gmfn.gmfn = virt_to_mfn(pirq_needs_eoi_bits);
-		if (HYPERVISOR_physdev_op(PHYSDEVOP_pirq_eoi_gmfn, &eoi_gmfn) == 0) {
+		if (HYPERVISOR_physdev_op(PHYSDEVOP_pirq_eoi_gmfn, &eoi_gmfn) != 0) {
 			/* Could recover by reverting to old method...? */
 			BUG();
 		}
