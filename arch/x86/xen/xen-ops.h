@@ -31,6 +31,7 @@ pgd_t *xen_setup_kernel_pagetable(pgd_t *pgd, unsigned long max_pfn);
 void xen_ident_map_ISA(void);
 void xen_reserve_top(void);
 void xen_ident_map_ISA(void);
+extern unsigned long xen_max_p2m_pfn;
 
 void xen_set_pat(u64);
 
