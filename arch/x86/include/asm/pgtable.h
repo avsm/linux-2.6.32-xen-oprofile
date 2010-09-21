@@ -14,6 +14,7 @@
 	 : (prot))
 
 #ifndef __ASSEMBLY__
+#include <linux/mm_types.h>
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
@@ -24,6 +25,17 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
 
 extern spinlock_t pgd_lock;
 extern struct list_head pgd_list;
+
+static inline void pgd_set_mm(pgd_t *pgd, struct mm_struct *mm)
+{
+	BUILD_BUG_ON(sizeof(virt_to_page(pgd)->index) < sizeof(mm));
+	virt_to_page(pgd)->index = (pgoff_t)mm;
+}
+
+static inline struct mm_struct *pgd_page_get_mm(struct page *page)
+{
+	return (struct mm_struct *)page->index;
+}
 
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
