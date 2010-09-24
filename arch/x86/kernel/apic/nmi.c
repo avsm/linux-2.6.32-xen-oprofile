@@ -558,6 +558,9 @@ void arch_trigger_all_cpu_backtrace(void)
 {
 	int i;
 
+	if (!cpu_has_apic)
+		return;
+
 	cpumask_copy(&backtrace_mask, cpu_online_mask);
 
 	printk(KERN_INFO "sending NMI to all CPUs:\n");
