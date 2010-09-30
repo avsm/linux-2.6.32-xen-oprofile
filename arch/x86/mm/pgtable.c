@@ -99,7 +99,7 @@ static inline void pgd_list_del(pgd_t *pgd)
 #define UNSHARED_PTRS_PER_PGD				\
 	(SHARED_KERNEL_PMD ? KERNEL_PGD_BOUNDARY : PTRS_PER_PGD)
 
-static void pgd_ctor(pgd_t *pgd)
+static void pgd_ctor(struct mm_struct *mm, pgd_t *pgd)
 {
 	/* If the pgd points to a shared pagetable level (either the
 	   ptes in non-PAE, or shared PMD in PAE), then just copy the
@@ -117,8 +117,10 @@ static void pgd_ctor(pgd_t *pgd)
 	}
 
 	/* list required to sync kernel mapping updates */
-	if (!SHARED_KERNEL_PMD)
+	if (!SHARED_KERNEL_PMD) {
+		pgd_set_mm(pgd, mm);
 		pgd_list_add(pgd);
+	}
 }
 
 static void pgd_dtor(pgd_t *pgd)
@@ -284,7 +286,7 @@ pgd_t *pgd_alloc(struct mm_struct *mm)
 	 */
 	spin_lock_irqsave(&pgd_lock, flags);
 
-	pgd_ctor(pgd);
+	pgd_ctor(mm, pgd);
 	pgd_prepopulate_pmd(mm, pgd, pmds);
 
 	spin_unlock_irqrestore(&pgd_lock, flags);
