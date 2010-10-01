@@ -99,6 +99,18 @@ static inline void pgd_list_del(pgd_t *pgd)
 #define UNSHARED_PTRS_PER_PGD				\
 	(SHARED_KERNEL_PMD ? KERNEL_PGD_BOUNDARY : PTRS_PER_PGD)
 
+
+static void pgd_set_mm(pgd_t *pgd, struct mm_struct *mm)
+{
+	BUILD_BUG_ON(sizeof(virt_to_page(pgd)->index) < sizeof(mm));
+	virt_to_page(pgd)->index = (pgoff_t)mm;
+}
+
+struct mm_struct *pgd_page_get_mm(struct page *page)
+{
+	return (struct mm_struct *)page->index;
+}
+
 static void pgd_ctor(struct mm_struct *mm, pgd_t *pgd)
 {
 	/* If the pgd points to a shared pagetable level (either the
