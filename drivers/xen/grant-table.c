@@ -548,7 +548,7 @@ int gnttab_copy_grant_page(grant_ref_t ref, struct page **pagep)
 	if (!xen_feature(XENFEAT_auto_translated_physmap)) {
 		set_phys_to_machine(page_to_pfn(new_page), INVALID_P2M_ENTRY);
 
-		mmu.ptr = (new_mfn << PAGE_SHIFT) | MMU_MACHPHYS_UPDATE;
+		mmu.ptr = PFN_PHYS(new_mfn) | MMU_MACHPHYS_UPDATE;
 		mmu.val = pfn;
 		err = HYPERVISOR_mmu_update(&mmu, 1, NULL, DOMID_SELF);
 		BUG_ON(err);
