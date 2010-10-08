@@ -401,7 +401,7 @@ static bool identity_mapped_irq(unsigned irq)
 	return irq < get_nr_hw_irqs();
 }
 
-static void pirq_eoi(int irq)
+static void pirq_eoi(unsigned int irq)
 {
 	struct irq_info *info = info_for_irq(irq);
 	struct physdev_eoi eoi = { .irq = info->u.pirq.nr };
