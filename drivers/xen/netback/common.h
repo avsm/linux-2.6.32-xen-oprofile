@@ -320,7 +320,7 @@ struct xen_netbk {
 	struct gnttab_copy grant_copy_op[2*NET_RX_RING_SIZE];
 	unsigned char rx_notify[NR_IRQS];
 	u16 notify_list[NET_RX_RING_SIZE];
-	struct netbk_rx_meta meta[NET_RX_RING_SIZE];
+	struct netbk_rx_meta meta[2*NET_RX_RING_SIZE];
 };
 
 extern struct xen_netbk *xen_netbk;
