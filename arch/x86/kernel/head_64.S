@@ -141,6 +141,8 @@ ident_complete:
 	addq	%rbp, trampoline_level4_pgt + (511*8)(%rip)
 #endif
 
+	movq    $KERNEL_IMAGE_SIZE / PAGE_SIZE, max_pfn_mapped(%rip)
+
 	/* Due to ENTRY(), sometimes the empty space gets filled with
 	 * zeros. Better take a jmp than relying on empty space being
 	 * filled with 0x90 (nop)
