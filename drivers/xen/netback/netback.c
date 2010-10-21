@@ -785,15 +785,34 @@ static int __on_net_schedule_list(struct xen_netif *netif)
 	return !list_empty(&netif->list);
 }
 
+/* Must be called with net_schedule_list_lock held */
 static void remove_from_net_schedule_list(struct xen_netif *netif)
 {
-	struct xen_netbk *netbk = &xen_netbk[netif->group];
-	spin_lock_irq(&netbk->net_schedule_list_lock);
 	if (likely(__on_net_schedule_list(netif))) {
 		list_del_init(&netif->list);
 		netif_put(netif);
 	}
+}
+
+static struct xen_netif *poll_net_schedule_list(struct xen_netbk *netbk)
+{
+	struct xen_netif *netif = NULL;
+
+	spin_lock_irq(&netbk->net_schedule_list_lock);
+	if (list_empty(&netbk->net_schedule_list))
+		goto out;
+
+	netif = list_first_entry(&netbk->net_schedule_list,
+				 struct xen_netif, list);
+	if (!netif)
+		goto out;
+
+	netif_get(netif);
+
+	remove_from_net_schedule_list(netif);
+out:
 	spin_unlock_irq(&netbk->net_schedule_list_lock);
+	return netif;
 }
 
 static void add_to_net_schedule_list_tail(struct xen_netif *netif)
@@ -828,7 +847,10 @@ void netif_schedule_work(struct xen_netif *netif)
 
 void netif_deschedule_work(struct xen_netif *netif)
 {
+	struct xen_netbk *netbk = &xen_netbk[netif->group];
+	spin_lock_irq(&netbk->net_schedule_list_lock);
 	remove_from_net_schedule_list(netif);
+	spin_unlock_irq(&netbk->net_schedule_list_lock);
 }
 
 
@@ -1312,12 +1334,11 @@ static unsigned net_tx_build_mops(struct xen_netbk *netbk)
 		int work_to_do;
 		unsigned int data_len;
 		pending_ring_idx_t index;
-	
+
 		/* Get a netif from the list with work to do. */
-		netif = list_first_entry(&netbk->net_schedule_list,
-				struct xen_netif, list);
-		netif_get(netif);
-		remove_from_net_schedule_list(netif);
+		netif = poll_net_schedule_list(netbk);
+		if (!netif)
+			continue;
 
 		RING_FINAL_CHECK_FOR_REQUESTS(&netif->tx, work_to_do);
 		if (!work_to_do) {
