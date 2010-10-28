@@ -17,7 +17,6 @@
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
 
-#include <xen/xen.h>
 #include <xen/page.h>
 #include <xen/interface/callback.h>
 #include <xen/interface/memory.h>
@@ -117,13 +116,17 @@ static unsigned long __init xen_return_unused_memory(unsigned long max_pfn,
 						     const struct e820map *e820)
 {
 	phys_addr_t max_addr = PFN_PHYS(max_pfn);
-	phys_addr_t last_end = 0;
+	phys_addr_t last_end = ISA_END_ADDRESS;
 	unsigned long released = 0;
 	int i;
 
+	/* Free any unused memory above the low 1Mbyte. */
 	for (i = 0; i < e820->nr_map && last_end < max_addr; i++) {
 		phys_addr_t end = e820->map[i].addr;
 		end = min(max_addr, end);
+
+		if (last_end < end)
+			continue;
 
 		released += xen_release_chunk(last_end, end);
 		last_end = e820->map[i].addr + e820->map[i].size;
@@ -159,6 +162,7 @@ char * __init xen_memory_setup(void)
 
 	rc = HYPERVISOR_memory_op(XENMEM_memory_map, &memmap);
 	if (rc == -ENOSYS) {
+		BUG_ON(xen_initial_domain());
 		memmap.nr_entries = 1;
 		map[0].addr = 0ULL;
 		map[0].size = mem_end;
@@ -196,9 +200,13 @@ char * __init xen_memory_setup(void)
 	}
 
 	/*
-	 * Even though this is normal, usable memory under Xen, reserve
-	 * ISA memory anyway because too many things think they can poke
+	 * In domU, the ISA region is normal, usable memory, but we
+	 * reserve ISA memory anyway because too many things poke
 	 * about in there.
+	 *
+	 * In Dom0, the host E820 information can leave gaps in the
+	 * ISA range, which would cause us to release those pages.  To
+	 * avoid this, we unconditionally reserve them here.
 	 */
 	e820_add_region(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS,
 			E820_RESERVED);
