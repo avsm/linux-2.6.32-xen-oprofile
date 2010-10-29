@@ -85,6 +85,22 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
 	start = PFN_UP(start_addr);
 	end = PFN_DOWN(end_addr);
 
+	/*
+	 * Domain 0 maintains a 1-1 P2M mapping for the first megabyte
+	 * so do not return such memory to the hypervisor.
+	 *
+	 * This region can contain various firmware tables and the
+	 * like which are often assumed to be always mapped and
+	 * available via phys_to_virt.
+	 */
+	if (xen_initial_domain()) {
+		if (end < PFN_DOWN(ISA_END_ADDRESS))
+			return 0;
+
+		if (start < PFN_DOWN(ISA_END_ADDRESS))
+			start = PFN_DOWN(ISA_END_ADDRESS);
+	}
+
 	if (end <= start)
 		return 0;
 
@@ -164,6 +180,7 @@ char * __init xen_memory_setup(void)
 		XENMEM_memory_map;
 	rc = HYPERVISOR_memory_op(op, &memmap);
 	if (rc == -ENOSYS) {
+		BUG_ON(xen_initial_domain());
 		memmap.nr_entries = 1;
 		map[0].addr = 0ULL;
 		map[0].size = mem_end;
@@ -208,8 +225,9 @@ char * __init xen_memory_setup(void)
 	 * In a dom0 kernel, this region is identity mapped with the
 	 * hardware ISA area, so it really is out of bounds.
 	 */
-	e820_add_region(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS,
-			E820_RESERVED);
+	if (!xen_initial_domain())
+		e820_add_region(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS,
+				E820_RESERVED);
 
 	/*
 	 * Reserve Xen bits:
