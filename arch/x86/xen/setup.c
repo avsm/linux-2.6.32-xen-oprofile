@@ -85,24 +85,13 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
 	start = PFN_UP(start_addr);
 	end = PFN_DOWN(end_addr);
 
-	/*
-	 * Domain 0 maintains a 1-1 P2M mapping for the first megabyte
-	 * so do not return such memory to the hypervisor.
-	 *
-	 * This region can contain various firmware tables and the
-	 * like which are often assumed to be always mapped and
-	 * available via phys_to_virt.
-	 */
-	if (xen_initial_domain()) {
-		if (end < PFN_DOWN(ISA_END_ADDRESS))
-			return 0;
-
-		if (start < PFN_DOWN(ISA_END_ADDRESS))
-			start = PFN_DOWN(ISA_END_ADDRESS);
-	}
-
 	if (end <= start)
 		return 0;
+
+	if (end < PFN_DOWN(ISA_END_ADDRESS))
+		return 0;
+	if (start < PFN_DOWN(ISA_END_ADDRESS))
+		start = PFN_DOWN(ISA_END_ADDRESS);
 
 	printk(KERN_INFO "xen_release_chunk: looking at area pfn %lx-%lx: ",
 	       start, end);
@@ -218,16 +207,16 @@ char * __init xen_memory_setup(void)
 	}
 
 	/*
-	 * Even though this is normal, usable memory under Xen, reserve
-	 * ISA memory anyway because too many things think they can poke
+	 * In domU, the ISA region is normal, usable memory, but we
+	 * reserve ISA memory anyway because too many things poke
 	 * about in there.
 	 *
-	 * In a dom0 kernel, this region is identity mapped with the
-	 * hardware ISA area, so it really is out of bounds.
+	 * In Dom0, the host E820 information can leave gaps in the
+	 * ISA range, which would cause us to release those pages.  To
+	 * avoid this, we unconditionally reserve them here.
 	 */
-	if (!xen_initial_domain())
-		e820_add_region(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS,
-				E820_RESERVED);
+	e820_add_region(ISA_START_ADDRESS, ISA_END_ADDRESS - ISA_START_ADDRESS,
+			E820_RESERVED);
 
 	/*
 	 * Reserve Xen bits:
