@@ -812,10 +812,11 @@ static void disable_dynirq(unsigned int irq)
 static void ack_dynirq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
+	struct irq_desc *desc = irq_to_desc(irq);
 
 	move_masked_irq(irq);
 
-	if (VALID_EVTCHN(evtchn))
+	if (VALID_EVTCHN(evtchn) && !(desc->status & IRQ_DISABLED))
 		unmask_evtchn(evtchn);
 }
 
