@@ -1285,9 +1285,6 @@ static void restore_cpu_virqs(unsigned int cpu)
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_virq_info(evtchn, virq);
 		bind_evtchn_to_cpu(evtchn, cpu);
-
-		/* Ready for use. */
-		unmask_evtchn(evtchn);
 	}
 }
 
@@ -1313,10 +1310,6 @@ static void restore_cpu_ipis(unsigned int cpu)
 		evtchn_to_irq[evtchn] = irq;
 		irq_info[irq] = mk_ipi_info(evtchn, ipi);
 		bind_evtchn_to_cpu(evtchn, cpu);
-
-		/* Ready for use. */
-		unmask_evtchn(evtchn);
-
 	}
 }
 
@@ -1389,6 +1382,7 @@ EXPORT_SYMBOL_GPL(xen_ignore_irq);
 void xen_irq_resume(void)
 {
 	unsigned int cpu, irq, evtchn;
+	struct irq_desc *desc;
 
 	init_evtchn_cpu_bindings();
 
@@ -1406,6 +1400,23 @@ void xen_irq_resume(void)
 	for_each_possible_cpu(cpu) {
 		restore_cpu_virqs(cpu);
 		restore_cpu_ipis(cpu);
+	}
+
+	/*
+	 * Unmask any IRQF_NO_SUSPEND IRQs which are enabled. These
+	 * are not handled by the IRQ core.
+	 */
+	for_each_irq_desc(irq, desc) {
+		if (!desc->action || !(desc->action->flags & IRQF_NO_SUSPEND))
+			continue;
+		if (desc->status & IRQ_DISABLED)
+			continue;
+
+		evtchn = evtchn_from_irq(irq);
+		if (evtchn == -1)
+			continue;
+
+		unmask_evtchn(evtchn);
 	}
 
 	if (pirq_eoi_does_unmask) {
