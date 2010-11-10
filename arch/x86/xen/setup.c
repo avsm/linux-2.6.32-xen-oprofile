@@ -18,7 +18,6 @@
 #include <asm/xen/hypervisor.h>
 #include <asm/xen/hypercall.h>
 
-#include <xen/xen.h>
 #include <xen/page.h>
 #include <xen/interface/callback.h>
 #include <xen/interface/memory.h>
@@ -88,11 +87,6 @@ static unsigned long __init xen_release_chunk(phys_addr_t start_addr,
 	if (end <= start)
 		return 0;
 
-	if (end < PFN_DOWN(ISA_END_ADDRESS))
-		return 0;
-	if (start < PFN_DOWN(ISA_END_ADDRESS))
-		start = PFN_DOWN(ISA_END_ADDRESS);
-
 	printk(KERN_INFO "xen_release_chunk: looking at area pfn %lx-%lx: ",
 	       start, end);
 	for(pfn = start; pfn < end; pfn++) {
@@ -123,13 +117,17 @@ static unsigned long __init xen_return_unused_memory(unsigned long max_pfn,
 						     const struct e820map *e820)
 {
 	phys_addr_t max_addr = PFN_PHYS(max_pfn);
-	phys_addr_t last_end = 0;
+	phys_addr_t last_end = ISA_END_ADDRESS;
 	unsigned long released = 0;
 	int i;
 
+	/* Free any unused memory above the low 1Mbyte. */
 	for (i = 0; i < e820->nr_map && last_end < max_addr; i++) {
 		phys_addr_t end = e820->map[i].addr;
 		end = min(max_addr, end);
+
+		if (last_end < end)
+			continue;
 
 		released += xen_release_chunk(last_end, end);
 		last_end = e820->map[i].addr + e820->map[i].size;
