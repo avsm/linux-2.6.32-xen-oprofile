@@ -126,11 +126,9 @@ static unsigned long __init xen_return_unused_memory(unsigned long max_pfn,
 		phys_addr_t end = e820->map[i].addr;
 		end = min(max_addr, end);
 
-		if (last_end > end)
-			continue;
-
-		released += xen_release_chunk(last_end, end);
-		last_end = e820->map[i].addr + e820->map[i].size;
+		if (last_end < end)
+			released += xen_release_chunk(last_end, end);
+		last_end = max(last_end, e820->map[i].addr + e820->map[i].size);
 	}
 
 	if (last_end < max_addr)
