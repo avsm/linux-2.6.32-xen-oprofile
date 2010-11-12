@@ -18,12 +18,9 @@ blktap_control_get_minor(void)
 	int minor;
 	struct blktap *tap;
 
-	tap = kmalloc(sizeof(*tap), GFP_KERNEL);
+	tap = kzalloc(sizeof(*tap), GFP_KERNEL);
 	if (unlikely(!tap))
 		return NULL;
-
-	memset(tap, 0, sizeof(*tap));
-	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
 	mutex_lock(&blktap_lock);
 
@@ -289,9 +286,6 @@ static int __init
 blktap_init(void)
 {
 	int err;
-
-	if (!xen_pv_domain())
-		return -ENODEV;
 
 	err = blktap_device_init();
 	if (err)

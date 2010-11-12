@@ -3,7 +3,6 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/device.h>
-#include <xen/balloon.h>
 
 #include "blktap.h"
 
@@ -127,6 +126,25 @@ blktap_request_free(struct blktap *tap,
 	mempool_free(request, request_pool);
 
 	__page_pool_wake(tap->pool);
+}
+
+void
+blktap_request_bounce(struct blktap *tap,
+		      struct blktap_request *request,
+		      int seg, int write)
+{
+	struct scatterlist *sg = &request->sg_table[seg];
+	void *s, *p;
+
+	BUG_ON(seg >= request->nr_pages);
+
+	s = sg_virt(sg);
+	p = page_address(request->pages[seg]) + sg->offset;
+
+	if (write)
+		memcpy(p, s, sg->length);
+	else
+		memcpy(s, p, sg->length);
 }
 
 static void

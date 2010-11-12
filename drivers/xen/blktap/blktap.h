@@ -7,7 +7,6 @@
 #include <linux/init.h>
 #include <linux/scatterlist.h>
 #include <xen/blkif.h>
-#include <xen/grant_table.h>
 
 extern int blktap_debug_level;
 extern int blktap_ring_major;
@@ -27,7 +26,6 @@ extern int blktap_device_major;
 
 #define MAX_BLKTAP_DEVICE            1024
 
-#define BLKTAP_CONTROL               1
 #define BLKTAP_DEVICE                4
 #define BLKTAP_DEVICE_CLOSED         5
 #define BLKTAP_SHUTDOWN_REQUESTED    8
@@ -94,10 +92,12 @@ struct blktap_ring {
 	struct task_struct            *task;
 
 	struct vm_area_struct         *vma;
-	struct blkif_front_ring             ring;
-	struct vm_foreign_map          foreign_map;
+	struct blkif_front_ring        ring;
 	unsigned long                  ring_vstart;
 	unsigned long                  user_vstart;
+
+	int                            n_pending;
+	struct blktap_request         *pending[MAX_PENDING_REQS];
 
 	wait_queue_head_t              poll_wait;
 
@@ -123,18 +123,20 @@ struct blktap_statistics {
 struct blktap_request {
 	struct blktap                 *tap;
 	struct request                *rq;
-	uint16_t                       usr_idx;
+	int                            usr_idx;
 
-	uint8_t                        status;
-	atomic_t                       pendcnt;
-	unsigned short                 operation;
-
+	int                            operation;
 	struct timeval                 time;
-	struct grant_handle_pair       handles[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
+	struct scatterlist             sg_table[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 	struct page                   *pages[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 	int                            nr_pages;
 };
+
+#define blktap_for_each_sg(_sg, _req, _i)	\
+	for (_sg = (_req)->sg_table, _i = 0;	\
+	     _i < (_req)->nr_pages;		\
+	     (_sg)++, (_i)++)
 
 struct blktap {
 	int                            minor;
@@ -143,10 +145,6 @@ struct blktap {
 	struct blktap_ring             ring;
 	struct blktap_device           device;
 	struct blktap_page_pool       *pool;
-
-	int                            pending_cnt;
-	struct blktap_request         *pending_requests[MAX_PENDING_REQS];
-	struct scatterlist             sg[BLKIF_MAX_SEGMENTS_PER_REQUEST];
 
 	wait_queue_head_t              remove_wait;
 	struct work_struct             remove_work;
@@ -174,6 +172,13 @@ void blktap_ring_exit(void);
 size_t blktap_ring_debug(struct blktap *, char *, size_t);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
+struct blktap_request *blktap_ring_make_request(struct blktap *);
+void blktap_ring_free_request(struct blktap *,struct blktap_request *);
+void blktap_ring_submit_request(struct blktap *, struct blktap_request *);
+int blktap_ring_map_request_segment(struct blktap *, struct blktap_request *, int);
+int blktap_ring_map_request(struct blktap *, struct blktap_request *);
+void blktap_ring_unmap_request(struct blktap *, struct blktap_request *);
+void blktap_ring_set_message(struct blktap *, int);
 void blktap_ring_kick_user(struct blktap *);
 
 int blktap_sysfs_init(void);
@@ -187,7 +192,7 @@ size_t blktap_device_debug(struct blktap *, char *, size_t);
 int blktap_device_create(struct blktap *, struct blktap_params *);
 int blktap_device_destroy(struct blktap *);
 void blktap_device_destroy_sync(struct blktap *);
-int blktap_device_run_queue(struct blktap *);
+void blktap_device_run_queue(struct blktap *);
 void blktap_device_end_request(struct blktap *, struct blktap_request *, int);
 
 int blktap_page_pool_init(struct kobject *);
@@ -199,14 +204,6 @@ struct blktap_request *blktap_request_alloc(struct blktap *);
 int blktap_request_get_pages(struct blktap *, struct blktap_request *, int);
 void blktap_request_free(struct blktap *, struct blktap_request *);
 void blktap_request_bounce(struct blktap *, struct blktap_request *, int, int);
-
-static inline unsigned long
-request_to_kaddr(struct blktap_request *req, int seg)
-{
-	return (unsigned long)page_address(req->pages[seg]);
-}
-
-#define request_to_page(_request, _seg) ((_request)->pages[_seg])
 
 
 #endif
