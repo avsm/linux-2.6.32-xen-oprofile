@@ -488,7 +488,8 @@ blktap_device_create(struct blktap *tap, struct blktap_params *params)
 	set_bit(BLKTAP_DEVICE, &tap->dev_inuse);
 
 	dev_info(disk_to_dev(gd), "sector-size: %u capacity: %llu\n",
-		 queue_logical_block_size(rq), get_capacity(gd));
+		 queue_logical_block_size(rq),
+		 (unsigned long long)get_capacity(gd));
 
 	return 0;
 
@@ -516,7 +517,8 @@ blktap_device_debug(struct blktap *tap, char *buf, size_t size)
 
 	s += snprintf(s, end - s,
 		      "disk capacity:%llu sector size:%u\n",
-		      get_capacity(disk), queue_logical_block_size(q));
+		      (unsigned long long)get_capacity(disk),
+		      queue_logical_block_size(q));
 
 	s += snprintf(s, end - s,
 		      "queue flags:%#lx plugged:%d stopped:%d empty:%d\n",
