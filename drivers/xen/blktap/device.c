@@ -108,13 +108,13 @@ static struct block_device_operations blktap_device_file_operations = {
 static inline struct request*
 __blktap_next_queued_rq(struct request_queue *q)
 {
-	return elv_next_request(q);
+	return blk_peek_request(q);
 }
 
 static inline void
 __blktap_dequeue_rq(struct request *rq)
 {
-	blkdev_dequeue_request(rq);
+	blk_start_request(rq);
 }
 
 /* NB. err == 0 indicates success, failures < 0 */
@@ -122,6 +122,7 @@ __blktap_dequeue_rq(struct request *rq)
 static inline void
 __blktap_end_queued_rq(struct request *rq, int err)
 {
+	blk_start_request(rq);
 	__blk_end_request(rq, err, blk_rq_bytes(rq));
 }
 
@@ -151,7 +152,7 @@ blktap_device_end_request(struct blktap *tap,
 
 	blktap_ring_free_request(tap, request);
 
-	dev_dbg(&tapdev->gd->dev,
+	dev_dbg(disk_to_dev(tapdev->gd),
 		"end_request: op=%d error=%d bytes=%d\n",
 		rq_data_dir(rq), error, blk_rq_bytes(rq));
 
@@ -180,7 +181,7 @@ blktap_device_make_request(struct blktap *tap, struct request *rq)
 	write = rq_data_dir(rq) == WRITE;
 	nsegs = blk_rq_map_sg(rq->q, rq, request->sg_table);
 
-	dev_dbg(&tapdev->gd->dev,
+	dev_dbg(disk_to_dev(tapdev->gd),
 		"make_request: op=%c bytes=%d nsegs=%d\n",
 		write ? 'w' : 'r', blk_rq_bytes(rq), nsegs);
 
@@ -210,7 +211,7 @@ _out:
 	return err;
 fail:
 	if (printk_ratelimit())
-		dev_warn(&tapdev->gd->dev,
+		dev_warn(disk_to_dev(tapdev->gd),
 			 "make request: %d, failing\n", err);
 	goto _out;
 }
@@ -241,11 +242,6 @@ blktap_device_run_queue(struct blktap *tap)
 
 		if (!blk_fs_request(rq)) {
 			__blktap_end_queued_rq(rq, -EOPNOTSUPP);
-			continue;
-		}
-
-		if (blk_empty_barrier(rq)) {
-			__blktap_end_queued_rq(rq, 0);
 			continue;
 		}
 
@@ -491,8 +487,8 @@ blktap_device_create(struct blktap *tap, struct blktap_params *params)
 
 	set_bit(BLKTAP_DEVICE, &tap->dev_inuse);
 
-	dev_info(&gd->dev, "sector-size: %u capacity: %llu\n",
-		 rq->hardsect_size, get_capacity(gd));
+	dev_info(disk_to_dev(gd), "sector-size: %u capacity: %llu\n",
+		 queue_logical_block_size(rq), get_capacity(gd));
 
 	return 0;
 
@@ -520,7 +516,7 @@ blktap_device_debug(struct blktap *tap, char *buf, size_t size)
 
 	s += snprintf(s, end - s,
 		      "disk capacity:%llu sector size:%u\n",
-		      get_capacity(disk), queue_hardsect_size(q));
+		      get_capacity(disk), queue_logical_block_size(q));
 
 	s += snprintf(s, end - s,
 		      "queue flags:%#lx plugged:%d stopped:%d empty:%d\n",

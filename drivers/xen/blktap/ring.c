@@ -247,7 +247,7 @@ blktap_ring_submit_request(struct blktap *tap,
 	breq = RING_GET_REQUEST(&ring->ring, ring->ring.req_prod_pvt);
 
 	breq->id            = request->usr_idx;
-	breq->sector_number = request->rq->sector;
+	breq->sector_number = blk_rq_pos(request->rq);
 	breq->handle        = 0;
 	breq->operation     = request->operation;
 	breq->nr_segments   = request->nr_pages;
