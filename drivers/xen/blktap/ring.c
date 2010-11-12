@@ -17,8 +17,6 @@
 int blktap_ring_major;
 static struct cdev blktap_ring_cdev;
 
-static DECLARE_WAIT_QUEUE_HEAD(blktap_poll_wait);
-
 static inline struct blktap *
 vma_to_blktap(struct vm_area_struct *vma)
 {
@@ -409,7 +407,7 @@ static unsigned int blktap_ring_poll(struct file *filp, poll_table *wait)
 	struct blktap_ring *ring = &tap->ring;
 	int work = 0;
 
-	poll_wait(filp, &blktap_poll_wait, wait);
+	poll_wait(filp, &tap->pool->wait, wait);
 	poll_wait(filp, &ring->poll_wait, wait);
 
 	down_read(&current->mm->mmap_sem);
@@ -438,12 +436,6 @@ void
 blktap_ring_kick_user(struct blktap *tap)
 {
 	wake_up(&tap->ring.poll_wait);
-}
-
-void
-blktap_ring_kick_all(void)
-{
-	wake_up(&blktap_poll_wait);
 }
 
 int

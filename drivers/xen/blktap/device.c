@@ -605,7 +605,7 @@ blktap_device_run_queue(struct blktap *tap)
 			break;
 		}
 
-		request = blktap_request_allocate(tap);
+		request = blktap_request_alloc(tap);
 		if (!request) {
 			tap->stats.st_oo_req++;
 			goto wait;

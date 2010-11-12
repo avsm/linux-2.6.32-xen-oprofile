@@ -104,6 +104,8 @@ blktap_sysfs_debug_device(struct device *dev, struct device_attribute *attr, cha
 
 	s += blktap_control_debug(tap, s, end - s);
 
+	s += blktap_request_debug(tap, s, end - s);
+
 	s += blktap_device_debug(tap, s, end - s);
 
 	s += blktap_ring_debug(tap, s, end - s);
@@ -129,6 +131,38 @@ blktap_sysfs_show_task(struct device *dev, struct device_attribute *attr, char *
 }
 static DEVICE_ATTR(task, S_IRUGO, blktap_sysfs_show_task, NULL);
 
+static ssize_t
+blktap_sysfs_show_pool(struct device *dev,
+		       struct device_attribute *attr,
+		       char *buf)
+{
+	struct blktap *tap = dev_get_drvdata(dev);
+	return sprintf(buf, "%s", kobject_name(&tap->pool->kobj));
+}
+
+static ssize_t
+blktap_sysfs_store_pool(struct device *dev,
+			struct device_attribute *attr,
+			const char *buf, size_t size)
+{
+	struct blktap *tap = dev_get_drvdata(dev);
+	struct blktap_page_pool *pool, *tmp = tap->pool;
+
+	if (tap->device.gd)
+		return -EBUSY;
+
+	pool = blktap_page_pool_get(buf);
+	if (IS_ERR(pool))
+		return PTR_ERR(pool);
+
+	tap->pool = pool;
+	kobject_put(&tmp->kobj);
+
+	return size;
+}
+DEVICE_ATTR(pool, S_IRUSR|S_IWUSR,
+	    blktap_sysfs_show_pool, blktap_sysfs_store_pool);
+
 int
 blktap_sysfs_create(struct blktap *tap)
 {
@@ -150,6 +184,8 @@ blktap_sysfs_create(struct blktap *tap)
 		err = device_create_file(dev, &dev_attr_debug);
 	if (!err)
 		err = device_create_file(dev, &dev_attr_task);
+	if (!err)
+		err = device_create_file(dev, &dev_attr_pool);
 	if (!err)
 		ring->dev = dev;
 	else

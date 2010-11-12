@@ -121,17 +121,19 @@ struct blktap_statistics {
 };
 
 struct blktap_request {
+	struct blktap                 *tap;
 	struct request                *rq;
 	uint16_t                       usr_idx;
 
 	uint8_t                        status;
 	atomic_t                       pendcnt;
-	uint8_t                        nr_pages;
 	unsigned short                 operation;
 
 	struct timeval                 time;
 	struct grant_handle_pair       handles[BLKIF_MAX_SEGMENTS_PER_REQUEST];
-	struct list_head               free_list;
+
+	struct page                   *pages[BLKIF_MAX_SEGMENTS_PER_REQUEST];
+	int                            nr_pages;
 };
 
 struct blktap {
@@ -140,6 +142,7 @@ struct blktap {
 
 	struct blktap_ring             ring;
 	struct blktap_device           device;
+	struct blktap_page_pool       *pool;
 
 	int                            pending_cnt;
 	struct blktap_request         *pending_requests[MAX_PENDING_REQS];
@@ -150,6 +153,13 @@ struct blktap {
 	char                           name[BLKTAP2_MAX_MESSAGE_LEN];
 
 	struct blktap_statistics       stats;
+};
+
+struct blktap_page_pool {
+	struct mempool_s              *bufs;
+	spinlock_t                     lock;
+	struct kobject                 kobj;
+	wait_queue_head_t              wait;
 };
 
 extern struct mutex blktap_lock;
@@ -165,7 +175,6 @@ size_t blktap_ring_debug(struct blktap *, char *, size_t);
 int blktap_ring_create(struct blktap *);
 int blktap_ring_destroy(struct blktap *);
 void blktap_ring_kick_user(struct blktap *);
-void blktap_ring_kick_all(void);
 
 int blktap_sysfs_init(void);
 void blktap_sysfs_exit(void);
@@ -181,19 +190,23 @@ void blktap_device_destroy_sync(struct blktap *);
 int blktap_device_run_queue(struct blktap *);
 void blktap_device_end_request(struct blktap *, struct blktap_request *, int);
 
-int blktap_request_pool_init(void);
-void blktap_request_pool_free(void);
-int blktap_request_pool_grow(void);
-int blktap_request_pool_shrink(void);
-struct blktap_request *blktap_request_allocate(struct blktap *);
+int blktap_page_pool_init(struct kobject *);
+void blktap_page_pool_exit(void);
+struct blktap_page_pool *blktap_page_pool_get(const char *);
+
+size_t blktap_request_debug(struct blktap *, char *, size_t);
+struct blktap_request *blktap_request_alloc(struct blktap *);
+int blktap_request_get_pages(struct blktap *, struct blktap_request *, int);
 void blktap_request_free(struct blktap *, struct blktap_request *);
-struct page *request_to_page(struct blktap_request *, int);
+void blktap_request_bounce(struct blktap *, struct blktap_request *, int, int);
 
 static inline unsigned long
 request_to_kaddr(struct blktap_request *req, int seg)
 {
-	unsigned long pfn = page_to_pfn(request_to_page(req, seg));
-	return (unsigned long)pfn_to_kaddr(pfn);
+	return (unsigned long)page_address(req->pages[seg]);
 }
+
+#define request_to_page(_request, _seg) ((_request)->pages[_seg])
+
 
 #endif
