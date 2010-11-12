@@ -103,6 +103,42 @@ static struct block_device_operations blktap_device_file_operations = {
 	.getgeo    = blktap_device_getgeo
 };
 
+/* NB. __blktap holding the queue lock; blktap where unlocked */
+
+static inline struct request*
+__blktap_next_queued_rq(struct request_queue *q)
+{
+	return elv_next_request(q);
+}
+
+static inline void
+__blktap_dequeue_rq(struct request *rq)
+{
+	blkdev_dequeue_request(rq);
+}
+
+/* NB. err == 0 indicates success, failures < 0 */
+
+static inline void
+__blktap_end_queued_rq(struct request *rq, int err)
+{
+	__blk_end_request(rq, err, blk_rq_bytes(rq));
+}
+
+static inline void
+__blktap_end_rq(struct request *rq, int err)
+{
+	__blk_end_request(rq, err, blk_rq_bytes(rq));
+}
+
+static inline void
+blktap_end_rq(struct request *rq, int err)
+{
+	spin_lock_irq(rq->q->queue_lock);
+	__blktap_end_rq(rq, err);
+	spin_unlock_irq(rq->q->queue_lock);
+}
+
 void
 blktap_device_end_request(struct blktap *tap,
 			  struct blktap_request *request,
@@ -119,9 +155,7 @@ blktap_device_end_request(struct blktap *tap,
 		"end_request: op=%d error=%d bytes=%d\n",
 		rq_data_dir(rq), error, blk_rq_bytes(rq));
 
-	spin_lock_irq(&tapdev->lock);
-	end_request(request->rq, !error);
-	spin_unlock_irq(&tapdev->lock);
+	blktap_end_rq(rq, error);
 }
 
 int
@@ -201,17 +235,17 @@ blktap_device_run_queue(struct blktap *tap)
 	queue_flag_clear(QUEUE_FLAG_STOPPED, q);
 
 	do {
-		rq = elv_next_request(q);
+		rq = __blktap_next_queued_rq(q);
 		if (!rq)
 			break;
 
 		if (!blk_fs_request(rq)) {
-			end_queued_request(rq, 0);
+			__blktap_end_queued_rq(rq, -EOPNOTSUPP);
 			continue;
 		}
 
 		if (blk_empty_barrier(rq)) {
-			end_queued_request(rq, 1);
+			__blktap_end_queued_rq(rq, 0);
 			continue;
 		}
 
@@ -226,10 +260,10 @@ blktap_device_run_queue(struct blktap *tap)
 			break;
 		}
 
-		blkdev_dequeue_request(req);
+		__blktap_dequeue_rq(rq);
 
 		if (unlikely(err))
-			end_request(rq, 0);
+			__blktap_end_rq(rq, err);
 	} while (1);
 
 	spin_unlock_irq(&tapdev->lock);
@@ -365,11 +399,11 @@ blktap_device_fail_queue(struct blktap *tap)
 	queue_flag_clear(QUEUE_FLAG_STOPPED, q);
 
 	do {
-		struct request *rq = elv_next_request(q);
+		struct request *rq = __blktap_next_queued_rq(q);
 		if (!rq)
 			break;
 
-		end_request(rq, -EIO);
+		__blktap_end_queued_rq(rq, -EIO);
 	} while (1);
 
 	spin_unlock_irq(&tapdev->lock);
