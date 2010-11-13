@@ -1,297 +1,418 @@
+#include <linux/mempool.h>
 #include <linux/spinlock.h>
-#include <xen/balloon.h>
+#include <linux/mutex.h>
 #include <linux/sched.h>
+#include <linux/device.h>
 
 #include "blktap.h"
 
-#define MAX_BUCKETS                      8
-#define BUCKET_SIZE                      MAX_PENDING_REQS
+/* max pages per shared pool. just to prevent accidental dos. */
+#define POOL_MAX_PAGES           (256*BLKIF_MAX_SEGMENTS_PER_REQUEST)
 
-#define BLKTAP_POOL_CLOSING              1
+/* default page pool size. when considering to shrink a shared pool,
+ * note that paused tapdisks may grab a whole lot of pages for a long
+ * time. */
+#define POOL_DEFAULT_PAGES       (2 * MMAP_PAGES)
 
-struct blktap_request_bucket;
+/* max number of pages allocatable per request. */
+#define POOL_MAX_REQUEST_PAGES   BLKIF_MAX_SEGMENTS_PER_REQUEST
 
-struct blktap_request_handle {
-	int                              slot;
-	uint8_t                          inuse;
-	struct blktap_request            request;
-	struct blktap_request_bucket    *bucket;
-};
+/* min request structs per pool. These grow dynamically. */
+#define POOL_MIN_REQS            BLK_RING_SIZE
 
-struct blktap_request_bucket {
-	atomic_t                         reqs_in_use;
-	struct blktap_request_handle     handles[BUCKET_SIZE];
-	struct page                    **foreign_pages;
-};
+static struct kset *pool_set;
 
-struct blktap_request_pool {
-	spinlock_t                       lock;
-	uint8_t                          status;
-	struct list_head                 free_list;
-	atomic_t                         reqs_in_use;
-	wait_queue_head_t                wait_queue;
-	struct blktap_request_bucket    *buckets[MAX_BUCKETS];
-};
+#define kobj_to_pool(_kobj) \
+	container_of(_kobj, struct blktap_page_pool, kobj)
 
-static struct blktap_request_pool pool;
-
-static inline struct blktap_request_handle *
-blktap_request_to_handle(struct blktap_request *req)
-{
-	return container_of(req, struct blktap_request_handle, request);
-}
+static struct kmem_cache *request_cache;
+static mempool_t *request_pool;
 
 static void
-blktap_request_pool_init_request(struct blktap_request *request)
+__page_pool_wake(struct blktap_page_pool *pool)
 {
-	int i;
+	mempool_t *mem = pool->bufs;
 
-	request->usr_idx  = -1;
-	request->nr_pages = 0;
-	request->status   = BLKTAP_REQUEST_FREE;
-	INIT_LIST_HEAD(&request->free_list);
-	for (i = 0; i < ARRAY_SIZE(request->handles); i++) {
-		request->handles[i].user   = INVALID_GRANT_HANDLE;
-		request->handles[i].kernel = INVALID_GRANT_HANDLE;
-	}
+	/*
+	  NB. slightly wasteful to always wait for a full segment
+	  set. but this ensures the next disk makes
+	  progress. presently, the repeated request struct
+	  alloc/release cycles would otherwise keep everyone spinning.
+	*/
+
+	if (mem->curr_nr >= POOL_MAX_REQUEST_PAGES)
+		wake_up(&pool->wait);
 }
 
-static int
-blktap_request_pool_allocate_bucket(void)
+int
+blktap_request_get_pages(struct blktap *tap,
+			 struct blktap_request *request, int nr_pages)
 {
-	int i, idx;
-	unsigned long flags;
-	struct blktap_request *request;
-	struct blktap_request_handle *handle;
-	struct blktap_request_bucket *bucket;
+	struct blktap_page_pool *pool = tap->pool;
+	mempool_t *mem = pool->bufs;
+	struct page *page;
 
-	bucket = kzalloc(sizeof(struct blktap_request_bucket), GFP_KERNEL);
-	if (!bucket)
-		goto fail;
+	BUG_ON(request->nr_pages != 0);
+	BUG_ON(nr_pages > POOL_MAX_REQUEST_PAGES);
 
-	bucket->foreign_pages = alloc_empty_pages_and_pagevec(MMAP_PAGES);
-	if (!bucket->foreign_pages)
-		goto fail;
+	if (mem->curr_nr < nr_pages)
+		return -ENOMEM;
 
-	spin_lock_irqsave(&pool.lock, flags);
+	/* NB. avoid thundering herds of tapdisks colliding. */
+	spin_lock(&pool->lock);
 
-	idx = -1;
-	for (i = 0; i < MAX_BUCKETS; i++) {
-		if (!pool.buckets[i]) {
-			idx = i;
-			pool.buckets[idx] = bucket;
-			break;
-		}
+	if (mem->curr_nr < nr_pages) {
+		spin_unlock(&pool->lock);
+		return -ENOMEM;
 	}
 
-	if (idx == -1) {
-		spin_unlock_irqrestore(&pool.lock, flags);
-		goto fail;
+	while (request->nr_pages < nr_pages) {
+		page = mempool_alloc(mem, GFP_NOWAIT);
+		BUG_ON(!page);
+		request->pages[request->nr_pages++] = page;
 	}
 
-	for (i = 0; i < BUCKET_SIZE; i++) {
-		handle  = bucket->handles + i;
-		request = &handle->request;
-
-		handle->slot   = i;
-		handle->inuse  = 0;
-		handle->bucket = bucket;
-
-		blktap_request_pool_init_request(request);
-		list_add_tail(&request->free_list, &pool.free_list);
-	}
-
-	spin_unlock_irqrestore(&pool.lock, flags);
+	spin_unlock(&pool->lock);
 
 	return 0;
-
-fail:
-	if (bucket && bucket->foreign_pages)
-		free_empty_pages_and_pagevec(bucket->foreign_pages, MMAP_PAGES);
-	kfree(bucket);
-	return -ENOMEM;
 }
 
 static void
-blktap_request_pool_free_bucket(struct blktap_request_bucket *bucket)
+blktap_request_put_pages(struct blktap *tap,
+			 struct blktap_request *request)
 {
-	if (!bucket)
-		return;
+	struct blktap_page_pool *pool = tap->pool;
+	struct page *page;
 
-	BTDBG("freeing bucket %p\n", bucket);
-
-	free_empty_pages_and_pagevec(bucket->foreign_pages, MMAP_PAGES);
-	kfree(bucket);
-}
-
-struct page *
-request_to_page(struct blktap_request *req, int seg)
-{
-	struct blktap_request_handle *handle = blktap_request_to_handle(req);
-	int idx = handle->slot * BLKIF_MAX_SEGMENTS_PER_REQUEST + seg;
-	return handle->bucket->foreign_pages[idx];
-}
-
-int
-blktap_request_pool_shrink(void)
-{
-	int i, err;
-	unsigned long flags;
-	struct blktap_request_bucket *bucket;
-
-	err = -EAGAIN;
-
-	spin_lock_irqsave(&pool.lock, flags);
-
-	/* always keep at least one bucket */
-	for (i = 1; i < MAX_BUCKETS; i++) {
-		bucket = pool.buckets[i];
-		if (!bucket)
-			continue;
-
-		if (atomic_read(&bucket->reqs_in_use))
-			continue;
-
-		blktap_request_pool_free_bucket(bucket);
-		pool.buckets[i] = NULL;
-		err = 0;
-		break;
+	while (request->nr_pages) {
+		page = request->pages[--request->nr_pages];
+		mempool_free(page, pool->bufs);
 	}
-
-	spin_unlock_irqrestore(&pool.lock, flags);
-
-	return err;
 }
 
-int
-blktap_request_pool_grow(void)
+size_t
+blktap_request_debug(struct blktap *tap, char *buf, size_t size)
 {
-	return blktap_request_pool_allocate_bucket();
+	struct blktap_page_pool *pool = tap->pool;
+	mempool_t *mem = pool->bufs;
+	char *s = buf, *end = buf + size;
+
+	s += snprintf(buf, end - s,
+		      "pool:%s pages:%d free:%d\n",
+		      kobject_name(&pool->kobj),
+		      mem->min_nr, mem->curr_nr);
+
+	return s - buf;
 }
 
-struct blktap_request *
-blktap_request_allocate(struct blktap *tap)
+struct blktap_request*
+blktap_request_alloc(struct blktap *tap)
 {
-	int i;
-	uint16_t usr_idx;
-	unsigned long flags;
 	struct blktap_request *request;
 
-	usr_idx = -1;
-	request = NULL;
+	request = mempool_alloc(request_pool, GFP_NOWAIT);
+	if (request)
+		request->tap = tap;
 
-	spin_lock_irqsave(&pool.lock, flags);
-
-	if (pool.status == BLKTAP_POOL_CLOSING)
-		goto out;
-
-	for (i = 0; i < ARRAY_SIZE(tap->pending_requests); i++)
-		if (!tap->pending_requests[i]) {
-			usr_idx = i;
-			break;
-		}
-
-	if (usr_idx == (uint16_t)-1)
-		goto out;
-
-	if (!list_empty(&pool.free_list)) {
-		request = list_entry(pool.free_list.next,
-				     struct blktap_request, free_list);
-		list_del(&request->free_list);
-	}
-
-	if (request) {
-		struct blktap_request_handle *handle;
-
-		atomic_inc(&pool.reqs_in_use);
-
-		handle = blktap_request_to_handle(request);
-		atomic_inc(&handle->bucket->reqs_in_use);
-		handle->inuse = 1;
-
-		request->usr_idx = usr_idx;
-
-		tap->pending_requests[usr_idx] = request;
-		tap->pending_cnt++;
-	}
-
-out:
-	spin_unlock_irqrestore(&pool.lock, flags);
 	return request;
 }
 
 void
-blktap_request_free(struct blktap *tap, struct blktap_request *request)
+blktap_request_free(struct blktap *tap,
+		    struct blktap_request *request)
 {
-	int free;
-	unsigned long flags;
-	struct blktap_request_handle *handle;
+	blktap_request_put_pages(tap, request);
 
-	BUG_ON(request->usr_idx >= ARRAY_SIZE(tap->pending_requests));
-	handle = blktap_request_to_handle(request);
+	mempool_free(request, request_pool);
 
-	spin_lock_irqsave(&pool.lock, flags);
-
-	handle->inuse = 0;
-	tap->pending_requests[request->usr_idx] = NULL;
-	blktap_request_pool_init_request(request);
-	list_add(&request->free_list, &pool.free_list);
-	atomic_dec(&handle->bucket->reqs_in_use);
-	free = atomic_dec_and_test(&pool.reqs_in_use);
-	tap->pending_cnt--;
-
-	spin_unlock_irqrestore(&pool.lock, flags);
-
-	if (free)
-		wake_up(&pool.wait_queue);
-
-	blktap_ring_kick_all();
+	__page_pool_wake(tap->pool);
 }
 
 void
-blktap_request_pool_free(void)
+blktap_request_bounce(struct blktap *tap,
+		      struct blktap_request *request,
+		      int seg, int write)
 {
-	int i;
-	unsigned long flags;
+	struct scatterlist *sg = &request->sg_table[seg];
+	void *s, *p;
 
-	spin_lock_irqsave(&pool.lock, flags);
+	BUG_ON(seg >= request->nr_pages);
 
-	pool.status = BLKTAP_POOL_CLOSING;
-	while (atomic_read(&pool.reqs_in_use)) {
-		spin_unlock_irqrestore(&pool.lock, flags);
-		wait_event(pool.wait_queue, !atomic_read(&pool.reqs_in_use));
-		spin_lock_irqsave(&pool.lock, flags);
+	s = sg_virt(sg);
+	p = page_address(request->pages[seg]) + sg->offset;
+
+	if (write)
+		memcpy(p, s, sg->length);
+	else
+		memcpy(s, p, sg->length);
+}
+
+static void
+blktap_request_ctor(void *obj)
+{
+	struct blktap_request *request = obj;
+
+	memset(request, 0, sizeof(*request));
+	sg_init_table(request->sg_table, ARRAY_SIZE(request->sg_table));
+}
+
+static int
+blktap_page_pool_resize(struct blktap_page_pool *pool, int target)
+{
+	mempool_t *bufs = pool->bufs;
+	int err;
+
+	/* NB. mempool asserts min_nr >= 1 */
+	target = max(1, target);
+
+	err = mempool_resize(bufs, target, GFP_KERNEL);
+	if (err)
+		return err;
+
+	__page_pool_wake(pool);
+
+	return 0;
+}
+
+struct pool_attribute {
+	struct attribute attr;
+
+	ssize_t (*show)(struct blktap_page_pool *pool,
+			char *buf);
+
+	ssize_t (*store)(struct blktap_page_pool *pool,
+			 const char *buf, size_t count);
+};
+
+#define kattr_to_pool_attr(_kattr) \
+	container_of(_kattr, struct pool_attribute, attr)
+
+static ssize_t
+blktap_page_pool_show_size(struct blktap_page_pool *pool,
+			   char *buf)
+{
+	mempool_t *mem = pool->bufs;
+	return sprintf(buf, "%d", mem->min_nr);
+}
+
+static ssize_t
+blktap_page_pool_store_size(struct blktap_page_pool *pool,
+			    const char *buf, size_t size)
+{
+	int target;
+
+	/*
+	 * NB. target fixup to avoid undesired results. less than a
+	 * full segment set can wedge the disk. much more than a
+	 * couple times the physical queue depth is rarely useful.
+	 */
+
+	target = simple_strtoul(buf, NULL, 0);
+	target = max(POOL_MAX_REQUEST_PAGES, target);
+	target = min(target, POOL_MAX_PAGES);
+
+	return blktap_page_pool_resize(pool, target) ? : size;
+}
+
+static struct pool_attribute blktap_page_pool_attr_size =
+	__ATTR(size, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH,
+	       blktap_page_pool_show_size,
+	       blktap_page_pool_store_size);
+
+static ssize_t
+blktap_page_pool_show_free(struct blktap_page_pool *pool,
+			   char *buf)
+{
+	mempool_t *mem = pool->bufs;
+	return sprintf(buf, "%d", mem->curr_nr);
+}
+
+static struct pool_attribute blktap_page_pool_attr_free =
+	__ATTR(free, S_IRUSR|S_IRGRP|S_IROTH,
+	       blktap_page_pool_show_free,
+	       NULL);
+
+static struct attribute *blktap_page_pool_attrs[] = {
+	&blktap_page_pool_attr_size.attr,
+	&blktap_page_pool_attr_free.attr,
+	NULL,
+};
+
+static inline struct kobject*
+__blktap_kset_find_obj(struct kset *kset, const char *name)
+{
+	struct kobject *k;
+	struct kobject *ret = NULL;
+
+	spin_lock(&kset->list_lock);
+	list_for_each_entry(k, &kset->list, entry) {
+		if (kobject_name(k) && !strcmp(kobject_name(k), name)) {
+			ret = kobject_get(k);
+			break;
+		}
 	}
+	spin_unlock(&kset->list_lock);
+	return ret;
+}
 
-	for (i = 0; i < MAX_BUCKETS; i++) {
-		blktap_request_pool_free_bucket(pool.buckets[i]);
-		pool.buckets[i] = NULL;
-	}
+static ssize_t
+blktap_page_pool_show_attr(struct kobject *kobj, struct attribute *kattr,
+			   char *buf)
+{
+	struct blktap_page_pool *pool = kobj_to_pool(kobj);
+	struct pool_attribute *attr = kattr_to_pool_attr(kattr);
 
-	spin_unlock_irqrestore(&pool.lock, flags);
+	if (attr->show)
+		return attr->show(pool, buf);
+
+	return -EIO;
+}
+
+static ssize_t
+blktap_page_pool_store_attr(struct kobject *kobj, struct attribute *kattr,
+			    const char *buf, size_t size)
+{
+	struct blktap_page_pool *pool = kobj_to_pool(kobj);
+	struct pool_attribute *attr = kattr_to_pool_attr(kattr);
+
+	if (attr->show)
+		return attr->store(pool, buf, size);
+
+	return -EIO;
+}
+
+static struct sysfs_ops blktap_page_pool_sysfs_ops = {
+	.show		= blktap_page_pool_show_attr,
+	.store		= blktap_page_pool_store_attr,
+};
+
+static void
+blktap_page_pool_release(struct kobject *kobj)
+{
+	struct blktap_page_pool *pool = kobj_to_pool(kobj);
+	mempool_destroy(pool->bufs);
+	kfree(pool);
+}
+
+struct kobj_type blktap_page_pool_ktype = {
+	.release       = blktap_page_pool_release,
+	.sysfs_ops     = &blktap_page_pool_sysfs_ops,
+	.default_attrs = blktap_page_pool_attrs,
+};
+
+static void*
+__mempool_page_alloc(gfp_t gfp_mask, void *pool_data)
+{
+	struct page *page;
+
+	if (!(gfp_mask & __GFP_WAIT))
+		return NULL;
+
+	page = alloc_page(gfp_mask);
+	if (page)
+		SetPageReserved(page);
+
+	return page;
+}
+
+static void
+__mempool_page_free(void *element, void *pool_data)
+{
+	struct page *page = element;
+
+	ClearPageReserved(page);
+	put_page(page);
+}
+
+static struct kobject*
+blktap_page_pool_create(const char *name, int nr_pages)
+{
+	struct blktap_page_pool *pool;
+	int err;
+
+	pool = kzalloc(sizeof(*pool), GFP_KERNEL);
+	if (!pool)
+		goto fail;
+
+	spin_lock_init(&pool->lock);
+	init_waitqueue_head(&pool->wait);
+
+	pool->bufs = mempool_create(nr_pages,
+				    __mempool_page_alloc, __mempool_page_free,
+				    pool);
+	if (!pool->bufs)
+		goto fail_pool;
+
+	kobject_init(&pool->kobj, &blktap_page_pool_ktype);
+	pool->kobj.kset = pool_set;
+	err = kobject_add(&pool->kobj, &pool_set->kobj, "%s", name);
+	if (err)
+		goto fail_bufs;
+
+	return &pool->kobj;
+
+	kobject_del(&pool->kobj);
+fail_bufs:
+	mempool_destroy(pool->bufs);
+fail_pool:
+	kfree(pool);
+fail:
+	return NULL;
+}
+
+struct blktap_page_pool*
+blktap_page_pool_get(const char *name)
+{
+	struct kobject *kobj;
+
+	kobj = __blktap_kset_find_obj(pool_set, name);
+	if (!kobj)
+		kobj = blktap_page_pool_create(name,
+					       POOL_DEFAULT_PAGES);
+	if (!kobj)
+		return ERR_PTR(-ENOMEM);
+
+	return kobj_to_pool(kobj);
 }
 
 int __init
-blktap_request_pool_init(void)
+blktap_page_pool_init(struct kobject *parent)
 {
-	int i, err;
+	request_cache =
+		kmem_cache_create("blktap-request",
+				  sizeof(struct blktap_request), 0,
+				  0, blktap_request_ctor);
+	if (!request_cache)
+		return -ENOMEM;
 
-	memset(&pool, 0, sizeof(pool));
+	request_pool =
+		mempool_create_slab_pool(POOL_MIN_REQS, request_cache);
+	if (!request_pool)
+		return -ENOMEM;
 
-	spin_lock_init(&pool.lock);
-	INIT_LIST_HEAD(&pool.free_list);
-	atomic_set(&pool.reqs_in_use, 0);
-	init_waitqueue_head(&pool.wait_queue);
-
-	for (i = 0; i < 2; i++) {
-		err = blktap_request_pool_allocate_bucket();
-		if (err)
-			goto fail;
-	}
+	pool_set = kset_create_and_add("pools", NULL, parent);
+	if (!pool_set)
+		return -ENOMEM;
 
 	return 0;
+}
 
-fail:
-	blktap_request_pool_free();
-	return err;
+void
+blktap_page_pool_exit(void)
+{
+	if (pool_set) {
+		BUG_ON(!list_empty(&pool_set->list));
+		kset_unregister(pool_set);
+		pool_set = NULL;
+	}
+
+	if (request_pool) {
+		mempool_destroy(request_pool);
+		request_pool = NULL;
+	}
+
+	if (request_cache) {
+		kmem_cache_destroy(request_cache);
+		request_cache = NULL;
+	}
 }
