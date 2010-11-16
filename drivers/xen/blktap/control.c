@@ -1,7 +1,7 @@
 #include <linux/module.h>
 #include <linux/sched.h>
 #include <linux/miscdevice.h>
-
+#include <linux/device.h>
 #include <asm/uaccess.h>
 
 #include "blktap.h"
@@ -10,6 +10,7 @@ DEFINE_MUTEX(blktap_lock);
 
 struct blktap **blktaps;
 int blktap_max_minor;
+static struct blktap_page_pool *default_pool;
 
 static struct blktap *
 blktap_control_get_minor(void)
@@ -17,12 +18,9 @@ blktap_control_get_minor(void)
 	int minor;
 	struct blktap *tap;
 
-	tap = kmalloc(sizeof(*tap), GFP_KERNEL);
+	tap = kzalloc(sizeof(*tap), GFP_KERNEL);
 	if (unlikely(!tap))
 		return NULL;
-
-	memset(tap, 0, sizeof(*tap));
-	sg_init_table(tap->sg, BLKIF_MAX_SEGMENTS_PER_REQUEST);
 
 	mutex_lock(&blktap_lock);
 
@@ -83,6 +81,9 @@ blktap_control_create_tap(void)
 	if (!tap)
 		return NULL;
 
+	kobject_get(&default_pool->kobj);
+	tap->pool = default_pool;
+
 	err = blktap_ring_create(tap);
 	if (err)
 		goto fail_tap;
@@ -109,6 +110,8 @@ blktap_control_destroy_tap(struct blktap *tap)
 	err = blktap_ring_destroy(tap);
 	if (err)
 		return err;
+
+	kobject_put(&tap->pool->kobj);
 
 	blktap_sysfs_destroy(tap);
 
@@ -166,11 +169,42 @@ static struct file_operations blktap_control_file_operations = {
 	.ioctl    = blktap_control_ioctl,
 };
 
-static struct miscdevice blktap_misc = {
+static struct miscdevice blktap_control = {
 	.minor    = MISC_DYNAMIC_MINOR,
 	.name     = "blktap-control",
 	.fops     = &blktap_control_file_operations,
 };
+
+static struct device *control_device;
+
+static ssize_t
+blktap_control_show_default_pool(struct device *device,
+				 struct device_attribute *attr,
+				 char *buf)
+{
+	return sprintf(buf, "%s", kobject_name(&default_pool->kobj));
+}
+
+static ssize_t
+blktap_control_store_default_pool(struct device *device,
+				  struct device_attribute *attr,
+				  const char *buf, size_t size)
+{
+	struct blktap_page_pool *pool, *tmp = default_pool;
+
+	pool = blktap_page_pool_get(buf);
+	if (IS_ERR(pool))
+		return PTR_ERR(pool);
+
+	default_pool = pool;
+	kobject_put(&tmp->kobj);
+
+	return size;
+}
+
+static DEVICE_ATTR(default_pool, S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH,
+		   blktap_control_show_default_pool,
+		   blktap_control_store_default_pool);
 
 size_t
 blktap_control_debug(struct blktap *tap, char *buf, size_t size)
@@ -190,12 +224,11 @@ blktap_control_init(void)
 {
 	int err;
 
-	err = misc_register(&blktap_misc);
-	if (err) {
-		blktap_misc.minor = MISC_DYNAMIC_MINOR;
-		BTERR("misc_register failed for control device");
+	err = misc_register(&blktap_control);
+	if (err)
 		return err;
-	}
+
+	control_device = blktap_control.this_device;
 
 	blktap_max_minor = min(64, MAX_BLKTAP_DEVICE);
 	blktaps = kzalloc(blktap_max_minor * sizeof(blktaps[0]), GFP_KERNEL);
@@ -204,20 +237,39 @@ blktap_control_init(void)
 		return -ENOMEM;
 	}
 
+	err = blktap_page_pool_init(&control_device->kobj);
+	if (err)
+		return err;
+
+	default_pool = blktap_page_pool_get("default");
+	if (!default_pool)
+		return -ENOMEM;
+
+	err = device_create_file(control_device, &dev_attr_default_pool);
+	if (err)
+		return err;
+
 	return 0;
 }
 
 static void
 blktap_control_exit(void)
 {
+	if (default_pool) {
+		kobject_put(&default_pool->kobj);
+		default_pool = NULL;
+	}
+
+	blktap_page_pool_exit();
+
 	if (blktaps) {
 		kfree(blktaps);
 		blktaps = NULL;
 	}
 
-	if (blktap_misc.minor != MISC_DYNAMIC_MINOR) {
-		misc_deregister(&blktap_misc);
-		blktap_misc.minor = MISC_DYNAMIC_MINOR;
+	if (control_device) {
+		misc_deregister(&blktap_control);
+		control_device = NULL;
 	}
 }
 
@@ -228,20 +280,12 @@ blktap_exit(void)
 	blktap_ring_exit();
 	blktap_sysfs_exit();
 	blktap_device_exit();
-	blktap_request_pool_free();
 }
 
 static int __init
 blktap_init(void)
 {
 	int err;
-
-	if (!xen_pv_domain())
-		return -ENODEV;
-
-	err = blktap_request_pool_init();
-	if (err)
-		return err;
 
 	err = blktap_device_init();
 	if (err)

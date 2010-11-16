@@ -2,26 +2,10 @@
 #include <linux/blkdev.h>
 #include <linux/cdrom.h>
 #include <linux/hdreg.h>
-#include <linux/module.h>
-#include <asm/tlbflush.h>
-
 #include <scsi/scsi.h>
 #include <scsi/scsi_ioctl.h>
 
-#include <xen/xenbus.h>
-#include <xen/interface/io/blkif.h>
-
-#include <asm/xen/page.h>
-#include <asm/xen/hypercall.h>
-
 #include "blktap.h"
-
-#include "../blkback/blkback-pagemap.h"
-
-struct blktap_grant_table {
-	int cnt;
-	struct gnttab_map_grant_ref grants[BLKIF_MAX_SEGMENTS_PER_REQUEST * 2];
-};
 
 int blktap_device_major;
 
@@ -119,174 +103,41 @@ static struct block_device_operations blktap_device_file_operations = {
 	.getgeo    = blktap_device_getgeo
 };
 
-static int
-blktap_map_uaddr_fn(pte_t *ptep, struct page *pmd_page,
-		    unsigned long addr, void *data)
+/* NB. __blktap holding the queue lock; blktap where unlocked */
+
+static inline struct request*
+__blktap_next_queued_rq(struct request_queue *q)
 {
-	pte_t *pte = (pte_t *)data;
-
-	BTDBG("ptep %p -> %012llx\n", ptep, (unsigned long long)pte_val(*pte));
-	set_pte(ptep, *pte);
-	return 0;
-}
-
-static int
-blktap_map_uaddr(struct mm_struct *mm, unsigned long address, pte_t pte)
-{
-	return apply_to_page_range(mm, address,
-				   PAGE_SIZE, blktap_map_uaddr_fn, &pte);
-}
-
-static int
-blktap_umap_uaddr_fn(pte_t *ptep, struct page *pmd_page,
-		     unsigned long addr, void *data)
-{
-	struct mm_struct *mm = (struct mm_struct *)data;
-
-	BTDBG("ptep %p\n", ptep);
-	pte_clear(mm, addr, ptep);
-	return 0;
-}
-
-static int
-blktap_umap_uaddr(struct mm_struct *mm, unsigned long address)
-{
-	return apply_to_page_range(mm, address,
-				   PAGE_SIZE, blktap_umap_uaddr_fn, mm);
+	return blk_peek_request(q);
 }
 
 static inline void
-flush_tlb_kernel_page(unsigned long kvaddr)
+__blktap_dequeue_rq(struct request *rq)
 {
-	flush_tlb_kernel_range(kvaddr, kvaddr + PAGE_SIZE);
+	blk_start_request(rq);
 }
 
-static void
-blktap_device_end_dequeued_request(struct blktap_device *dev,
-				   struct request *req, int error)
+/* NB. err == 0 indicates success, failures < 0 */
+
+static inline void
+__blktap_end_queued_rq(struct request *rq, int err)
 {
-	unsigned long flags;
-	int ret;
-
-	//spin_lock_irq(&dev->lock);
-	spin_lock_irqsave(dev->gd->queue->queue_lock, flags);
-	ret = __blk_end_request(req, error, blk_rq_bytes(req));
-	spin_unlock_irqrestore(dev->gd->queue->queue_lock, flags);
-	//spin_unlock_irq(&dev->lock);
-
-	BUG_ON(ret);
+	blk_start_request(rq);
+	__blk_end_request(rq, err, blk_rq_bytes(rq));
 }
 
-static void
-blktap_device_fast_flush(struct blktap *tap, struct blktap_request *request)
+static inline void
+__blktap_end_rq(struct request *rq, int err)
 {
-	uint64_t ptep;
-	int ret, usr_idx;
-	unsigned int i, cnt;
-	struct page **map, *page;
-	struct blktap_ring *ring;
-	struct grant_handle_pair *khandle;
-	unsigned long kvaddr, uvaddr, offset;
-	struct gnttab_unmap_grant_ref unmap[BLKIF_MAX_SEGMENTS_PER_REQUEST * 2];
-
-	cnt     = 0;
-	ring    = &tap->ring;
-	usr_idx = request->usr_idx;
-	map     = ring->foreign_map.map;
-
-	if (!ring->vma)
-		return;
-
-	if (xen_feature(XENFEAT_auto_translated_physmap))
-		zap_page_range(ring->vma, 
-			       MMAP_VADDR(ring->user_vstart, usr_idx, 0),
-			       request->nr_pages << PAGE_SHIFT, NULL);
-
-	for (i = 0; i < request->nr_pages; i++) {
-		kvaddr = request_to_kaddr(request, i);
-		uvaddr = MMAP_VADDR(ring->user_vstart, usr_idx, i);
-
-		khandle = request->handles + i;
-
-		if (khandle->kernel != INVALID_GRANT_HANDLE) {
-			gnttab_set_unmap_op(&unmap[cnt], kvaddr,
-					    GNTMAP_host_map, khandle->kernel);
-			cnt++;
-			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
-					    INVALID_P2M_ENTRY);
-		}
-
-		if (khandle->user != INVALID_GRANT_HANDLE) {
-			BUG_ON(xen_feature(XENFEAT_auto_translated_physmap));
-			if (create_lookup_pte_addr(ring->vma->vm_mm,
-						   uvaddr, &ptep) != 0) {
-				BTERR("Couldn't get a pte addr!\n");
-				return;
-			}
-
-			gnttab_set_unmap_op(&unmap[cnt], ptep,
-					    GNTMAP_host_map
-					    | GNTMAP_application_map
-					    | GNTMAP_contains_pte,
-					    khandle->user);
-			cnt++;
-		}
-
-		offset = (uvaddr - ring->vma->vm_start) >> PAGE_SHIFT;
-
-		BTDBG("offset: 0x%08lx, page: %p, request: %p, usr_idx: %d, "
-		      "seg: %d, kvaddr: 0x%08lx, khandle: %u, uvaddr: "
-		      "0x%08lx, handle: %u\n", offset, map[offset], request,
-		      usr_idx, i, kvaddr, khandle->kernel, uvaddr,
-		      khandle->user);
-
-		page = map[offset];
-		if (page && blkback_pagemap_contains_page(page))
-			set_page_private(page, 0);
-
-		map[offset] = NULL;
-
-		khandle->kernel = INVALID_GRANT_HANDLE;
-		khandle->user   = INVALID_GRANT_HANDLE;
-	}
-
-	if (cnt) {
-		ret = HYPERVISOR_grant_table_op(GNTTABOP_unmap_grant_ref,
-						unmap, cnt);
-		BUG_ON(ret);
-	}
-
-	if (!xen_feature(XENFEAT_auto_translated_physmap))
-		zap_page_range(ring->vma, 
-			       MMAP_VADDR(ring->user_vstart, usr_idx, 0), 
-			       request->nr_pages << PAGE_SHIFT, NULL);
+	__blk_end_request(rq, err, blk_rq_bytes(rq));
 }
 
-static void
-blktap_unmap(struct blktap *tap, struct blktap_request *request)
+static inline void
+blktap_end_rq(struct request *rq, int err)
 {
-	int i, usr_idx;
-	unsigned long kvaddr;
-
-	usr_idx = request->usr_idx;
-
-	for (i = 0; i < request->nr_pages; i++) {
-		kvaddr = request_to_kaddr(request, i);
-		BTDBG("request: %p, seg: %d, kvaddr: 0x%08lx, khandle: %u, "
-		      "uvaddr: 0x%08lx, uhandle: %u\n", request, i,
-		      kvaddr, request->handles[i].kernel,
-		      MMAP_VADDR(tap->ring.user_vstart, usr_idx, i),
-		      request->handles[i].user);
-
-		if (request->handles[i].kernel == INVALID_GRANT_HANDLE) {
-			blktap_umap_uaddr(current->mm, kvaddr);
-			flush_tlb_kernel_page(kvaddr);
-			set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT,
-					    INVALID_P2M_ENTRY);
-		}
-	}
-
-	blktap_device_fast_flush(tap, request);
+	spin_lock_irq(rq->q->queue_lock);
+	__blktap_end_rq(rq, err);
+	spin_unlock_irq(rq->q->queue_lock);
 }
 
 void
@@ -297,351 +148,121 @@ blktap_device_end_request(struct blktap *tap,
 	struct blktap_device *tapdev = &tap->device;
 	struct request *rq = request->rq;
 
-	blktap_unmap(tap, request);
+	blktap_ring_unmap_request(tap, request);
 
-	spin_lock_irq(&tapdev->lock);
-	__blk_end_request(rq, error, blk_rq_bytes(rq));
-	spin_unlock_irq(&tapdev->lock);
+	blktap_ring_free_request(tap, request);
 
-	blktap_request_free(tap, request);
+	dev_dbg(disk_to_dev(tapdev->gd),
+		"end_request: op=%d error=%d bytes=%d\n",
+		rq_data_dir(rq), error, blk_rq_bytes(rq));
+
+	blktap_end_rq(rq, error);
 }
 
-static int
-blktap_prep_foreign(struct blktap *tap,
-		    struct blktap_request *request,
-		    struct blkif_request *blkif_req,
-		    unsigned int seg, struct page *page,
-		    struct blktap_grant_table *table)
+int
+blktap_device_make_request(struct blktap *tap, struct request *rq)
 {
-	uint64_t ptep;
-	uint32_t flags;
-#ifdef BLKTAP_CHAINED_BLKTAP
-	struct page *tap_page;
-#endif
-	struct blktap_ring *ring;
-	struct blkback_pagemap map;
-	unsigned long uvaddr, kvaddr;
+	struct blktap_device *tapdev = &tap->device;
+	struct blktap_request *request;
+	int write, nsegs;
+	int err;
 
-	ring = &tap->ring;
-	map  = blkback_pagemap_read(page);
-	blkif_req->seg[seg].gref = map.gref;
+	request = blktap_ring_make_request(tap);
+	if (IS_ERR(request)) {
+		err = PTR_ERR(request);
+		request = NULL;
 
-	uvaddr = MMAP_VADDR(ring->user_vstart, request->usr_idx, seg);
-	kvaddr = request_to_kaddr(request, seg);
-	flags  = GNTMAP_host_map |
-		(request->operation == BLKIF_OP_WRITE ? GNTMAP_readonly : 0);
+		if (err == -ENOSPC || err == -ENOMEM)
+			goto stop;
 
-	gnttab_set_map_op(&table->grants[table->cnt],
-			  kvaddr, flags, map.gref, map.domid);
-	table->cnt++;
-
-
-#ifdef BLKTAP_CHAINED_BLKTAP
-	/* enable chained tap devices */
-	tap_page = request_to_page(request, seg);
-	set_page_private(tap_page, page_private(page));
-	SetPageBlkback(tap_page);
-#endif
-
-	if (xen_feature(XENFEAT_auto_translated_physmap))
-		return 0;
-
-	if (create_lookup_pte_addr(ring->vma->vm_mm, uvaddr, &ptep)) {
-		BTERR("couldn't get a pte addr!\n");
-		return -1;
+		goto fail;
 	}
 
-	flags |= GNTMAP_application_map | GNTMAP_contains_pte;
-	gnttab_set_map_op(&table->grants[table->cnt],
-			  ptep, flags, map.gref, map.domid);
-	table->cnt++;
+	write = rq_data_dir(rq) == WRITE;
+	nsegs = blk_rq_map_sg(rq->q, rq, request->sg_table);
+
+	dev_dbg(disk_to_dev(tapdev->gd),
+		"make_request: op=%c bytes=%d nsegs=%d\n",
+		write ? 'w' : 'r', blk_rq_bytes(rq), nsegs);
+
+	request->rq = rq;
+	request->operation = write ? BLKIF_OP_WRITE : BLKIF_OP_READ;
+
+	err = blktap_request_get_pages(tap, request, nsegs);
+	if (err)
+		goto stop;
+
+	err = blktap_ring_map_request(tap, request);
+	if (err)
+		goto fail;
+
+	blktap_ring_submit_request(tap, request);
 
 	return 0;
-}
 
-static int
-blktap_map_foreign(struct blktap *tap,
-		   struct blktap_request *request,
-		   struct blkif_request *blkif_req,
-		   struct blktap_grant_table *table)
-{
-	struct page *page;
-	int i, grant, err, usr_idx;
-	struct blktap_ring *ring;
-	unsigned long uvaddr, foreign_mfn;
+stop:
+	tap->stats.st_oo_req++;
+	err = -EBUSY;
 
-	if (!table->cnt)
-		return 0;
-
-	err = HYPERVISOR_grant_table_op(GNTTABOP_map_grant_ref,
-					table->grants, table->cnt);
-	BUG_ON(err);
-
-	grant   = 0;
-	usr_idx = request->usr_idx;
-	ring    = &tap->ring;
-
-	for (i = 0; i < request->nr_pages; i++) {
-		if (!blkif_req->seg[i].gref)
-			continue;
-
-		uvaddr = MMAP_VADDR(ring->user_vstart, usr_idx, i);
-
-		if (unlikely(table->grants[grant].status)) {
-			BTERR("invalid kernel buffer: could not remap it\n");
-			err |= 1;
-			table->grants[grant].handle = INVALID_GRANT_HANDLE;
-		}
-
-		request->handles[i].kernel = table->grants[grant].handle;
-		foreign_mfn = table->grants[grant].dev_bus_addr >> PAGE_SHIFT;
-		grant++;
-
-		if (xen_feature(XENFEAT_auto_translated_physmap))
-			goto done;
-
-		if (unlikely(table->grants[grant].status)) {
-			BTERR("invalid user buffer: could not remap it\n");
-			err |= 1;
-			table->grants[grant].handle = INVALID_GRANT_HANDLE;
-		}
-
-		request->handles[i].user = table->grants[grant].handle;
-		grant++;
-
-	done:
-		if (err)
-			continue;
-
-		page = request_to_page(request, i);
-
-		if (!xen_feature(XENFEAT_auto_translated_physmap))
-			set_phys_to_machine(page_to_pfn(page),
-					    FOREIGN_FRAME(foreign_mfn));
-		else if (vm_insert_page(ring->vma, uvaddr, page))
-			err |= 1;
-
-		BTDBG("pending_req: %p, seg: %d, page: %p, "
-		      "kvaddr: 0x%p, khandle: %u, uvaddr: 0x%08lx, "
-		      "uhandle: %u\n", request, i, page,
-		      pfn_to_kaddr(page_to_pfn(page)),
-		      request->handles[i].kernel,
-		      uvaddr, request->handles[i].user);
-	}
+_out:
+	if (request)
+		blktap_ring_free_request(tap, request);
 
 	return err;
-}
-
-static void
-blktap_map(struct blktap *tap,
-	   struct blktap_request *request,
-	   unsigned int seg, struct page *page)
-{
-	pte_t pte;
-	int usr_idx;
-	struct blktap_ring *ring;
-	unsigned long uvaddr, kvaddr;
-
-	ring    = &tap->ring;
-	usr_idx = request->usr_idx;
-	uvaddr  = MMAP_VADDR(ring->user_vstart, usr_idx, seg);
-	kvaddr  = request_to_kaddr(request, seg);
-
-	pte = mk_pte(page, ring->vma->vm_page_prot);
-	blktap_map_uaddr(ring->vma->vm_mm, uvaddr, pte_mkwrite(pte));
-	flush_tlb_page(ring->vma, uvaddr);
-	blktap_map_uaddr(ring->vma->vm_mm, kvaddr, mk_pte(page, PAGE_KERNEL));
-	flush_tlb_kernel_page(kvaddr);
-
-	set_phys_to_machine(__pa(kvaddr) >> PAGE_SHIFT, pte_mfn(pte));
-	request->handles[seg].kernel = INVALID_GRANT_HANDLE;
-	request->handles[seg].user   = INVALID_GRANT_HANDLE;
-
-	BTDBG("pending_req: %p, seg: %d, page: %p, kvaddr: 0x%08lx, "
-	      "uvaddr: 0x%08lx\n", request, seg, page, kvaddr,
-	      uvaddr);
-}
-
-static int
-blktap_device_process_request(struct blktap *tap,
-			      struct blktap_request *request,
-			      struct request *req)
-{
-	struct page *page;
-	int i, usr_idx, err;
-	struct blktap_ring *ring;
-	struct scatterlist *sg;
-	struct blktap_grant_table table;
-	unsigned int fsect, lsect, nr_sects;
-	unsigned long offset, uvaddr;
-	struct blkif_request blkif_req, *target;
-
-	err = -1;
-	memset(&table, 0, sizeof(table));
-
-	ring    = &tap->ring;
-	usr_idx = request->usr_idx;
-	blkif_req.id = usr_idx;
-	blkif_req.sector_number = (blkif_sector_t)blk_rq_pos(req);
-	blkif_req.handle = 0;
-	blkif_req.operation = rq_data_dir(req) ?
-		BLKIF_OP_WRITE : BLKIF_OP_READ;
-
-	request->rq        = req;
-	request->operation = blkif_req.operation;
-	request->status    = BLKTAP_REQUEST_PENDING;
-	do_gettimeofday(&request->time);
-
-	nr_sects = 0;
-	request->nr_pages = 0;
-	blkif_req.nr_segments = blk_rq_map_sg(req->q, req, tap->sg);
-	BUG_ON(blkif_req.nr_segments > BLKIF_MAX_SEGMENTS_PER_REQUEST);
-	for (i = 0; i < blkif_req.nr_segments; ++i) {
-			sg = tap->sg + i;
-			fsect = sg->offset >> 9;
-			lsect = fsect + (sg->length >> 9) - 1;
-			nr_sects += sg->length >> 9;
-
-			blkif_req.seg[i] =
-				(struct blkif_request_segment) {
-				.gref       = 0,
-				.first_sect = fsect,
-				.last_sect  = lsect };
-
-			if (blkback_pagemap_contains_page(sg_page(sg))) {
-				/* foreign page -- use xen */
-				if (blktap_prep_foreign(tap,
-							request,
-							&blkif_req,
-							i,
-							sg_page(sg),
-							&table))
-					goto out;
-			} else {
-				/* do it the old fashioned way */
-				blktap_map(tap,
-					   request,
-					   i,
-					   sg_page(sg));
-			}
-
-			uvaddr = MMAP_VADDR(ring->user_vstart, usr_idx, i);
-			offset = (uvaddr - ring->vma->vm_start) >> PAGE_SHIFT;
-			page   = request_to_page(request, i);
-			ring->foreign_map.map[offset] = page;
-			SetPageReserved(page);
-
-			BTDBG("mapped uaddr %08lx to page %p pfn 0x%lx\n",
-			      uvaddr, page, page_to_pfn(page));
-			BTDBG("offset: 0x%08lx, pending_req: %p, seg: %d, "
-			      "page: %p, kvaddr: %p, uvaddr: 0x%08lx\n",
-			      offset, request, i,
-			      page, pfn_to_kaddr(page_to_pfn(page)), uvaddr);
-
-			request->nr_pages++;
-	}
-
-	if (blktap_map_foreign(tap, request, &blkif_req, &table))
-		goto out;
-
-	/* Finally, write the request message to the user ring. */
-	target = RING_GET_REQUEST(&ring->ring, ring->ring.req_prod_pvt);
-	memcpy(target, &blkif_req, sizeof(blkif_req));
-	target->id = request->usr_idx;
-	wmb(); /* blktap_poll() reads req_prod_pvt asynchronously */
-	ring->ring.req_prod_pvt++;
-
-	if (rq_data_dir(req)) {
-		tap->stats.st_wr_sect += nr_sects;
-		tap->stats.st_wr_req++;
-	} else {
-		tap->stats.st_rd_sect += nr_sects;
-		tap->stats.st_rd_req++;
-	}
-
-	err = 0;
-
-out:
-	if (err)
-		blktap_device_fast_flush(tap, request);
-	return err;
+fail:
+	if (printk_ratelimit())
+		dev_warn(disk_to_dev(tapdev->gd),
+			 "make request: %d, failing\n", err);
+	goto _out;
 }
 
 /*
  * called from tapdisk context
  */
-int
+void
 blktap_device_run_queue(struct blktap *tap)
 {
-	int err, rv;
-	struct request_queue *rq;
-	struct request *req;
-	struct blktap_ring *ring;
-	struct blktap_device *dev;
-	struct blktap_request *request;
+	struct blktap_device *tapdev = &tap->device;
+	struct request_queue *q;
+	struct request *rq;
+	int err;
 
-	ring   = &tap->ring;
-	dev    = &tap->device;
-	rq     = dev->gd->queue;
+	if (!tapdev->gd)
+		return;
 
-	BTDBG("running queue for %d\n", tap->minor);
-	spin_lock_irq(&dev->lock);
-	queue_flag_clear(QUEUE_FLAG_STOPPED, rq);
+	q = tapdev->gd->queue;
 
-	while ((req = blk_peek_request(rq)) != NULL) {
-		if (!blk_fs_request(req)) {
-			blk_start_request(req);
-			__blk_end_request_cur(req, -EOPNOTSUPP);
+	spin_lock_irq(&tapdev->lock);
+	queue_flag_clear(QUEUE_FLAG_STOPPED, q);
+
+	do {
+		rq = __blktap_next_queued_rq(q);
+		if (!rq)
+			break;
+
+		if (!blk_fs_request(rq)) {
+			__blktap_end_queued_rq(rq, -EOPNOTSUPP);
 			continue;
 		}
 
-		if (blk_barrier_rq(req) && !blk_rq_bytes(req)) {
-			blk_start_request(req);
-			__blk_end_request_cur(req, 0);
-			continue;
-		}
+		spin_unlock_irq(&tapdev->lock);
 
-		if (RING_FULL(&ring->ring)) {
-		wait:
-			/* Avoid pointless unplugs. */
-			blk_stop_queue(rq);
+		err = blktap_device_make_request(tap, rq);
+
+		spin_lock_irq(&tapdev->lock);
+
+		if (err == -EBUSY) {
+			blk_stop_queue(q);
 			break;
 		}
 
-		request = blktap_request_allocate(tap);
-		if (!request) {
-			tap->stats.st_oo_req++;
-			goto wait;
-		}
+		__blktap_dequeue_rq(rq);
 
-		BTDBG("req %p: dev %d cmd %p, sec 0x%llx, (0x%x/0x%x) "
-		      "buffer:%p [%s], pending: %p\n", req, tap->minor,
-		      req->cmd, (unsigned long long)blk_rq_pos(req),
-		      blk_rq_cur_sectors(req),
-		      blk_rq_sectors(req), req->buffer,
-		      rq_data_dir(req) ? "write" : "read", request);
+		if (unlikely(err))
+			__blktap_end_rq(rq, err);
+	} while (1);
 
-		blk_start_request(req);
-
-		spin_unlock_irq(&dev->lock);
-
-		err = blktap_device_process_request(tap, request, req);
-		if (err) {
-			blktap_device_end_dequeued_request(dev, req, -EIO);
-			blktap_request_free(tap, request);
-		}
-
-		spin_lock_irq(&dev->lock);
-	}
-
-	spin_unlock_irq(&dev->lock);
-
-	rv = ring->ring.req_prod_pvt -
-		ring->ring.sring->req_prod;
-
-	RING_PUSH_REQUESTS(&ring->ring);
-
-	return rv;
+	spin_unlock_irq(&tapdev->lock);
 }
 
 static void
@@ -774,11 +395,11 @@ blktap_device_fail_queue(struct blktap *tap)
 	queue_flag_clear(QUEUE_FLAG_STOPPED, q);
 
 	do {
-		struct request *rq = blk_fetch_request(q);
+		struct request *rq = __blktap_next_queued_rq(q);
 		if (!rq)
 			break;
 
-		__blk_end_request(rq, -EIO, blk_rq_bytes(rq));
+		__blktap_end_queued_rq(rq, -EIO);
 	} while (1);
 
 	spin_unlock_irq(&tapdev->lock);
@@ -867,7 +488,8 @@ blktap_device_create(struct blktap *tap, struct blktap_params *params)
 	set_bit(BLKTAP_DEVICE, &tap->dev_inuse);
 
 	dev_info(disk_to_dev(gd), "sector-size: %u capacity: %llu\n",
-		 queue_logical_block_size(rq), get_capacity(gd));
+		 queue_logical_block_size(rq),
+		 (unsigned long long)get_capacity(gd));
 
 	return 0;
 
@@ -895,7 +517,8 @@ blktap_device_debug(struct blktap *tap, char *buf, size_t size)
 
 	s += snprintf(s, end - s,
 		      "disk capacity:%llu sector size:%u\n",
-		      get_capacity(disk), queue_logical_block_size(q));
+		      (unsigned long long)get_capacity(disk),
+		      queue_logical_block_size(q));
 
 	s += snprintf(s, end - s,
 		      "queue flags:%#lx plugged:%d stopped:%d empty:%d\n",
