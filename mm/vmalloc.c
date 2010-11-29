@@ -36,8 +36,11 @@
 
 static int vunmap_pte(pte_t *pte, pgtable_t tok, unsigned long addr, void *data)
 {
-	pte_t ptent = ptep_get_and_clear(&init_mm, addr, pte);
+	pte_t ptent = *pte;
+
+	pte_clear(&init_mm, addr, pte);
 	WARN_ON(!pte_none(ptent) && !pte_present(ptent));
+
 	return 0;
 }
 
