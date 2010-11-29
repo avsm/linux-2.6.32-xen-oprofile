@@ -46,63 +46,25 @@ static void vunmap_page_range(unsigned long addr, unsigned long end)
 	apply_to_page_range(&init_mm, addr, end - addr, vunmap_pte, NULL);
 }
 
-static int vmap_pte_range(pmd_t *pmd, unsigned long addr,
-		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+struct vmap_data
 {
-	pte_t *pte;
+	struct page **pages;
+	unsigned index;
+	pgprot_t prot;
+};
 
-	/*
-	 * nr is a running index into the array which helps higher level
-	 * callers keep track of where we're up to.
-	 */
-
-	pte = pte_alloc_kernel(pmd, addr);
-	if (!pte)
-		return -ENOMEM;
-	do {
-		struct page *page = pages[*nr];
-
-		if (WARN_ON(!pte_none(*pte)))
-			return -EBUSY;
-		if (WARN_ON(!page))
-			return -ENOMEM;
-		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
-		(*nr)++;
-	} while (pte++, addr += PAGE_SIZE, addr != end);
-	return 0;
-}
-
-static int vmap_pmd_range(pud_t *pud, unsigned long addr,
-		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+static int vmap_pte(pte_t *pte, pgtable_t tok, unsigned long addr, void *data)
 {
-	pmd_t *pmd;
-	unsigned long next;
+	struct vmap_data *vmap = data;
+	struct page *page = vmap->pages[vmap->index];
 
-	pmd = pmd_alloc(&init_mm, pud, addr);
-	if (!pmd)
+	if (WARN_ON(!pte_none(*pte)))
+		return -EBUSY;
+	if (WARN_ON(!page))
 		return -ENOMEM;
-	do {
-		next = pmd_addr_end(addr, end);
-		if (vmap_pte_range(pmd, addr, next, prot, pages, nr))
-			return -ENOMEM;
-	} while (pmd++, addr = next, addr != end);
-	return 0;
-}
+	set_pte_at(&init_mm, addr, pte, mk_pte(page, vmap->prot));
+	vmap->index++;
 
-static int vmap_pud_range(pgd_t *pgd, unsigned long addr,
-		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
-{
-	pud_t *pud;
-	unsigned long next;
-
-	pud = pud_alloc(&init_mm, pgd, addr);
-	if (!pud)
-		return -ENOMEM;
-	do {
-		next = pud_addr_end(addr, end);
-		if (vmap_pmd_range(pud, addr, next, prot, pages, nr))
-			return -ENOMEM;
-	} while (pud++, addr = next, addr != end);
 	return 0;
 }
 
@@ -115,22 +77,14 @@ static int vmap_pud_range(pgd_t *pgd, unsigned long addr,
 static int vmap_page_range_noflush(unsigned long start, unsigned long end,
 				   pgprot_t prot, struct page **pages)
 {
-	pgd_t *pgd;
-	unsigned long next;
-	unsigned long addr = start;
-	int err = 0;
-	int nr = 0;
-
-	BUG_ON(addr >= end);
-	pgd = pgd_offset_k(addr);
-	do {
-		next = pgd_addr_end(addr, end);
-		err = vmap_pud_range(pgd, addr, next, prot, pages, &nr);
-		if (err)
-			return err;
-	} while (pgd++, addr = next, addr != end);
-
-	return nr;
+	struct vmap_data vmap = {
+		.pages = pages,
+		.index = 0,
+		.prot = prot
+	};
+	
+	apply_to_page_range(&init_mm, start, end - start, vmap_pte, &vmap);
+	return vmap.index;
 }
 
 static int vmap_page_range(unsigned long start, unsigned long end,
