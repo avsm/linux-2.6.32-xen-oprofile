@@ -547,7 +547,6 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 			if (va->va_end > *end)
 				*end = va->va_end;
 			nr += (va->va_end - va->va_start) >> PAGE_SHIFT;
-			unmap_vmap_area(va);
 			list_add_tail(&va->purge_list, &valist);
 			va->flags |= VM_LAZY_FREEING;
 			va->flags &= ~VM_LAZY_FREE;
@@ -599,6 +598,8 @@ static void purge_vmap_area_lazy(void)
  */
 static void free_unmap_vmap_area_noflush(struct vmap_area *va)
 {
+	unmap_vmap_area(va);
+
 	va->flags |= VM_LAZY_FREE;
 	atomic_add((va->va_end - va->va_start) >> PAGE_SHIFT, &vmap_lazy_nr);
 	if (unlikely(atomic_read(&vmap_lazy_nr) > lazy_max_pages()))
@@ -869,8 +870,10 @@ static void vb_free(const void *addr, unsigned long size)
 		BUG_ON(vb->free || !list_empty(&vb->free_list));
 		spin_unlock(&vb->lock);
 		free_vmap_block(vb);
-	} else
+	} else {
 		spin_unlock(&vb->lock);
+		vunmap_page_range((unsigned long)addr, (unsigned long)addr + size);
+	}
 }
 
 /**
@@ -913,7 +916,6 @@ void vm_unmap_aliases(void)
 
 				s = vb->va->va_start + (i << PAGE_SHIFT);
 				e = vb->va->va_start + (j << PAGE_SHIFT);
-				vunmap_page_range(s, e);
 				flush = 1;
 
 				if (s < start)
