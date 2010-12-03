@@ -211,9 +211,9 @@ static int ethtool_get_drvinfo(struct net_device *dev, void __user *useraddr)
 	} else {
 		/* code path for obsolete hooks */
 
-		if (ops->self_test_count)
+		if (ops && ops->self_test_count)
 			info.testinfo_len = ops->self_test_count(dev);
-		if (ops->get_stats_count)
+		if (ops && ops->get_stats_count)
 			info.n_stats = ops->get_stats_count(dev);
 	}
 	if (ops && ops->get_regs_len)
