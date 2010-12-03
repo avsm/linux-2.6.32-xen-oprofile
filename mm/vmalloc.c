@@ -33,40 +33,117 @@
 
 /*** Page table manipulation functions ***/
 
-static int vunmap_pte(pte_t *pte, pgtable_t tok, unsigned long addr, void *data)
+static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end)
 {
-	pte_t ptent = *pte;
+	pte_t *pte;
 
-	pte_clear(&init_mm, addr, pte);
-	WARN_ON(!pte_none(ptent) && !pte_present(ptent));
+	pte = pte_offset_kernel(pmd, addr);
+	do {
+		pte_t ptent = ptep_get_and_clear(&init_mm, addr, pte);
+		WARN_ON(!pte_none(ptent) && !pte_present(ptent));
+	} while (pte++, addr += PAGE_SIZE, addr != end);
+}
 
-	return 0;
+static void vunmap_pmd_range(pud_t *pud, unsigned long addr, unsigned long end)
+{
+	pmd_t *pmd;
+	unsigned long next;
+
+	pmd = pmd_offset(pud, addr);
+	do {
+		next = pmd_addr_end(addr, end);
+		if (pmd_none_or_clear_bad(pmd))
+			continue;
+		vunmap_pte_range(pmd, addr, next);
+	} while (pmd++, addr = next, addr != end);
+}
+
+static void vunmap_pud_range(pgd_t *pgd, unsigned long addr, unsigned long end)
+{
+	pud_t *pud;
+	unsigned long next;
+
+	pud = pud_offset(pgd, addr);
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(pud))
+			continue;
+		vunmap_pmd_range(pud, addr, next);
+	} while (pud++, addr = next, addr != end);
 }
 
 static void vunmap_page_range(unsigned long addr, unsigned long end)
 {
-	apply_to_page_range(&init_mm, addr, end - addr, vunmap_pte, NULL);
+	pgd_t *pgd;
+	unsigned long next;
+
+	BUG_ON(addr >= end);
+	pgd = pgd_offset_k(addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		if (pgd_none_or_clear_bad(pgd))
+			continue;
+		vunmap_pud_range(pgd, addr, next);
+	} while (pgd++, addr = next, addr != end);
 }
 
-struct vmap_data
+static int vmap_pte_range(pmd_t *pmd, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
 {
-	struct page **pages;
-	unsigned index;
-	pgprot_t prot;
-};
+	pte_t *pte;
 
-static int vmap_pte(pte_t *pte, pgtable_t tok, unsigned long addr, void *data)
-{
-	struct vmap_data *vmap = data;
-	struct page *page = vmap->pages[vmap->index];
+	/*
+	 * nr is a running index into the array which helps higher level
+	 * callers keep track of where we're up to.
+	 */
 
-	if (WARN_ON(!pte_none(*pte)))
-		return -EBUSY;
-	if (WARN_ON(!page))
+	pte = pte_alloc_kernel(pmd, addr);
+	if (!pte)
 		return -ENOMEM;
-	set_pte_at(&init_mm, addr, pte, mk_pte(page, vmap->prot));
-	vmap->index++;
+	do {
+		struct page *page = pages[*nr];
 
+		if (WARN_ON(!pte_none(*pte)))
+			return -EBUSY;
+		if (WARN_ON(!page))
+			return -ENOMEM;
+		set_pte_at(&init_mm, addr, pte, mk_pte(page, prot));
+		(*nr)++;
+	} while (pte++, addr += PAGE_SIZE, addr != end);
+	return 0;
+}
+
+static int vmap_pmd_range(pud_t *pud, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+{
+	pmd_t *pmd;
+	unsigned long next;
+
+	pmd = pmd_alloc(&init_mm, pud, addr);
+	if (!pmd)
+		return -ENOMEM;
+	do {
+		next = pmd_addr_end(addr, end);
+		if (vmap_pte_range(pmd, addr, next, prot, pages, nr))
+			return -ENOMEM;
+	} while (pmd++, addr = next, addr != end);
+	return 0;
+}
+
+static int vmap_pud_range(pgd_t *pgd, unsigned long addr,
+		unsigned long end, pgprot_t prot, struct page **pages, int *nr)
+{
+	pud_t *pud;
+	unsigned long next;
+
+	pud = pud_alloc(&init_mm, pgd, addr);
+	if (!pud)
+		return -ENOMEM;
+	do {
+		next = pud_addr_end(addr, end);
+		if (vmap_pmd_range(pud, addr, next, prot, pages, nr))
+			return -ENOMEM;
+	} while (pud++, addr = next, addr != end);
 	return 0;
 }
 
@@ -79,14 +156,22 @@ static int vmap_pte(pte_t *pte, pgtable_t tok, unsigned long addr, void *data)
 static int vmap_page_range_noflush(unsigned long start, unsigned long end,
 				   pgprot_t prot, struct page **pages)
 {
-	struct vmap_data vmap = {
-		.pages = pages,
-		.index = 0,
-		.prot = prot
-	};
-	
-	apply_to_page_range(&init_mm, start, end - start, vmap_pte, &vmap);
-	return vmap.index;
+	pgd_t *pgd;
+	unsigned long next;
+	unsigned long addr = start;
+	int err = 0;
+	int nr = 0;
+
+	BUG_ON(addr >= end);
+	pgd = pgd_offset_k(addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		err = vmap_pud_range(pgd, addr, next, prot, pages, &nr);
+		if (err)
+			return err;
+	} while (pgd++, addr = next, addr != end);
+
+	return nr;
 }
 
 static int vmap_page_range(unsigned long start, unsigned long end,
@@ -476,6 +561,7 @@ static void __purge_vmap_area_lazy(unsigned long *start, unsigned long *end,
 			if (va->va_end > *end)
 				*end = va->va_end;
 			nr += (va->va_end - va->va_start) >> PAGE_SHIFT;
+			unmap_vmap_area(va);
 			list_add_tail(&va->purge_list, &valist);
 			va->flags |= VM_LAZY_FREEING;
 			va->flags &= ~VM_LAZY_FREE;
@@ -526,8 +612,6 @@ static void purge_vmap_area_lazy(void)
  */
 static void free_unmap_vmap_area_noflush(struct vmap_area *va)
 {
-	unmap_vmap_area(va);
-
 	va->flags |= VM_LAZY_FREE;
 	atomic_add((va->va_end - va->va_start) >> PAGE_SHIFT, &vmap_lazy_nr);
 	if (unlikely(atomic_read(&vmap_lazy_nr) > lazy_max_pages()))
@@ -855,10 +939,8 @@ static void vb_free(const void *addr, unsigned long size)
 		BUG_ON(vb->free);
 		spin_unlock(&vb->lock);
 		free_vmap_block(vb);
-	} else {
+	} else
 		spin_unlock(&vb->lock);
-		vunmap_page_range((unsigned long)addr, (unsigned long)addr + size);
-	}
 }
 
 /**
@@ -901,6 +983,7 @@ void vm_unmap_aliases(void)
 
 				s = vb->va->va_start + (i << PAGE_SHIFT);
 				e = vb->va->va_start + (j << PAGE_SHIFT);
+				vunmap_page_range(s, e);
 				flush = 1;
 
 				if (s < start)
