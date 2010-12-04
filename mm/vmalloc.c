@@ -31,6 +31,8 @@
 #include <asm/tlbflush.h>
 #include <asm/shmparam.h>
 
+bool vmap_lazy_unmap __read_mostly = true;
+
 /*** Page table manipulation functions ***/
 
 static void vunmap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end)
@@ -500,6 +502,9 @@ static void vmap_debug_free_range(unsigned long start, unsigned long end)
 static unsigned long lazy_max_pages(void)
 {
 	unsigned int log;
+
+	if (!vmap_lazy_unmap)
+		return 0;
 
 	log = fls(num_online_cpus());
 
