@@ -29,7 +29,7 @@ typedef struct xpaddr {
 
 /**** MACHINE <-> PHYSICAL CONVERSION MACROS ****/
 #define INVALID_P2M_ENTRY	(~0UL)
-#define FOREIGN_FRAME_BIT	(1UL<<31)
+#define FOREIGN_FRAME_BIT	(1UL << (sizeof(unsigned long) * 8 - 1))
 #define FOREIGN_FRAME(m)	((m) | FOREIGN_FRAME_BIT)
 
 /* Maximum amount of memory we can handle in a domain in pages */
