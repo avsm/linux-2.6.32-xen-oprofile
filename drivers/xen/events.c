@@ -421,7 +421,7 @@ static int find_unbound_irq(void)
 	if (irq == start)
 		goto no_irqs;
 
-	desc = irq_to_desc_alloc_node(irq, 0);
+	desc = irq_to_desc_alloc_node(irq, -1);
 	if (WARN_ON(desc == NULL))
 		return -1;
 
