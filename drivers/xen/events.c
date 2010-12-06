@@ -422,7 +422,7 @@ static int find_unbound_irq(void)
 	if (irq == start)
 		goto no_irqs;
 
-	desc = irq_to_desc_alloc_node(irq, 0);
+	desc = irq_to_desc_alloc_node(irq, -1);
 	if (WARN_ON(desc == NULL))
 		return -1;
 
@@ -1239,10 +1239,11 @@ int resend_irq_on_evtchn(unsigned int irq)
 static void ack_dynirq(unsigned int irq)
 {
 	int evtchn = evtchn_from_irq(irq);
+	struct irq_desc *desc = irq_to_desc(irq);
 
 	move_masked_irq(irq);
 
-	if (VALID_EVTCHN(evtchn))
+	if (VALID_EVTCHN(evtchn) && !(desc->status & IRQ_DISABLED))
 		unmask_evtchn(evtchn);
 }
 
