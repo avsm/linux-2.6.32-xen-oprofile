@@ -293,7 +293,6 @@ static void init_evtchn_cpu_bindings(void)
 	for_each_possible_cpu(i)
 		memset(cpu_evtchn_mask(i),
 		       (i == 0) ? ~0 : 0, sizeof(struct cpu_evtchn_s));
-
 }
 
 static inline void clear_evtchn(int port)
