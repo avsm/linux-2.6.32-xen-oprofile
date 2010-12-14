@@ -917,11 +917,20 @@ static inline void net_tx_action_dealloc(struct xen_netbk *netbk)
 			gop++;
 		}
 
-		if (netbk_copy_skb_mode != NETBK_DELAYED_COPY_SKB ||
-		    list_empty(&netbk->pending_inuse_head))
-			break;
+	} while (dp != netbk->dealloc_prod);
 
-		/* Copy any entries that have been pending for too long. */
+	netbk->dealloc_cons = dc;
+
+	ret = HYPERVISOR_grant_table_op(
+		GNTTABOP_unmap_grant_ref, netbk->tx_unmap_ops,
+		gop - netbk->tx_unmap_ops);
+	BUG_ON(ret);
+
+	/*
+	 * Copy any entries that have been pending for too long
+	 */
+	if (netbk_copy_skb_mode == NETBK_DELAYED_COPY_SKB &&
+	    !list_empty(&netbk->pending_inuse_head)) {
 		list_for_each_entry_safe(inuse, n,
 				&netbk->pending_inuse_head, list) {
 			struct pending_tx_info *pending_tx_info;
@@ -947,14 +956,7 @@ static inline void net_tx_action_dealloc(struct xen_netbk *netbk)
 
 			break;
 		}
-	} while (dp != netbk->dealloc_prod);
-
-	netbk->dealloc_cons = dc;
-
-	ret = HYPERVISOR_grant_table_op(
-		GNTTABOP_unmap_grant_ref, netbk->tx_unmap_ops,
-		gop - netbk->tx_unmap_ops);
-	BUG_ON(ret);
+	}
 
 	list_for_each_entry_safe(inuse, n, &list, list) {
 		struct pending_tx_info *pending_tx_info;
