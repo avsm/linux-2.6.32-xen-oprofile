@@ -1523,9 +1523,6 @@ static void net_tx_submit(struct xen_netbk *netbk)
 		skb->dev      = netif->dev;
 		skb->protocol = eth_type_trans(skb, skb->dev);
 
-		netif->stats.rx_bytes += skb->len;
-		netif->stats.rx_packets++;
-
 		if (skb->ip_summed == CHECKSUM_PARTIAL) {
 			if (skb_checksum_setup(skb)) {
 				DPRINTK("Can't setup checksum in net_tx_action\n");
@@ -1540,6 +1537,9 @@ static void net_tx_submit(struct xen_netbk *netbk)
 			kfree_skb(skb);
 			continue;
 		}
+
+		netif->stats.rx_bytes += skb->len;
+		netif->stats.rx_packets++;
 
 		netif_rx_ni(skb);
 		netif->dev->last_rx = jiffies;
