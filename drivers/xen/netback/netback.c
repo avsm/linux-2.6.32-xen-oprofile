@@ -275,13 +275,6 @@ static inline int netbk_queue_full(struct xen_netif *netif)
 	       ((netif->rx.rsp_prod_pvt + NET_RX_RING_SIZE - peek) < needed);
 }
 
-static void tx_queue_callback(unsigned long data)
-{
-	struct xen_netif *netif = (struct xen_netif *)data;
-	if (netif_schedulable(netif))
-		netif_wake_queue(netif->dev);
-}
-
 /* Figure out how many ring slots we're going to need to send @skb to
    the guest. */
 static unsigned count_skb_slots(struct sk_buff *skb, struct xen_netif *netif)
@@ -364,19 +357,8 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		netif->rx.sring->req_event = netif->rx_req_cons_peek +
 			netbk_max_required_rx_slots(netif);
 		mb(); /* request notification /then/ check & stop the queue */
-		if (netbk_queue_full(netif)) {
+		if (netbk_queue_full(netif))
 			netif_stop_queue(dev);
-			/*
-			 * Schedule 500ms timeout to restart the queue, thus
-			 * ensuring that an inactive queue will be drained.
-			 * Packets will be immediately be dropped until more
-			 * receive buffers become available (see
-			 * netbk_queue_full() check above).
-			 */
-			netif->tx_queue_timeout.data = (unsigned long)netif;
-			netif->tx_queue_timeout.function = tx_queue_callback;
-			mod_timer(&netif->tx_queue_timeout, jiffies + HZ/2);
-		}
 	}
 	skb_queue_tail(&netbk->rx_queue, skb);
 
