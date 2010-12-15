@@ -36,9 +36,11 @@
 
 #include "common.h"
 
-#include <linux/tcp.h>
-#include <linux/udp.h>
 #include <linux/kthread.h>
+#include <linux/if_vlan.h>
+#include <linux/udp.h>
+
+#include <net/tcp.h>
 
 #include <xen/balloon.h>
 #include <xen/events.h>
@@ -125,10 +127,12 @@ static inline int netif_get_page_ext(struct page *pg, unsigned int *_group, unsi
 /*
  * This is the amount of packet we copy rather than map, so that the
  * guest can't fiddle with the contents of the headers while we do
- * packet processing on them (netfilter, routing, etc). 72 is enough
- * to cover TCP+IP headers including options.
+ * packet processing on them (netfilter, routing, etc).
  */
-#define PKT_PROT_LEN 72
+#define PKT_PROT_LEN    (ETH_HLEN + \
+			 VLAN_HLEN + \
+			 sizeof(struct iphdr) + MAX_IPOPTLEN + \
+			 sizeof(struct tcphdr) + MAX_TCP_OPTION_SPACE)
 
 static inline pending_ring_idx_t pending_index(unsigned i)
 {
