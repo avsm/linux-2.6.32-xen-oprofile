@@ -1513,6 +1513,10 @@ static void net_tx_submit(struct xen_netbk *netbk)
 				kfree_skb(skb);
 				continue;
 			}
+		} else if (skb_is_gso(skb)) {
+			DPRINTK("Dropping GSO but not CHECKSUM_PARTIAL skb\n");
+			kfree_skb(skb);
+			continue;
 		}
 
 		if (unlikely(netbk_copy_skb_mode == NETBK_ALWAYS_COPY_SKB) &&
