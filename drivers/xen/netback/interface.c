@@ -41,15 +41,7 @@
  * Module parameter 'queue_length':
  *
  * Enables queuing in the network stack when a client has run out of receive
- * descriptors. Although this feature can improve receive bandwidth by avoiding
- * packet loss, it can also result in packets sitting in the 'tx_queue' for
- * unbounded time. This is bad if those packets hold onto foreign resources.
- * For example, consider a packet that holds onto resources belonging to the
- * guest for which it is queued (e.g., packet received on vif1.0, destined for
- * vif1.1 which is not activated in the guest): in this situation the guest
- * will never be destroyed, unless vif1.1 is taken down. To avoid this, we
- * run a timer (tx_queue_timeout) to drain the queue when the interface is
- * blocked.
+ * descriptors.
  */
 static unsigned long netbk_queue_length = 32;
 module_param_named(queue_length, netbk_queue_length, ulong, 0644);
@@ -295,8 +287,6 @@ struct xen_netif *netif_alloc(struct device *parent, domid_t domid, unsigned int
 	/* Initialize 'expires' now: it's used to track the credit window. */
 	netif->credit_timeout.expires = jiffies;
 
-	init_timer(&netif->tx_queue_timeout);
-
 	dev->netdev_ops	= &netback_ops;
 	netif_set_features(netif);
 	SET_ETHTOOL_OPS(dev, &network_ethtool_ops);
@@ -458,7 +448,6 @@ void netif_disconnect(struct xen_netif *netif)
 	wait_event(netif->waiting_to_free, atomic_read(&netif->refcnt) == 0);
 
 	del_timer_sync(&netif->credit_timeout);
-	del_timer_sync(&netif->tx_queue_timeout);
 
 	if (netif->irq)
 		unbind_from_irqhandler(netif->irq, netif);
