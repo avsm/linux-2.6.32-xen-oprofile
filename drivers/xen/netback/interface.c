@@ -189,7 +189,14 @@ static const struct netif_stat {
 	char name[ETH_GSTRING_LEN];
 	u16 offset;
 } netbk_stats[] = {
-	{ "copied_skbs", offsetof(struct xen_netif, nr_copied_skbs) },
+	{
+		"copied_skbs",
+		offsetof(struct xen_netif, nr_copied_skbs)
+	},
+	{
+		"rx_gso_checksum_fixup",
+		offsetof(struct xen_netif, rx_gso_checksum_fixup)
+	},
 };
 
 static int netbk_get_sset_count(struct net_device *dev, int string_set)

@@ -1233,11 +1233,28 @@ static int netbk_set_skb_gso(struct sk_buff *skb, struct xen_netif_extra_info *g
 	return 0;
 }
 
-static int skb_checksum_setup(struct sk_buff *skb)
+static int checksum_setup(struct xen_netif *netif, struct sk_buff *skb)
 {
 	struct iphdr *iph;
 	unsigned char *th;
 	int err = -EPROTO;
+	int recalculate_partial_csum = 0;
+
+	/*
+	 * A GSO SKB must be CHECKSUM_PARTIAL. However some buggy
+	 * peers can fail to set NETRXF_csum_blank when sending a GSO
+	 * frame. In this case force the SKB to CHECKSUM_PARTIAL and
+	 * recalculate the partial checksum.
+	 */
+	if (skb->ip_summed != CHECKSUM_PARTIAL && skb_is_gso(skb)) {
+		netif->rx_gso_checksum_fixup++;
+		skb->ip_summed = CHECKSUM_PARTIAL;
+		recalculate_partial_csum = 1;
+	}
+
+	/* A non-CHECKSUM_PARTIAL SKB does not require setup. */
+	if (skb->ip_summed != CHECKSUM_PARTIAL)
+		return 0;
 
 	if (skb->protocol != htons(ETH_P_IP))
 		goto out;
@@ -1251,9 +1268,23 @@ static int skb_checksum_setup(struct sk_buff *skb)
 	switch (iph->protocol) {
 	case IPPROTO_TCP:
 		skb->csum_offset = offsetof(struct tcphdr, check);
+
+		if (recalculate_partial_csum) {
+			struct tcphdr *tcph = (struct tcphdr *)th;
+			tcph->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr,
+							 skb->len - iph->ihl*4,
+							 IPPROTO_TCP, 0);
+		}
 		break;
 	case IPPROTO_UDP:
 		skb->csum_offset = offsetof(struct udphdr, check);
+
+		if (recalculate_partial_csum) {
+			struct udphdr *udph = (struct udphdr *)th;
+			udph->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr,
+							 skb->len - iph->ihl*4,
+							 IPPROTO_UDP, 0);
+		}
 		break;
 	default:
 		if (net_ratelimit())
@@ -1507,12 +1538,10 @@ static void net_tx_submit(struct xen_netbk *netbk)
 		skb->dev      = netif->dev;
 		skb->protocol = eth_type_trans(skb, skb->dev);
 
-		if (skb->ip_summed == CHECKSUM_PARTIAL) {
-			if (skb_checksum_setup(skb)) {
-				DPRINTK("Can't setup checksum in net_tx_action\n");
-				kfree_skb(skb);
-				continue;
-			}
+		if (checksum_setup(netif, skb)) {
+			DPRINTK("Can't setup checksum in net_tx_action\n");
+			kfree_skb(skb);
+			continue;
 		}
 
 		if (unlikely(netbk_copy_skb_mode == NETBK_ALWAYS_COPY_SKB) &&

@@ -102,6 +102,7 @@ struct xen_netif {
 
 	/* Statistics */
 	int nr_copied_skbs;
+	int rx_gso_checksum_fixup;
 
 	/* Miscellaneous private stuff. */
 	struct list_head list;  /* scheduling list */
