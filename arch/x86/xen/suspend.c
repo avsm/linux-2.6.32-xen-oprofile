@@ -28,6 +28,7 @@ void xen_pre_suspend(void)
 
 void xen_hvm_post_suspend(int suspend_cancelled)
 {
+#ifdef CONFIG_XEN_PVHVM
 	int cpu;
 	xen_hvm_init_shared_info();
 	xen_callback_vector();
@@ -36,6 +37,7 @@ void xen_hvm_post_suspend(int suspend_cancelled)
 			xen_setup_runstate_info(cpu);
 		}
 	}
+#endif
 }
 
 void xen_post_suspend(int suspend_cancelled)
