@@ -32,11 +32,15 @@ enum shutdown_state {
 /* Ignore multiple shutdown requests. */
 static enum shutdown_state shutting_down = SHUTDOWN_INVALID;
 
+struct suspend_info {
+	int cancelled;
+};
+
 #ifdef CONFIG_PM_SLEEP
 static int xen_hvm_suspend(void *data)
 {
+	struct suspend_info *si = data;
 	int err;
-	int *cancelled = data;
 
 	BUG_ON(!irqs_disabled());
 
@@ -52,12 +56,12 @@ static int xen_hvm_suspend(void *data)
 	 * or the domain was merely checkpointed, and 0 if it
 	 * is resuming in a new domain.
 	 */
-	*cancelled = HYPERVISOR_suspend(0UL);
+	si->cancelled = HYPERVISOR_suspend(0UL);
 
-	xen_hvm_post_suspend(*cancelled);
+	xen_hvm_post_suspend(si->cancelled);
 	gnttab_resume();
 
-	if (!*cancelled) {
+	if (!si->cancelled) {
 		xen_irq_resume();
 		xen_timer_resume();
 	}
@@ -67,8 +71,8 @@ static int xen_hvm_suspend(void *data)
 
 static int xen_suspend(void *data)
 {
+	struct suspend_info *si = data;
 	int err;
-	int *cancelled = data;
 
 	BUG_ON(!irqs_disabled());
 
@@ -88,13 +92,13 @@ static int xen_suspend(void *data)
 	 * or the domain was merely checkpointed, and 0 if it
 	 * is resuming in a new domain.
 	 */
-	*cancelled = HYPERVISOR_suspend(virt_to_mfn(xen_start_info));
+	si->cancelled = HYPERVISOR_suspend(virt_to_mfn(xen_start_info));
 
-	xen_post_suspend(*cancelled);
+	xen_post_suspend(si->cancelled);
 	gnttab_resume();
 	xen_mm_unpin_all();
 
-	if (!*cancelled) {
+	if (!si->cancelled) {
 		xen_irq_resume();
 		xen_console_resume();
 		xen_timer_resume();
@@ -108,7 +112,7 @@ static int xen_suspend(void *data)
 static void do_suspend(void)
 {
 	int err;
-	int cancelled = 1;
+	struct suspend_info si;
 
 	shutting_down = SHUTDOWN_SUSPEND;
 
@@ -144,20 +148,22 @@ static void do_suspend(void)
 		goto out_resume;
 	}
 
+	si.cancelled = 1;
+
 	if (xen_hvm_domain())
-		err = stop_machine(xen_hvm_suspend, &cancelled, cpumask_of(0));
+		err = stop_machine(xen_hvm_suspend, &si, cpumask_of(0));
 	else
-		err = stop_machine(xen_suspend, &cancelled, cpumask_of(0));
+		err = stop_machine(xen_suspend, &si, cpumask_of(0));
 
 	dpm_resume_noirq(PMSG_RESUME);
 
 	if (err) {
 		printk(KERN_ERR "failed to start xen_suspend: %d\n", err);
-		cancelled = 1;
+		si.cancelled = 1;
 	}
 
 out_resume:
-	if (!cancelled) {
+	if (!si.cancelled) {
 		xen_arch_resume();
 		xs_resume();
 	} else
