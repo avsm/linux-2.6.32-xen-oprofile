@@ -289,7 +289,7 @@ HYPERVISOR_fpu_taskswitch(int set)
 static inline int
 HYPERVISOR_sched_op(int cmd, void *arg)
 {
-	return _hypercall2(int, sched_op_new, cmd, arg);
+	return _hypercall2(int, sched_op, cmd, arg);
 }
 
 static inline long
@@ -448,7 +448,7 @@ HYPERVISOR_suspend(unsigned long start_info_mfn)
 	 * hypercall calling convention this is the third hypercall
 	 * argument, which is start_info_mfn here.
 	 */
-	return _hypercall3(int, sched_op_new, SCHEDOP_shutdown, &r, start_info_mfn);
+	return _hypercall3(int, sched_op, SCHEDOP_shutdown, &r, start_info_mfn);
 }
 
 static inline int
