@@ -646,7 +646,10 @@ int register_xenstore_notifier(struct notifier_block *nb)
 {
 	int ret = 0;
 
-	blocking_notifier_chain_register(&xenstore_chain, nb);
+	if (xenstored_ready > 0)
+		ret = nb->notifier_call(nb, 0, NULL);
+	else
+		blocking_notifier_chain_register(&xenstore_chain, nb);
 
 	return ret;
 }
@@ -660,7 +663,7 @@ EXPORT_SYMBOL_GPL(unregister_xenstore_notifier);
 
 void xenbus_probe(struct work_struct *unused)
 {
-	BUG_ON((xenstored_ready <= 0));
+	xenstored_ready = 1;
 
 	/* Notify others that xenstore is up */
 	blocking_notifier_call_chain(&xenstore_chain, 0, NULL);
@@ -738,6 +741,7 @@ static int __init xenbus_init(void)
 			xen_store_evtchn = xen_start_info->store_evtchn;
 			xen_store_mfn = xen_start_info->store_mfn;
 			xen_store_interface = mfn_to_virt(xen_store_mfn);
+			xenstored_ready = 1;
 		}
 	}
 
