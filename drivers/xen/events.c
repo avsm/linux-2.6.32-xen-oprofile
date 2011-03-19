@@ -1500,7 +1500,9 @@ void xen_callback_vector(void)
 		}
 		printk(KERN_INFO "Xen HVM callback vector for event delivery is "
 				"enabled\n");
-		alloc_intr_gate(XEN_HVM_EVTCHN_CALLBACK, xen_hvm_callback_vector);
+		/* in the restore case the vector has already been allocated */
+		if (!test_bit(XEN_HVM_EVTCHN_CALLBACK, used_vectors))
+			alloc_intr_gate(XEN_HVM_EVTCHN_CALLBACK, xen_hvm_callback_vector);
 	}
 }
 #else

@@ -534,11 +534,10 @@ static int xlvbd_alloc_gendisk(blkif_sector_t capacity,
 		minor = BLKIF_MINOR_EXT(info->vdevice);
 		nr_parts = PARTS_PER_EXT_DISK;
 		offset = minor / nr_parts;
-		if (xen_hvm_domain() && minor >= EMULATED_HD_DISK_MINOR_OFFSET) {
+		if (xen_hvm_domain() && offset <= EMULATED_HD_DISK_NAME_OFFSET + 4)
 			printk(KERN_WARNING "blkfront: vdevice 0x%x might conflict with "
-					"emulated IDE and SCSI disks; ignoring", info->vdevice);
-			return -ENODEV;
-		}
+					"emulated IDE disks,\n\t choose an xvd device name"
+					"from xvde on\n", info->vdevice);
 	}
 	err = -ENODEV;
 

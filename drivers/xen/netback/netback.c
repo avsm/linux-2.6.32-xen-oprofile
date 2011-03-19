@@ -36,9 +36,11 @@
 
 #include "common.h"
 
-#include <linux/tcp.h>
-#include <linux/udp.h>
 #include <linux/kthread.h>
+#include <linux/if_vlan.h>
+#include <linux/udp.h>
+
+#include <net/tcp.h>
 
 #include <xen/balloon.h>
 #include <xen/events.h>
@@ -125,10 +127,12 @@ static inline int netif_get_page_ext(struct page *pg, unsigned int *_group, unsi
 /*
  * This is the amount of packet we copy rather than map, so that the
  * guest can't fiddle with the contents of the headers while we do
- * packet processing on them (netfilter, routing, etc). 72 is enough
- * to cover TCP+IP headers including options.
+ * packet processing on them (netfilter, routing, etc).
  */
-#define PKT_PROT_LEN 72
+#define PKT_PROT_LEN    (ETH_HLEN + \
+			 VLAN_HLEN + \
+			 sizeof(struct iphdr) + MAX_IPOPTLEN + \
+			 sizeof(struct tcphdr) + MAX_TCP_OPTION_SPACE)
 
 static inline pending_ring_idx_t pending_index(unsigned i)
 {
@@ -271,13 +275,6 @@ static inline int netbk_queue_full(struct xen_netif *netif)
 	       ((netif->rx.rsp_prod_pvt + NET_RX_RING_SIZE - peek) < needed);
 }
 
-static void tx_queue_callback(unsigned long data)
-{
-	struct xen_netif *netif = (struct xen_netif *)data;
-	if (netif_schedulable(netif))
-		netif_wake_queue(netif->dev);
-}
-
 /* Figure out how many ring slots we're going to need to send @skb to
    the guest. */
 static unsigned count_skb_slots(struct sk_buff *skb, struct xen_netif *netif)
@@ -360,19 +357,8 @@ int netif_be_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		netif->rx.sring->req_event = netif->rx_req_cons_peek +
 			netbk_max_required_rx_slots(netif);
 		mb(); /* request notification /then/ check & stop the queue */
-		if (netbk_queue_full(netif)) {
+		if (netbk_queue_full(netif))
 			netif_stop_queue(dev);
-			/*
-			 * Schedule 500ms timeout to restart the queue, thus
-			 * ensuring that an inactive queue will be drained.
-			 * Packets will be immediately be dropped until more
-			 * receive buffers become available (see
-			 * netbk_queue_full() check above).
-			 */
-			netif->tx_queue_timeout.data = (unsigned long)netif;
-			netif->tx_queue_timeout.function = tx_queue_callback;
-			mod_timer(&netif->tx_queue_timeout, jiffies + HZ/2);
-		}
 	}
 	skb_queue_tail(&netbk->rx_queue, skb);
 
@@ -931,11 +917,20 @@ static inline void net_tx_action_dealloc(struct xen_netbk *netbk)
 			gop++;
 		}
 
-		if (netbk_copy_skb_mode != NETBK_DELAYED_COPY_SKB ||
-		    list_empty(&netbk->pending_inuse_head))
-			break;
+	} while (dp != netbk->dealloc_prod);
 
-		/* Copy any entries that have been pending for too long. */
+	netbk->dealloc_cons = dc;
+
+	ret = HYPERVISOR_grant_table_op(
+		GNTTABOP_unmap_grant_ref, netbk->tx_unmap_ops,
+		gop - netbk->tx_unmap_ops);
+	BUG_ON(ret);
+
+	/*
+	 * Copy any entries that have been pending for too long
+	 */
+	if (netbk_copy_skb_mode == NETBK_DELAYED_COPY_SKB &&
+	    !list_empty(&netbk->pending_inuse_head)) {
 		list_for_each_entry_safe(inuse, n,
 				&netbk->pending_inuse_head, list) {
 			struct pending_tx_info *pending_tx_info;
@@ -961,14 +956,7 @@ static inline void net_tx_action_dealloc(struct xen_netbk *netbk)
 
 			break;
 		}
-	} while (dp != netbk->dealloc_prod);
-
-	netbk->dealloc_cons = dc;
-
-	ret = HYPERVISOR_grant_table_op(
-		GNTTABOP_unmap_grant_ref, netbk->tx_unmap_ops,
-		gop - netbk->tx_unmap_ops);
-	BUG_ON(ret);
+	}
 
 	list_for_each_entry_safe(inuse, n, &list, list) {
 		struct pending_tx_info *pending_tx_info;
@@ -1245,11 +1233,28 @@ static int netbk_set_skb_gso(struct sk_buff *skb, struct xen_netif_extra_info *g
 	return 0;
 }
 
-static int skb_checksum_setup(struct sk_buff *skb)
+static int checksum_setup(struct xen_netif *netif, struct sk_buff *skb)
 {
 	struct iphdr *iph;
 	unsigned char *th;
 	int err = -EPROTO;
+	int recalculate_partial_csum = 0;
+
+	/*
+	 * A GSO SKB must be CHECKSUM_PARTIAL. However some buggy
+	 * peers can fail to set NETRXF_csum_blank when sending a GSO
+	 * frame. In this case force the SKB to CHECKSUM_PARTIAL and
+	 * recalculate the partial checksum.
+	 */
+	if (skb->ip_summed != CHECKSUM_PARTIAL && skb_is_gso(skb)) {
+		netif->rx_gso_checksum_fixup++;
+		skb->ip_summed = CHECKSUM_PARTIAL;
+		recalculate_partial_csum = 1;
+	}
+
+	/* A non-CHECKSUM_PARTIAL SKB does not require setup. */
+	if (skb->ip_summed != CHECKSUM_PARTIAL)
+		return 0;
 
 	if (skb->protocol != htons(ETH_P_IP))
 		goto out;
@@ -1263,9 +1268,23 @@ static int skb_checksum_setup(struct sk_buff *skb)
 	switch (iph->protocol) {
 	case IPPROTO_TCP:
 		skb->csum_offset = offsetof(struct tcphdr, check);
+
+		if (recalculate_partial_csum) {
+			struct tcphdr *tcph = (struct tcphdr *)th;
+			tcph->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr,
+							 skb->len - iph->ihl*4,
+							 IPPROTO_TCP, 0);
+		}
 		break;
 	case IPPROTO_UDP:
 		skb->csum_offset = offsetof(struct udphdr, check);
+
+		if (recalculate_partial_csum) {
+			struct udphdr *udph = (struct udphdr *)th;
+			udph->check = ~csum_tcpudp_magic(iph->saddr, iph->daddr,
+							 skb->len - iph->ihl*4,
+							 IPPROTO_UDP, 0);
+		}
 		break;
 	default:
 		if (net_ratelimit())
@@ -1519,15 +1538,10 @@ static void net_tx_submit(struct xen_netbk *netbk)
 		skb->dev      = netif->dev;
 		skb->protocol = eth_type_trans(skb, skb->dev);
 
-		netif->stats.rx_bytes += skb->len;
-		netif->stats.rx_packets++;
-
-		if (skb->ip_summed == CHECKSUM_PARTIAL) {
-			if (skb_checksum_setup(skb)) {
-				DPRINTK("Can't setup checksum in net_tx_action\n");
-				kfree_skb(skb);
-				continue;
-			}
+		if (checksum_setup(netif, skb)) {
+			DPRINTK("Can't setup checksum in net_tx_action\n");
+			kfree_skb(skb);
+			continue;
 		}
 
 		if (unlikely(netbk_copy_skb_mode == NETBK_ALWAYS_COPY_SKB) &&
@@ -1536,6 +1550,9 @@ static void net_tx_submit(struct xen_netbk *netbk)
 			kfree_skb(skb);
 			continue;
 		}
+
+		netif->stats.rx_bytes += skb->len;
+		netif->stats.rx_packets++;
 
 		netif_rx_ni(skb);
 		netif->dev->last_rx = jiffies;
@@ -1728,6 +1745,10 @@ static inline int rx_work_todo(struct xen_netbk *netbk)
 static inline int tx_work_todo(struct xen_netbk *netbk)
 {
 	if (netbk->dealloc_cons != netbk->dealloc_prod)
+		return 1;
+
+	if (netbk_copy_skb_mode == NETBK_DELAYED_COPY_SKB &&
+	    !list_empty(&netbk->pending_inuse_head))
 		return 1;
 
 	if (((nr_pending_reqs(netbk) + MAX_SKB_FRAGS) < MAX_PENDING_REQS) &&
